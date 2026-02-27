@@ -1,0 +1,128 @@
+# =============================================================================
+# Global build args (must be before first FROM)
+# Base image digests for reproducible builds
+# Update with: ./scripts/update-base-images.sh
+# =============================================================================
+ARG PYTHON_VERSION=3.14
+ARG PYTHON_SLIM_DIGEST=sha256:9006fc63e3eaedc00ebc81193c99528575a2f9b9e3fb36d95e94814c23f31f47
+
+# JAM frontend version to pull from GitHub (used only by jam-ng target)
+ARG JAM_VERSION=v2
+
+# =============================================================================
+# Stage 1: Build Python environment
+# =============================================================================
+FROM python:${PYTHON_VERSION}-slim@${PYTHON_SLIM_DIGEST} AS builder
+WORKDIR /app
+
+# build-essential + cmake + pkg-config needed to compile coincurve (no wheels for 3.14 yet)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    libffi-dev \
+    libsodium-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY . /app/
+
+RUN pip install --no-cache-dir \
+    ./jmcore \
+    ./jmwallet \
+    ./maker \
+    ./taker \
+    ./orderbook_watcher \
+    ./jmwalletd
+
+# =============================================================================
+# Stage 2: jmwalletd — standalone API daemon (default target)
+# =============================================================================
+FROM python:${PYTHON_VERSION}-slim@${PYTHON_SLIM_DIGEST} AS jmwalletd
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini \
+    libsodium23 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN mkdir -p /root/.joinmarket-ng
+
+ENV PYTHONUNBUFFERED=1
+ENV JOINMARKET_DATA_DIR=/root/.joinmarket-ng
+ENV JMWALLETD_HOST=0.0.0.0
+
+EXPOSE 28183
+
+ENTRYPOINT ["tini", "--"]
+CMD ["jmwalletd", "--no-tls"]
+
+# =============================================================================
+# Stage 3: Build JAM frontend (cloned from GitHub, no submodule required)
+# =============================================================================
+FROM node:24-slim AS jam-builder
+ARG JAM_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch ${JAM_VERSION} \
+    https://github.com/joinmarket-webui/jam.git /app
+
+WORKDIR /app
+RUN npm ci && npm run build
+
+# =============================================================================
+# Stage 4: jam-ng — self-contained: jmwalletd + JAM frontend + Tor + obwatcher
+# Managed by s6-overlay for multi-process supervision
+# =============================================================================
+FROM jmwalletd AS jam-ng
+
+# s6-overlay version (pinned for reproducibility)
+ARG S6_OVERLAY_VERSION=3.2.0.2
+
+# Install xz-utils (for extracting s6-overlay) and Tor daemon
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xz-utils \
+    tor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install s6-overlay (noarch + arch-specific, checksums pinned)
+ADD --checksum=sha256:6dbcde158a3e78b9bb141d7bcb5ccb421e563523babbe2c64470e76f4fd02dae \
+    https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
+ADD --checksum=sha256:59289456ab1761e277bd456a95e737c06b03ede99158beb24f12b165a904f478 \
+    https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
+RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
+    && tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz \
+    && rm -f /tmp/s6-overlay-*.tar.xz
+
+# Copy s6 service definitions and torrc
+COPY jmwalletd/rootfs/ /
+
+# Ensure run scripts are executable
+RUN chmod +x /etc/s6-overlay/s6-rc.d/tor/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/tor-ready/up \
+    && chmod +x /etc/s6-overlay/s6-rc.d/obwatcher/run \
+    && chmod +x /etc/s6-overlay/s6-rc.d/jmwalletd-svc/run
+
+# Tor data directory (writable at runtime)
+RUN mkdir -p /var/lib/tor && chown root:root /var/lib/tor && chmod 700 /var/lib/tor
+
+# Copy JAM frontend
+COPY --from=jam-builder /app/dist /usr/share/jmwalletd/jam
+
+# Default env: point services at the local Tor and obwatcher
+ENV TOR__SOCKS_HOST=127.0.0.1
+ENV TOR__SOCKS_PORT=9050
+ENV TOR__CONTROL_HOST=127.0.0.1
+ENV TOR__CONTROL_PORT=9051
+ENV OBWATCH_URL=http://127.0.0.1:8000
+
+# s6-overlay init replaces tini as PID 1
+ENTRYPOINT ["/init"]
+# No CMD — s6-overlay starts all services via s6-rc

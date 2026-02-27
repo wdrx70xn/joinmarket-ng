@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Signet support in send command**: Sending to signet addresses (`tb1…`) now works correctly. Custom address decoding code replaced with `python-bitcointx` (`CCoinAddress`), which handles all address types and networks without manual script construction.
+- **`jmwalletd` — JAM-compatible HTTP/WebSocket API daemon**: New monorepo package implementing the JoinMarket wallet RPC API as a FastAPI application, designed as a drop-in replacement for the reference `jmwalletd`. Enables the JAM web UI to work with joinmarket-ng's backend.
+  - Full REST API on `/api/v1` matching the reference implementation's endpoints: wallet lifecycle (create, recover, open, lock, unlock), wallet data (display, UTXOs, addresses, seeds), transaction operations (direct send, freeze/unfreeze), CoinJoin control (taker, tumbler, maker start/stop), configuration (get/set), and session management.
+  - WebSocket endpoint at `/jmws` (JAM-compatible), `/ws`, and `/api/v1/ws` for real-time CoinJoin state notifications with JWT authentication and heartbeat.
+  - JWT authentication with HS256 access tokens (30min) and refresh tokens (4hr), matching the reference auth flow including the custom `x-jm-authorization` header.
+  - Self-signed TLS certificate generation for HTTPS/WSS.
+  - Backend factory supporting multiple wallet backends (descriptor, bitcoin-core, neutrino, mempool).
+  - 161 unit tests with full coverage of auth, models, state, dependencies, routers, wallet operations, and WebSocket.
 
 ## [0.18.0] - 2026-03-02
 
