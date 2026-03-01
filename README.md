@@ -38,7 +38,7 @@ See the [Installation Guide](https://joinmarket-ng.github.io/joinmarket-ng/insta
 ## Live Orderbook
 
 - [Live orderbook (mainnet)](https://joinmarket-ng.sgn.space/)
-- [Live orderbook (signet)](https://joinmarket-ng-signet.sgn.space/) 
+- [Live orderbook (signet)](https://joinmarket-ng-signet.sgn.space/)
 
 ## Community
 
