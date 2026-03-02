@@ -15,7 +15,14 @@ on:
       - 'pytest.ini'
       - 'docker-compose.yml'
       - '.github/workflows/**'
-  pull_request:
+  # pull_request_target runs from the base branch context and has write permissions,
+  # which allows pushing to GHCR even for fork PRs.
+  # GitHub's built-in "Fork pull request workflows" approval setting gates external
+  # contributors (first-time contributors require maintainer approval before running).
+  # Organization members can run CI without approval.
+  # The workflow files themselves always run from the base branch (not the fork), so
+  # malicious workflow changes in a fork PR cannot affect the privileged execution.
+  pull_request_target:
     paths:
       - 'jmcore/**'
       - 'jmwallet/**'
@@ -81,6 +88,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Get Git commit timestamp for reproducible builds
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
@@ -129,6 +138,8 @@ jobs:
         python-version: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           python-version: ${{ matrix.python-version }}
@@ -176,6 +187,8 @@ jobs:
       TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -271,6 +284,8 @@ jobs:
       DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet
@@ -337,6 +352,8 @@ jobs:
       DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,maker
@@ -400,6 +417,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,directory_server
@@ -434,6 +453,8 @@ jobs:
       TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -589,6 +610,8 @@ jobs:
       TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -744,6 +767,8 @@ jobs:
       TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -857,6 +882,8 @@ jobs:
       TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -970,6 +997,8 @@ jobs:
       TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -1133,6 +1162,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Get Git commit timestamp for reproducible builds
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
@@ -1210,6 +1241,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Get Git commit timestamp for reproducible builds
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
@@ -1299,6 +1332,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
