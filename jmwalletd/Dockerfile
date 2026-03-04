@@ -5,31 +5,60 @@
 # =============================================================================
 ARG PYTHON_VERSION=3.14
 ARG PYTHON_SLIM_DIGEST=sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456
+ARG NODE_VERSION=24
+ARG NODE_SLIM_DIGEST=sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895f6ca7719dbb780f929368eb
+ARG SETUPTOOLS_VERSION=82.0.0
+ARG WHEEL_VERSION=0.46.3
 
-# JAM frontend version to pull from GitHub (used only by jam-ng target)
-ARG JAM_VERSION=v2
+# JAM frontend: pinned commit hash for reproducible builds
+# Update with: ./scripts/update-base-images.sh
+ARG JAM_COMMIT=d5dd2add951db5d0807d4c0730dcdd2d9adfad75
 
 # =============================================================================
 # Stage 1: Build Python environment
 # =============================================================================
 FROM python:${PYTHON_VERSION}-slim@${PYTHON_SLIM_DIGEST} AS builder
+ARG SETUPTOOLS_VERSION
+ARG WHEEL_VERSION
 WORKDIR /app
 
 # build-essential + cmake + pkg-config needed to compile coincurve (no wheels for 3.14 yet)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    pkg-config \
-    libffi-dev \
-    libsodium-dev \
+    build-essential=12.12 \
+    cmake=3.31.6-2 \
+    pkg-config=1.8.1-4 \
+    libffi-dev=3.4.8-2 \
+    libsodium-dev=1.0.18-1+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Pin setuptools and wheel for reproducible builds
+RUN printf 'setuptools==%s\nwheel==%s\n' "${SETUPTOOLS_VERSION}" "${WHEEL_VERSION}" > /tmp/pip-constraints.txt
+ENV PIP_CONSTRAINT=/tmp/pip-constraints.txt
+
+COPY jmcore/requirements.txt /tmp/requirements-jmcore.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-jmcore.txt
+
+COPY jmwallet/requirements.txt /tmp/requirements-jmwallet.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-jmwallet.txt
+
+COPY maker/requirements.txt /tmp/requirements-maker.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-maker.txt
+
+COPY taker/requirements.txt /tmp/requirements-taker.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-taker.txt
+
+COPY orderbook_watcher/requirements.txt /tmp/requirements-obwatcher.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-obwatcher.txt
+
+COPY jmwalletd/requirements.txt /tmp/requirements-jmwalletd.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-jmwalletd.txt
+
 COPY . /app/
 
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --no-deps \
     ./jmcore \
     ./jmwallet \
     ./maker \
@@ -44,9 +73,10 @@ FROM python:${PYTHON_VERSION}-slim@${PYTHON_SLIM_DIGEST} AS jmwalletd
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini \
-    libsodium23 \
-    && rm -rf /var/lib/apt/lists/*
+    tini=0.19.0-3+b5 \
+    libsodium23=1.0.18-1+deb13u1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /var/log/dpkg.log /var/log/apt/*.log /var/cache/ldconfig/aux-cache
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -66,15 +96,19 @@ CMD ["jmwalletd", "--no-tls"]
 # Stage 3: Build JAM frontend (cloned from GitHub, no submodule required)
 # Always built for amd64: the output is static JS that runs in the browser,
 # so the build platform doesn't matter. node:24-slim has no linux/arm/v7 image.
+# Pinned to a specific commit for reproducible builds.
+# Update JAM_COMMIT with: ./scripts/update-base-images.sh
 # =============================================================================
-FROM --platform=linux/amd64 node:24-slim AS jam-builder
-ARG JAM_VERSION
+FROM --platform=linux/amd64 node:${NODE_VERSION}-slim@${NODE_SLIM_DIGEST} AS jam-builder
+ARG JAM_COMMIT
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates=20230311+deb12u1 \
+    git=1:2.39.5-0+deb12u3 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch ${JAM_VERSION} \
-    https://github.com/joinmarket-webui/jam.git /app
+RUN git clone https://github.com/joinmarket-webui/jam.git /app \
+    && git -C /app checkout "${JAM_COMMIT}"
 
 WORKDIR /app
 RUN npm ci && npm run build
@@ -86,27 +120,28 @@ RUN npm ci && npm run build
 FROM jmwalletd AS jam-ng
 
 # s6-overlay version (pinned for reproducibility)
-ARG S6_OVERLAY_VERSION=3.2.0.2
+# Update with: ./scripts/update-base-images.sh
+ARG S6_OVERLAY_VERSION=3.2.2.0
 
 # Install xz-utils (for extracting s6-overlay), wget (for downloading s6-overlay), and Tor daemon
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
-    xz-utils \
-    tor \
+    wget=1.25.0-2 \
+    xz-utils=5.8.1-1 \
+    tor=0.4.8.16-1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install s6-overlay (noarch + arch-specific, checksums pinned)
 # noarch tarball is the same for all platforms
-ADD --checksum=sha256:6dbcde158a3e78b9bb141d7bcb5ccb421e563523babbe2c64470e76f4fd02dae \
+ADD --checksum=sha256:85848f6baab49fb7832a5557644c73c066899ed458dd1601035cf18e7c759f26 \
     https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
 # Arch-specific tarball: select based on TARGETARCH/TARGETVARIANT at build time
 ARG TARGETARCH
 ARG TARGETVARIANT
 RUN set -eux; \
     case "${TARGETARCH}/${TARGETVARIANT:-}" in \
-        amd64/)   S6_ARCH=x86_64;  S6_SHA256=59289456ab1761e277bd456a95e737c06b03ede99158beb24f12b165a904f478 ;; \
-        arm64/)   S6_ARCH=aarch64; S6_SHA256=8b22a2eaca4bf0b27a43d36e65c89d2701738f628d1abd0cea5569619f66f785 ;; \
-        arm/v7)   S6_ARCH=armhf;   S6_SHA256=c8b8532fe4ec432898960e9ec9c903926454ce73588d4c94ad0e023f0b34fe39 ;; \
+        amd64/)   S6_ARCH=x86_64;  S6_SHA256=5a09e2f1878dc5f7f0211dd7bafed3eee1afe4f813e872fff2ab1957f266c7c0 ;; \
+        arm64/)   S6_ARCH=aarch64; S6_SHA256=50a5d4919e688fafc95ce9cf0055a46f74847517bcf08174bac811de234ec7d2 ;; \
+        arm/v7)   S6_ARCH=armhf;   S6_SHA256=c6a9fa7c41c80d4a285cd5e1fc80ed4bc44b318ac16febffb0788a949aef35d4 ;; \
         *) echo "Unsupported platform: ${TARGETARCH}/${TARGETVARIANT:-}" >&2; exit 1 ;; \
     esac; \
     wget -qO /tmp/s6-overlay-arch.tar.xz \
