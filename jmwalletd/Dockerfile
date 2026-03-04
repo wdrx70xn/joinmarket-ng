@@ -4,7 +4,7 @@
 # Update with: ./scripts/update-base-images.sh
 # =============================================================================
 ARG PYTHON_VERSION=3.14
-ARG PYTHON_SLIM_DIGEST=sha256:9006fc63e3eaedc00ebc81193c99528575a2f9b9e3fb36d95e94814c23f31f47
+ARG PYTHON_SLIM_DIGEST=sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456
 
 # JAM frontend version to pull from GitHub (used only by jam-ng target)
 ARG JAM_VERSION=v2

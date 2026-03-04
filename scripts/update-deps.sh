@@ -8,7 +8,7 @@
 
 set -e
 
-PACKAGES="jmcore directory_server orderbook_watcher jmwallet maker taker"
+PACKAGES="jmcore directory_server orderbook_watcher jmwallet maker taker jmwalletd"
 UPDATE_PROD=true
 UPDATE_DEV=true
 
