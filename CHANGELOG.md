@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.3] - 2026-03-05
+
 ### Added
 
 - **Recovery notification after all directory servers reconnect**: After the critical "All Directories Disconnected" alert, a follow-up "RESOLVED: Directory Servers Reconnected" notification is now sent as soon as at least one directory server reconnects. This uses the same `notify_all_disconnect` toggle (enabled by default) so operators are automatically informed when the issue is resolved.
@@ -1021,7 +1023,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.19.2...HEAD
+[Unreleased]: ../../compare/0.19.3...HEAD
+[0.19.3]: ../../compare/0.19.2...0.19.3
 [0.19.2]: ../../compare/0.19.1...0.19.2
 [0.19.1]: ../../compare/0.19.0...0.19.1
 [0.19.0]: ../../compare/0.18.0...0.19.0
