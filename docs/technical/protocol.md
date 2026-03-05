@@ -53,6 +53,7 @@ Fields are separated by **single whitespace** (multiple spaces not allowed).
 | `!ioauth` | **Yes** | No | 3 | Maker sends UTXOs + addresses (encrypted) |
 | `!tx` | **Yes** | No | 4 | Taker sends unsigned transaction (encrypted) |
 | `!sig` | **Yes** | No | 4 | Maker signs inputs (encrypted, one per input) |
+| `!hp2` | No | Yes | 3 | PoDLE commitment blacklist broadcast |
 
 **Note**: Rules enforced at message_channel layer. All encrypted messages are base64-encoded.
 
@@ -72,8 +73,23 @@ Fields are separated by **single whitespace** (multiple spaces not allowed).
 **Phase 3: Authentication**
 
 1. Taker sends `!auth`: reveals PoDLE proof, UTXO info, CoinJoin destination
-2. Maker verifies PoDLE, broadcasts `!hp2` to blacklist commitment
+2. Maker verifies PoDLE proof and taker's UTXO
 3. Maker sends `!ioauth`: their UTXOs + CoinJoin/change destinations
+4. Maker broadcasts `!hp2` to blacklist commitment network-wide (via ephemeral identity)
+
+**Commitment Broadcast (`!hp2`) Timing and Privacy:**
+
+The `!hp2` broadcast is sent *after* `!ioauth`, not before. This is intentional: broadcasting early would risk other makers in the same transaction seeing the commitment and blacklisting it before they have processed the same taker's `!auth`, causing spurious rejections.
+
+For source obfuscation, the maker does not broadcast `!hp2` on its own long-lived directory connection. Instead:
+
+1. Maker opens new connections to all directory servers using a **fresh random nick** and **unique Tor circuit** (via SOCKS5 stream isolation with a random credential)
+2. Broadcasts `!hp2 <commitment>` as **pubmsg** on each ephemeral connection
+3. Closes all ephemeral connections
+
+This prevents any party (directory servers, other peers, observers) from correlating the `!hp2` broadcast with the maker that participated in the CoinJoin. The broadcast is best-effort: connection failures are logged but do not affect the CoinJoin flow.
+
+When a maker receives a relay request (`!hp2` via privmsg from another maker), it uses the same ephemeral identity approach to re-broadcast, rather than publishing on its own connection.
 
 **Phase 4: Transaction Signing**
 

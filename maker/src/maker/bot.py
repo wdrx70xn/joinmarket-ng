@@ -133,6 +133,12 @@ class MakerBot(BackgroundTasksMixin, ProtocolHandlersMixin, DirectConnectionMixi
         # This prevents processing duplicates and avoids false rate limit violations
         self._message_deduplicator = MessageDeduplicator(window_seconds=30.0)
 
+        # Semaphore to limit concurrent ephemeral hp2 broadcasts.
+        # Each broadcast opens Tor connections to all directories, so we cap
+        # concurrency to prevent a Sybil DoS (many nicks each sending one !hp2
+        # relay request). Max 2 allows one own broadcast + one relay to overlap.
+        self._hp2_broadcast_semaphore = asyncio.Semaphore(2)
+
         # Track failed directory reconnection attempts
         # Key: node_id (host:port), Value: number of reconnection attempts
         self._directory_reconnect_attempts: dict[str, int] = {}

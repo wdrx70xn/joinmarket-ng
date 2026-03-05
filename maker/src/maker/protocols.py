@@ -59,6 +59,7 @@ class MakerBotProtocol(Protocol):
     _directory_reconnect_attempts: dict[str, int]
     _all_directories_disconnected: bool
     _own_wallet_nicks: set[str]
+    _hp2_broadcast_semaphore: asyncio.Semaphore
 
     # -- Cross-mixin methods --
 

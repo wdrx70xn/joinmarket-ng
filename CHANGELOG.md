@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Ephemeral-identity PoDLE commitment broadcast**: Commitment broadcasts (`!hp2`) are now sent from a fresh random nick on a separate Tor circuit, rather than from the maker's long-lived identity. After verifying a taker's PoDLE proof, the maker opens ephemeral connections to all directory servers using unique SOCKS5 credentials (forcing stream isolation) and a random nick identity, broadcasts the commitment, then tears down the connections. This prevents any party from correlating the `!hp2` broadcast with the maker that participated in the CoinJoin. The same ephemeral approach is used when relaying `!hp2` requests from other makers. Concurrent ephemeral broadcasts are capped at 2 via a semaphore to prevent Sybil DoS attacks.
+
 ## [0.19.3] - 2026-03-05
 
 ### Added

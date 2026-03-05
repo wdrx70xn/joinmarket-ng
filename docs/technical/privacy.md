@@ -34,7 +34,16 @@ PoDLE prevents Sybil attacks by requiring takers to commit to UTXO ownership bef
 2. **Maker accepts**: Sends encryption pubkey
 3. **Taker reveals**: Sends $P$ (pubkey), $P_2$, and Schnorr-like proof
 4. **Maker verifies**: $H(P_2) = C$, proof valid, UTXO exists
-5. **Maker broadcasts**: `!hp2` to blacklist commitment network-wide
+5. **Maker blacklists**: Adds commitment to local blacklist immediately
+6. **Maker broadcasts**: Opens ephemeral connections to all directories with a fresh random nick and isolated Tor circuit, broadcasts `!hp2` publicly, then closes
+
+The broadcast step (6) uses a completely separate identity: a new random nick, a new Tor circuit (via unique SOCKS5 credentials for stream isolation), and short-lived connections. This prevents any party -- directory servers, other peers, or observers -- from linking the `!hp2` broadcast to the maker that consumed the commitment. The broadcast is best-effort and fire-and-forget.
+
+When a maker receives a relay request (`!hp2` via privmsg from a reference implementation peer), it uses the same ephemeral identity approach to re-broadcast, preserving source obfuscation.
+
+**Commitment Broadcast Timing:**
+
+The `!hp2` broadcast is sent after `!ioauth` (step 3 of Phase 3), not before. Broadcasting early would risk blacklisting a commitment that other makers participating in the same transaction have not yet processed, causing them to reject the taker's `!auth`.
 
 The proof shows that $P = k \cdot G$ and $P_2 = k \cdot J$ use the same private key $k$ without revealing $k$.
 

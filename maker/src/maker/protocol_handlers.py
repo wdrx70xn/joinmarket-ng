@@ -10,15 +10,18 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 from jmcore.commitment_blacklist import add_commitment, check_commitment
+from jmcore.crypto import NickIdentity
 from jmcore.deduplication import MessageDeduplicator
 from jmcore.directory_client import DirectoryClient
 from jmcore.models import Offer
 from jmcore.notifications import get_notifier
-from jmcore.protocol import COMMAND_PREFIX, MessageType
+from jmcore.protocol import COMMAND_PREFIX, JM_VERSION, MessageType
 from jmcore.rate_limiter import RateLimitAction, RateLimiter
+from jmcore.tasks import parse_directory_address
 from jmwallet.backends.base import BlockchainBackend
 from jmwallet.history import (
     append_history_entry,
@@ -63,6 +66,7 @@ class ProtocolHandlersMixin:
     _orderbook_rate_limiter: OrderbookRateLimiter
     _direct_connection_rate_limiter: DirectConnectionRateLimiter
     _own_wallet_nicks: set[str]
+    _hp2_broadcast_semaphore: asyncio.Semaphore
 
     async def _handle_message(
         self: MakerBotProtocol, message: dict[str, Any], source: str = "unknown"
@@ -851,6 +855,9 @@ class ProtocolHandlersMixin:
         they should blacklist it. This prevents reuse of commitments that
         may have been used in failed or malicious CoinJoin attempts.
 
+        There is no way to spoof commitments, so the only risk of accepting
+        them is disk usage from a growing blacklist file.
+
         Format: hp2 <commitment_hex>
         """
         try:
@@ -877,13 +884,16 @@ class ProtocolHandlersMixin:
             logger.error(f"Failed to handle !hp2 pubmsg: {e}")
 
     async def _handle_hp2_privmsg(self, from_nick: str, msg: str) -> None:
-        """Handle !hp2 commitment transfer via private message.
+        """Handle !hp2 commitment relay request via private message.
 
         When a maker receives !hp2 via privmsg, another maker is asking us to
-        broadcast the commitment publicly. This provides obfuscation of the
-        original source of the commitment broadcast.
+        broadcast the commitment publicly on their behalf. Rather than
+        re-broadcasting on our own (long-lived, identifiable) connection, we
+        open ephemeral connections to all directory servers with a fresh random
+        nick and unique Tor circuit, then broadcast there. This way neither the
+        requesting maker nor we ourselves are linked to the public broadcast.
 
-        We simply re-broadcast it via pubmsg without verifying the commitment.
+        The commitment is also added to our own blacklist.
 
         Format: hp2 <commitment_hex>
         """
@@ -894,20 +904,16 @@ class ProtocolHandlersMixin:
                 return
 
             commitment = parts[1]
-            logger.info(f"Received commitment transfer from {from_nick}, re-broadcasting...")
+            logger.info(f"Received commitment relay request from {from_nick}: {commitment[:16]}...")
 
-            # Broadcast the commitment publicly
-            hp2_msg = f"hp2 {commitment}"
-            for client in self.directory_clients.values():
-                try:
-                    await client.send_public_message(hp2_msg)
-                except Exception as e:
-                    logger.warning(f"Failed to broadcast hp2: {e}")
+            # Blacklist locally
+            add_commitment(commitment)
 
-            logger.debug(f"Re-broadcast commitment: {commitment[:16]}...")
+            # Broadcast via ephemeral identity (fire-and-forget)
+            asyncio.create_task(self._broadcast_commitment_ephemeral(commitment))
 
         except Exception as e:
-            logger.error(f"Failed to handle !hp2 privmsg: {e}")
+            logger.error(f"Failed to handle !hp2 relay request: {e}")
 
     async def _broadcast_commitment(self, commitment: str) -> None:
         """Broadcast a PoDLE commitment via !hp2 to help other makers blacklist it.
@@ -916,24 +922,129 @@ class ProtocolHandlersMixin:
         commitment so other makers can add it to their blacklist. This prevents
         the same commitment from being reused in future CoinJoin attempts.
 
-        The reference implementation does this to maintain network-wide commitment
-        blacklisting, which is a key anti-Sybil mechanism.
+        **Privacy design (ephemeral identity broadcast):**
+
+        To prevent an observer from correlating the !hp2 broadcast with the
+        maker that just participated in a CoinJoin, we broadcast the commitment
+        from a fresh ephemeral identity on a separate Tor circuit:
+
+        1. Add the commitment to our own blacklist (immediate, persisted to disk)
+        2. Open new connections to all directory servers with a random nick and
+           unique SOCKS5 credentials (forcing a fresh Tor circuit via stream
+           isolation)
+        3. Broadcast ``hp2 <commitment>`` as pubmsg on each connection
+        4. Close all ephemeral connections
+
+        This is strictly better than the reference implementation's relay
+        approach (sending via privmsg to a random peer who re-broadcasts),
+        because it does not trust any peer to actually relay the message.
+        A malicious peer could simply drop the relay request; with direct
+        ephemeral broadcast, the commitment always reaches the network.
+
+        The broadcast is best-effort and fire-and-forget: connection failures
+        are logged but do not affect the CoinJoin flow.
         """
         try:
             # Add to our own blacklist first (persists to disk)
             add_commitment(commitment)
 
-            hp2_msg = f"hp2 {commitment}"
-            for client in self.directory_clients.values():
-                try:
-                    await client.send_public_message(hp2_msg)
-                except Exception as e:
-                    logger.warning(f"Failed to broadcast commitment: {e}")
+            # Broadcast via ephemeral identity (fire-and-forget)
+            asyncio.create_task(self._broadcast_commitment_ephemeral(commitment))
 
-            logger.debug(f"Broadcast commitment: {commitment[:16]}...")
+            logger.debug(f"Scheduled ephemeral commitment broadcast: {commitment[:16]}...")
 
         except Exception as e:
             logger.error(f"Failed to broadcast commitment: {e}")
+
+    async def _broadcast_commitment_ephemeral(self, commitment: str) -> None:
+        """Open ephemeral directory connections and broadcast a commitment.
+
+        Creates short-lived connections to all configured directory servers
+        using a fresh random nick identity and unique Tor stream isolation
+        credentials, broadcasts the commitment as a public !hp2 message, then
+        tears down the connections.
+
+        Guarded by ``_hp2_broadcast_semaphore`` (max 2 concurrent) to prevent
+        a Sybil DoS where many nicks each send one relay request, causing us
+        to open excessive Tor circuits. Requests that exceed the concurrency
+        limit are silently dropped -- the commitment is already blacklisted
+        locally by the caller.
+
+        This is a background task -- errors are logged, not raised.
+        """
+        acquired = self._hp2_broadcast_semaphore.locked() is False
+        if not acquired:
+            # All slots may be taken; try non-blocking acquire
+            try:
+                # Semaphore.acquire() with wait=False isn't available, so use
+                # a zero-timeout wait to avoid blocking.
+                await asyncio.wait_for(self._hp2_broadcast_semaphore.acquire(), timeout=0)
+                acquired = True
+            except TimeoutError:
+                logger.debug(
+                    f"Dropping ephemeral hp2 broadcast (concurrency limit): {commitment[:16]}..."
+                )
+                return
+        else:
+            await self._hp2_broadcast_semaphore.acquire()
+
+        hp2_msg = f"hp2 {commitment}"
+        ephemeral_clients: list[DirectoryClient] = []
+
+        try:
+            nick_identity = NickIdentity(JM_VERSION)
+
+            # Generate unique SOCKS5 credentials to force a fresh Tor circuit.
+            # Using a random password ensures this connection is isolated from
+            # all other connections in this process (including the maker's
+            # persistent directory connections).
+            socks_username = "jm-hp2-broadcast"
+            socks_password = os.urandom(16).hex()
+
+            for dir_server in self.config.directory_servers:
+                try:
+                    host, port = parse_directory_address(dir_server)
+                    client = DirectoryClient(
+                        host=host,
+                        port=port,
+                        network=self.config.network.value,
+                        nick_identity=nick_identity,
+                        socks_host=self.config.socks_host,
+                        socks_port=self.config.socks_port,
+                        timeout=30.0,
+                        socks_username=socks_username,
+                        socks_password=socks_password,
+                    )
+                    await client.connect()
+                    ephemeral_clients.append(client)
+                except Exception as e:
+                    logger.debug(f"Ephemeral hp2 connection to {dir_server} failed: {e}")
+
+            if not ephemeral_clients:
+                logger.warning("Could not connect to any directory for ephemeral hp2 broadcast")
+                return
+
+            for client in ephemeral_clients:
+                try:
+                    await client.send_public_message(hp2_msg)
+                except Exception as e:
+                    logger.debug(f"Ephemeral hp2 broadcast failed on one directory: {e}")
+
+            logger.debug(
+                f"Ephemeral hp2 broadcast complete on "
+                f"{len(ephemeral_clients)} directories: {commitment[:16]}..."
+            )
+
+        except Exception as e:
+            logger.error(f"Ephemeral commitment broadcast failed: {e}")
+
+        finally:
+            self._hp2_broadcast_semaphore.release()
+            for client in ephemeral_clients:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
     async def _send_response(self, taker_nick: str, command: str, data: dict[str, Any]) -> None:
         """Send signed response to taker.
