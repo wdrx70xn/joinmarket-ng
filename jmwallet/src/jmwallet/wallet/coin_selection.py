@@ -161,6 +161,16 @@ class CoinSelectionMixin:
         # Sort by value descending for efficient selection
         eligible.sort(key=lambda u: u.value, reverse=True)
 
+        if mixdepth == 0:
+            if not eligible:
+                raise ValueError("Insufficient funds: no eligible UTXOs in mixdepth 0")
+            if eligible[0].value < target_amount:
+                raise ValueError(
+                    f"Insufficient funds: largest md0 UTXO has {eligible[0].value}, "
+                    f"need {target_amount}. Cannot merge md0 UTXOs for privacy reasons. "
+                )
+            return [eligible[0]]
+
         # First, select minimum needed (greedy by value)
         selected = []
         total = 0
