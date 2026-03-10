@@ -116,6 +116,7 @@ def build_maker_config(
                 if hasattr(effective_bitcoin_network, "value")
                 else str(effective_bitcoin_network)
             ),
+            "scan_start_height": settings.wallet.scan_start_height,
         }
 
     # Resolve directory servers
@@ -380,6 +381,7 @@ def create_wallet_service(config: MakerConfig) -> WalletService:
             network=bitcoin_network.value,
             connect_peers=backend_cfg.get("connect_peers", []),
             data_dir=backend_cfg.get("data_dir", "/data/neutrino"),
+            scan_start_height=backend_cfg.get("scan_start_height"),
         )
     else:
         raise typer.BadParameter(f"Unsupported backend: {backend_type}")

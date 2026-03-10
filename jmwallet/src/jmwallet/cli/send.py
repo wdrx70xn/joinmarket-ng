@@ -182,7 +182,9 @@ async def _send_transaction(
     backend: BitcoinCoreBackend | DescriptorWalletBackend | NeutrinoBackend
     if backend_settings.backend_type == "neutrino":
         backend = NeutrinoBackend(
-            neutrino_url=backend_settings.neutrino_url, network=backend_settings.network
+            neutrino_url=backend_settings.neutrino_url,
+            network=backend_settings.network,
+            scan_start_height=backend_settings.scan_start_height,
         )
         logger.info("Waiting for neutrino to sync...")
         synced = await backend.wait_for_sync(timeout=300.0)

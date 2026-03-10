@@ -310,11 +310,23 @@ class CoinJoinSession:
 
             # Verify the taker's UTXO exists on the blockchain
             # Use Neutrino-compatible verification if backend requires it and metadata available
-            if (
-                self.backend.requires_neutrino_metadata()
-                and taker_scriptpubkey
-                and taker_blockheight is not None
-            ):
+            if self.backend.requires_neutrino_metadata():
+                if not taker_scriptpubkey or taker_blockheight is None:
+                    # Neutrino backend cannot verify UTXOs without extended metadata.
+                    # This happens when a legacy taker (e.g. reference implementation)
+                    # picks this maker -- they don't send scriptpubkey/blockheight.
+                    logger.warning(
+                        f"Neutrino backend cannot verify taker UTXO "
+                        f"{utxo_txid[:16]}...:{utxo_vout} - "
+                        f"taker did not send extended metadata (neutrino_compat). "
+                        f"Taker should select a full-node maker instead."
+                    )
+                    return False, {
+                        "error": "Neutrino backend requires extended UTXO metadata "
+                        "(neutrino_compat) for verification",
+                        "error_code": "neutrino_incompatible",
+                    }
+
                 # Neutrino backend: use metadata-based verification
                 result = await self.backend.verify_utxo_with_metadata(
                     txid=utxo_txid,

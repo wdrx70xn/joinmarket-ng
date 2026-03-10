@@ -216,6 +216,170 @@ class TestNeutrinoBackend:
         await backend.close()
 
     @pytest.mark.asyncio
+    async def test_neutrino_backend_scan_start_height_default(self):
+        """Test that scan_start_height defaults to _min_valid_blockheight per network."""
+        # Mainnet: defaults to SegWit activation height
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="mainnet")
+        assert backend._scan_start_height == 481824
+        await backend.close()
+
+        # Regtest: defaults to 0
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="regtest")
+        assert backend._scan_start_height == 0
+        await backend.close()
+
+        # Signet: defaults to 0
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="signet")
+        assert backend._scan_start_height == 0
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_neutrino_backend_scan_start_height_explicit(self):
+        """Test that explicit scan_start_height overrides the default."""
+        backend = NeutrinoBackend(
+            neutrino_url="http://localhost:8334",
+            network="mainnet",
+            scan_start_height=750000,
+        )
+        assert backend._scan_start_height == 750000
+        await backend.close()
+
+        # Even on regtest, explicit value is used
+        backend = NeutrinoBackend(
+            neutrino_url="http://localhost:8334",
+            network="regtest",
+            scan_start_height=100,
+        )
+        assert backend._scan_start_height == 100
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_neutrino_backend_get_utxos_uses_scan_start_height(self):
+        """Test that get_utxos uses scan_start_height for initial rescan."""
+        from unittest.mock import AsyncMock
+
+        backend = NeutrinoBackend(
+            neutrino_url="http://localhost:8334",
+            network="mainnet",
+            scan_start_height=750000,
+        )
+        backend._api_call = AsyncMock(return_value={"utxos": []})
+        backend.get_block_height = AsyncMock(return_value=800000)
+
+        await backend.get_utxos(["bc1qtest123"])
+
+        # The initial rescan should use start_height=750000
+        rescan_call = backend._api_call.call_args_list[0]
+        assert rescan_call[0] == ("POST", "v1/rescan")
+        assert rescan_call[1]["data"]["start_height"] == 750000
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_neutrino_backend_verify_bonds_uses_scan_start_height(self):
+        """Test that verify_bonds uses scan_start_height instead of 0."""
+        from unittest.mock import AsyncMock
+
+        from jmwallet.backends.base import BondVerificationRequest
+
+        backend = NeutrinoBackend(
+            neutrino_url="http://localhost:8334",
+            network="mainnet",
+            scan_start_height=750000,
+        )
+        backend.get_block_height = AsyncMock(return_value=800000)
+        backend._api_call = AsyncMock(
+            return_value={
+                "unspent": True,
+                "value": 100000,
+                "block_height": 760000,
+            }
+        )
+        backend.get_block_time = AsyncMock(return_value=1700000000)
+
+        bond = BondVerificationRequest(
+            txid="a" * 64,
+            vout=0,
+            utxo_pub=b"\x02" + b"\x00" * 32,
+            locktime=1800000000,
+            address="bc1qtest",
+            scriptpubkey="0020" + "00" * 32,
+        )
+
+        results = await backend.verify_bonds([bond])
+        assert len(results) == 1
+        assert results[0].valid is True
+
+        # Check that the API call used scan_start_height, not 0
+        utxo_call = backend._api_call.call_args
+        assert utxo_call[1]["params"]["start_height"] == 750000
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_rescan_completes_immediately(self):
+        """Test _wait_for_rescan returns immediately when in_progress is False."""
+        from unittest.mock import AsyncMock
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+        backend._api_call = AsyncMock(return_value={"in_progress": False})
+
+        await backend._wait_for_rescan()
+
+        backend._api_call.assert_called_once_with("GET", "v1/rescan/status")
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_rescan_polls_until_done(self):
+        """Test _wait_for_rescan polls until in_progress transitions to False."""
+        from unittest.mock import AsyncMock
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+        # First two calls return in_progress=True, third returns False
+        backend._api_call = AsyncMock(
+            side_effect=[
+                {"in_progress": True},
+                {"in_progress": True},
+                {"in_progress": False},
+            ]
+        )
+
+        await backend._wait_for_rescan(poll_interval=0.01)
+
+        assert backend._api_call.call_count == 3
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_rescan_fallback_on_error(self):
+        """Test _wait_for_rescan returns gracefully when endpoint is unavailable."""
+        from unittest.mock import AsyncMock
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+        backend._api_call = AsyncMock(side_effect=Exception("endpoint not found"))
+
+        # Should not raise, just return
+        await backend._wait_for_rescan()
+
+        backend._api_call.assert_called_once()
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_get_utxos_uses_wait_for_rescan_not_sleep(self):
+        """Test that get_utxos calls _wait_for_rescan instead of a fixed sleep."""
+        from unittest.mock import AsyncMock, patch
+
+        backend = NeutrinoBackend(
+            neutrino_url="http://localhost:8334",
+            network="regtest",
+        )
+        backend._api_call = AsyncMock(return_value={"utxos": []})
+        backend.get_block_height = AsyncMock(return_value=100)
+
+        with patch.object(backend, "_wait_for_rescan", new_callable=AsyncMock) as mock_wait:
+            await backend.get_utxos(["bcrt1qtest"])
+            mock_wait.assert_called_once()
+
+        await backend.close()
+
+    @pytest.mark.asyncio
     async def test_neutrino_backend_cannot_estimate_fee(self):
         """Test that NeutrinoBackend reports it cannot estimate fees."""
         backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
@@ -431,3 +595,86 @@ async def test_neutrino_backend_integration():
 
     finally:
         await backend.close()
+
+
+class TestSupportsDescriptorScan:
+    """Unit tests for the supports_descriptor_scan capability flag."""
+
+    def test_base_backend_does_not_support_descriptor_scan(self):
+        """BlockchainBackend base class must default to False."""
+        from jmwallet.backends.base import BlockchainBackend
+
+        assert BlockchainBackend.supports_descriptor_scan is False
+
+    def test_neutrino_does_not_support_descriptor_scan(self):
+        """NeutrinoBackend must report supports_descriptor_scan=False."""
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+        assert backend.supports_descriptor_scan is False
+
+    def test_bitcoin_core_supports_descriptor_scan(self):
+        """BitcoinCoreBackend must report supports_descriptor_scan=True."""
+        backend = BitcoinCoreBackend(
+            rpc_url="http://localhost:18443", rpc_user="test", rpc_password="test"
+        )
+        assert backend.supports_descriptor_scan is True
+
+    def test_descriptor_wallet_supports_descriptor_scan(self):
+        """DescriptorWalletBackend must report supports_descriptor_scan=True."""
+        from jmwallet.backends.descriptor_wallet import DescriptorWalletBackend
+
+        backend = DescriptorWalletBackend()
+        assert backend.supports_descriptor_scan is True
+
+
+class TestSyncAllAddressPreregistration:
+    """Unit tests for Bug 1 fix: all wallet addresses are pre-registered before
+    the initial rescan fires so that change (internal) addresses are not missed."""
+
+    @pytest.mark.asyncio
+    async def test_sync_all_preregisters_change_addresses(self):
+        """sync_all() must register both external AND internal addresses with the
+        backend *before* the first get_utxos call so the initial neutrino rescan
+        covers change addresses."""
+        from unittest.mock import AsyncMock
+
+        from _jmwallet_test_helpers import TEST_MNEMONIC
+
+        from jmwallet.backends.neutrino import NeutrinoBackend
+        from jmwallet.wallet.service import WalletService
+
+        # Build a real WalletService backed by a mocked NeutrinoBackend so we
+        # can inspect which addresses were added before the first UTXO query.
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+
+        # Stub out network calls
+        backend.get_block_height = AsyncMock(return_value=100)
+
+        registered_before_first_utxo_call: set[str] = set()
+
+        async def fake_get_utxos(addresses: list[str]) -> list:
+            # Capture state at first call to verify pre-registration happened
+            if not registered_before_first_utxo_call:
+                registered_before_first_utxo_call.update(backend._watched_addresses)
+            return []
+
+        backend.get_utxos = fake_get_utxos  # type: ignore[assignment]
+
+        wallet = WalletService(
+            mnemonic=TEST_MNEMONIC,
+            backend=backend,
+            network="signet",
+            mixdepth_count=1,
+            gap_limit=6,
+        )
+
+        await wallet.sync_all()
+
+        # All gap_limit addresses for both branches of mixdepth 0 must have been
+        # registered before the first UTXO query fired.
+        for change in [0, 1]:
+            for index in range(wallet.gap_limit):
+                addr = wallet.get_address(0, change, index)
+                assert addr in registered_before_first_utxo_call, (
+                    f"Address m/…/0'/{change}/{index} ({addr}) was not pre-registered "
+                    "with backend before initial rescan"
+                )

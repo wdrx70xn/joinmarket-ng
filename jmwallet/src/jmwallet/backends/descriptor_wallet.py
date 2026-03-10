@@ -48,6 +48,7 @@ SENSITIVE_LOGGING = os.environ.get("SENSITIVE_LOGGING", "").lower() in ("1", "tr
 
 
 class DescriptorWalletBackend(BlockchainBackend):
+    supports_descriptor_scan: bool = True
     """
     Blockchain backend using Bitcoin Core descriptor wallets.
 

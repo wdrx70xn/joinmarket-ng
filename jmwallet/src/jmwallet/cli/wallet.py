@@ -342,7 +342,11 @@ async def _show_wallet_info(
     # Create backend
     backend: BitcoinCoreBackend | DescriptorWalletBackend | NeutrinoBackend
     if backend_type == "neutrino":
-        backend = NeutrinoBackend(neutrino_url=backend_settings.neutrino_url, network=network)
+        backend = NeutrinoBackend(
+            neutrino_url=backend_settings.neutrino_url,
+            network=network,
+            scan_start_height=backend_settings.scan_start_height,
+        )
         logger.info("Waiting for neutrino to sync...")
         synced = await backend.wait_for_sync(timeout=300.0)
         if not synced:

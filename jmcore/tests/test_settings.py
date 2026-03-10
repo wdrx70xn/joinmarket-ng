@@ -23,8 +23,18 @@ from jmcore.settings import (
 
 
 @pytest.fixture(autouse=True)
-def reset_settings_fixture() -> Generator[None, None, None]:
-    """Reset settings before and after each test."""
+def reset_settings_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[None, None, None]:
+    """Reset settings before and after each test.
+
+    Also redirects JOINMARKET_DATA_DIR to an empty temp directory so that
+    tests that do not explicitly write a config.toml always see the defaults,
+    regardless of the developer's live ~/.joinmarket-ng/config.toml.
+    """
+    empty_data_dir = tmp_path / ".joinmarket-ng-defaults"
+    empty_data_dir.mkdir(parents=True)
+    monkeypatch.setenv("JOINMARKET_DATA_DIR", str(empty_data_dir))
     reset_settings()
     yield
     reset_settings()

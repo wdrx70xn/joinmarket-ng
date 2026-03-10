@@ -58,6 +58,8 @@ def test_bip39_import_with_passphrase_zpub_and_address():
         mock_backend = MagicMock()
         mock_backend.get_utxos = AsyncMock(return_value=[])
         mock_backend.close = AsyncMock()
+        mock_backend.supports_watch_address = False
+        mock_backend.supports_descriptor_scan = False
 
         # Mock the BitcoinCoreBackend class (imported inside _show_wallet_info)
         with patch("jmwallet.backends.bitcoin_core.BitcoinCoreBackend", return_value=mock_backend):
@@ -232,6 +234,8 @@ def test_bip39_prompt_passphrase():
         mock_backend = MagicMock()
         mock_backend.get_utxos = AsyncMock(return_value=[])
         mock_backend.close = AsyncMock()
+        mock_backend.supports_watch_address = False
+        mock_backend.supports_descriptor_scan = False
 
         # Mock typer.prompt to return the passphrase
         with (
@@ -556,6 +560,8 @@ def test_info_uses_default_wallet():
         mock_backend = MagicMock()
         mock_backend.get_utxos = AsyncMock(return_value=[])
         mock_backend.close = AsyncMock()
+        mock_backend.supports_watch_address = False
+        mock_backend.supports_descriptor_scan = False
 
         # Override home directory for this test
         with (

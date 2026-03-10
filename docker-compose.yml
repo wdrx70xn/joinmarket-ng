@@ -1059,7 +1059,7 @@ services:
   # ============================================================================
 
   neutrino:
-    image: ghcr.io/m0wer/neutrino-api:latest
+    image: ghcr.io/m0wer/neutrino-api:master
     container_name: jm-neutrino
     restart: unless-stopped
     logging:

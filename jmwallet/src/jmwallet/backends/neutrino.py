@@ -49,12 +49,15 @@ class NeutrinoBackend(BlockchainBackend):
     The neutrino daemon should be running alongside this client.
     """
 
+    supports_watch_address: bool = True
+
     def __init__(
         self,
         neutrino_url: str = "http://127.0.0.1:8334",
         network: str = "mainnet",
         connect_peers: list[str] | None = None,
         data_dir: str = "/data/neutrino",
+        scan_start_height: int | None = None,
     ):
         """
         Initialize Neutrino backend.
@@ -64,12 +67,16 @@ class NeutrinoBackend(BlockchainBackend):
             network: Bitcoin network (mainnet, testnet, regtest, signet)
             connect_peers: List of peer addresses to connect to (optional)
             data_dir: Directory for neutrino data (headers, filters)
+            scan_start_height: Block height to start initial rescan from (optional).
+                If set, skips scanning blocks before this height during initial wallet sync.
+                Critical for performance on mainnet/signet where scanning from genesis is slow.
+                If None, defaults to _min_valid_blockheight for the network.
         """
         self.neutrino_url = neutrino_url.rstrip("/")
         self.network = network
         self.connect_peers = connect_peers or []
         self.data_dir = data_dir
-        self.client = httpx.AsyncClient(timeout=60.0)
+        self.client = httpx.AsyncClient(timeout=300.0)
 
         # Cache for watched addresses (neutrino needs to know what to scan for)
         self._watched_addresses: set[str] = set()
@@ -105,6 +112,13 @@ class NeutrinoBackend(BlockchainBackend):
         elif network == "signet":
             self._min_valid_blockheight = 0  # Signet started with SegWit
 
+        # Determine the effective start height for initial rescan.
+        # Explicit scan_start_height takes priority; otherwise fall back to
+        # _min_valid_blockheight (SegWit activation on the network).
+        self._scan_start_height: int = (
+            scan_start_height if scan_start_height is not None else self._min_valid_blockheight
+        )
+
     async def _api_call(
         self,
         method: str,
@@ -137,6 +151,37 @@ class NeutrinoBackend(BlockchainBackend):
         except httpx.HTTPError as e:
             logger.error(f"Neutrino API call failed: {endpoint} - {e}")
             raise
+
+    async def _wait_for_rescan(self, timeout: float = 300.0, poll_interval: float = 2.0) -> None:
+        """
+        Wait until the neutrino daemon reports no rescan is in progress.
+
+        Polls ``GET /v1/rescan/status`` every *poll_interval* seconds until
+        ``in_progress`` is False or *timeout* is exceeded.  Falls back
+        gracefully (logs a warning) when the endpoint is unavailable so that
+        older neutrino-api versions still work.
+
+        Args:
+            timeout: Maximum seconds to wait (default 300 s / 5 min).
+            poll_interval: Seconds between status polls (default 2 s).
+        """
+        start = asyncio.get_event_loop().time()
+        while True:
+            try:
+                status = await self._api_call("GET", "v1/rescan/status")
+                if not status.get("in_progress", False):
+                    return
+            except Exception as e:
+                # Endpoint not available (old server version) – stop waiting
+                logger.warning(f"GET /v1/rescan/status failed ({e}); assuming rescan complete")
+                return
+
+            elapsed = asyncio.get_event_loop().time() - start
+            if elapsed >= timeout:
+                logger.warning(f"Rescan did not complete within {timeout:.0f}s; proceeding anyway")
+                return
+
+            await asyncio.sleep(poll_interval)
 
     async def wait_for_sync(self, timeout: float = 300.0) -> bool:
         """
@@ -230,8 +275,9 @@ class NeutrinoBackend(BlockchainBackend):
         Neutrino will scan the blockchain using compact block filters
         to find transactions relevant to the watched addresses.
 
-        On first call, triggers a full blockchain rescan from genesis to ensure
-        all historical UTXOs are found (critical for wallets funded before neutrino started).
+        On first call, triggers a blockchain rescan from the configured
+        scan_start_height (or network minimum) to ensure all historical UTXOs
+        are found (critical for wallets funded before neutrino started).
 
         After initial rescan, automatically rescans if new blocks have arrived
         to detect transactions that occurred after the last scan.
@@ -255,21 +301,21 @@ class NeutrinoBackend(BlockchainBackend):
         if not self._initial_rescan_done and self._watched_addresses:
             logger.info(
                 f"Performing initial blockchain rescan for {len(self._watched_addresses)} "
-                "watched addresses (this may take a moment)..."
+                f"watched addresses from height {self._scan_start_height} "
+                "(this may take a moment)..."
             )
             try:
-                # Trigger rescan from block 0 for all watched addresses
+                # Trigger rescan from configured start height for all watched addresses
                 await self._api_call(
                     "POST",
                     "v1/rescan",
                     data={
                         "addresses": list(self._watched_addresses),
-                        "start_height": 0,
+                        "start_height": self._scan_start_height,
                     },
                 )
-                # Wait for rescan to complete (neutrino processes this asynchronously)
-                # On regtest with ~3000 blocks, this typically takes 5-10 seconds
-                await asyncio.sleep(10.0)
+                # Wait for rescan to complete by polling /v1/rescan/status
+                await self._wait_for_rescan()
                 self._initial_rescan_done = True
                 self._last_rescan_height = current_height
                 self._rescan_in_progress = False
@@ -301,13 +347,12 @@ class NeutrinoBackend(BlockchainBackend):
                         "start_height": start_height,
                     },
                 )
-                # Wait for rescan to complete
+                # Wait for rescan to complete by polling /v1/rescan/status.
                 # NOTE: The rescan is asynchronous - neutrino needs time to:
                 # 1. Match block filters
                 # 2. Download full blocks that match
                 # 3. Extract and index UTXOs
-                # We wait 7 seconds to allow time for indexing to complete
-                await asyncio.sleep(7.0)
+                await self._wait_for_rescan()
 
                 self._last_rescan_height = current_height
                 self._rescan_in_progress = False
@@ -589,12 +634,12 @@ class NeutrinoBackend(BlockchainBackend):
 
         For each bond:
         1. Use the pre-computed P2WSH address (derived from utxo_pub + locktime)
-        2. Query ``v1/utxo/{txid}/{vout}?address={addr}&start_height=0``
+        2. Query ``v1/utxo/{txid}/{vout}?address={addr}&start_height={scan_start_height}``
         3. Parse the response to determine value, confirmations, and block time
 
-        Note: start_height=0 means a full scan from genesis. This is the safe default
-        when we don't know when the bond UTXO was created. The neutrino-api caches
-        filter data, so subsequent calls are faster.
+        Uses scan_start_height (defaulting to the network's minimum valid blockheight)
+        instead of scanning from genesis. This is safe because fidelity bonds can only
+        exist after SegWit activation, and dramatically faster on long chains.
         """
         if not bonds:
             return []
@@ -606,10 +651,16 @@ class NeutrinoBackend(BlockchainBackend):
             async with semaphore:
                 try:
                     # Use the neutrino-api single-UTXO endpoint with address hint
+                    # Start from _scan_start_height instead of genesis for performance.
+                    # Bonds require SegWit (P2WSH) so they cannot exist before
+                    # the network's minimum valid blockheight.
                     response = await self._api_call(
                         "GET",
                         f"v1/utxo/{bond.txid}/{bond.vout}",
-                        params={"address": bond.address, "start_height": 0},
+                        params={
+                            "address": bond.address,
+                            "start_height": self._scan_start_height,
+                        },
                     )
 
                     if response is None:
@@ -1012,8 +1063,8 @@ class NeutrinoBackend(BlockchainBackend):
         """Close the HTTP client connection and reset so the backend can be reused."""
         await self.client.aclose()
         # Re-create a fresh client so this instance is usable again if the
-        # wallet service is restarted (e.g. maker stop → start in jmwalletd).
-        self.client = httpx.AsyncClient(timeout=60.0)
+        # wallet service is restarted (e.g. maker stop -> start in jmwalletd).
+        self.client = httpx.AsyncClient(timeout=300.0)
         self._watched_addresses = set()
         self._watched_outpoints = set()
         self._filter_header_tip = 0

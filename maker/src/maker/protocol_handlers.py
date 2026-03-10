@@ -626,11 +626,26 @@ class ProtocolHandlersMixin:
                     # This prevents reuse of commitments in future CoinJoin attempts
                     await self._broadcast_commitment(commitment)
                 else:
-                    logger.error(f"Auth failed: {response.get('error')}")
+                    error_msg = response.get("error", "unknown error")
+                    error_code = response.get("error_code", "")
+                    logger.error(f"Auth failed: {error_msg}")
+
+                    # Send !error to taker so they can handle it immediately
+                    # rather than waiting for the ioauth timeout. The reference
+                    # implementation logs the error; our taker can act on it.
+                    try:
+                        for client in self.directory_clients.values():
+                            await client.send_private_message(taker_nick, "error", error_msg)
+                        logger.debug(f"Sent !error to {taker_nick}: {error_msg}")
+                    except Exception as e:
+                        logger.warning(f"Failed to send !error to {taker_nick}: {e}")
+
                     # Fire-and-forget notification for rejection
                     asyncio.create_task(
                         get_notifier().notify_rejection(
-                            taker_nick, "PoDLE verification failed", response.get("error", "")
+                            taker_nick,
+                            error_code or "PoDLE verification failed",
+                            error_msg,
                         )
                     )
                     del self.active_sessions[taker_nick]

@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from jmcore.bitcoin import btc_to_sats, format_amount
+from jmcore.bitcoin import btc_to_sats, format_amount, get_hrp
 from loguru import logger
 
 from jmwallet.backends.base import BlockchainBackend
@@ -60,6 +60,7 @@ class WalletSyncMixin:
     backend: BlockchainBackend
     master_key: HDKey
     root_path: str
+    network: str
     mixdepth_count: int
     gap_limit: int
     data_dir: Path | None
@@ -404,7 +405,7 @@ class WalletSyncMixin:
         logger.info("Syncing all mixdepths...")
 
         # Try efficient descriptor-based sync if backend supports it
-        if hasattr(self.backend, "scan_descriptors"):
+        if self.backend.supports_descriptor_scan:
             result = await self._sync_all_with_descriptors(fidelity_bond_addresses)
             if result is not None:
                 self._apply_frozen_state()
@@ -413,6 +414,22 @@ class WalletSyncMixin:
             logger.warning("Descriptor scan failed, falling back to address scan")
 
         # Legacy address-by-address scanning
+        # Pre-register ALL wallet addresses (all mixdepths × both branches × gap_limit)
+        # with the backend before the first get_utxos call triggers any rescan.
+        # Without this, light-client backends (Neutrino) fire the initial rescan on the
+        # first get_utxos call with only the *external* addresses registered, causing
+        # change (internal) addresses to be missed entirely.
+        if self.backend.supports_watch_address:
+            for pre_mixdepth in range(self.mixdepth_count):
+                for pre_change in [0, 1]:
+                    for pre_index in range(self.gap_limit):
+                        addr = self.get_address(pre_mixdepth, pre_change, pre_index)
+                        await self.backend.add_watch_address(addr)
+            logger.debug(
+                f"Pre-registered {self.mixdepth_count * 2 * self.gap_limit} addresses "
+                "with backend before initial rescan"
+            )
+
         result = {}
         for mixdepth in range(self.mixdepth_count):
             utxos = await self.sync_mixdepth(mixdepth)
@@ -464,11 +481,23 @@ class WalletSyncMixin:
 
         # Add fidelity bond addresses to the scan
         if fidelity_bond_addresses:
-            logger.info(
-                f"Including {len(fidelity_bond_addresses)} fidelity bond address(es) in scan"
-            )
-
+            expected_hrp = get_hrp(self.network)
+            valid_bonds = []
             for address, locktime, index in fidelity_bond_addresses:
+                # Skip addresses whose bech32 HRP doesn't match the current network
+                # (e.g. mainnet bc1q... addresses loaded into a regtest/signet wallet)
+                addr_hrp = address.split("1")[0].lower() if "1" in address else ""
+                if addr_hrp != expected_hrp:
+                    logger.warning(
+                        f"Skipping fidelity bond address {address!r}: network mismatch "
+                        f"(expected HRP {expected_hrp!r}, got {addr_hrp!r})"
+                    )
+                    continue
+                valid_bonds.append((address, locktime, index))
+
+            if valid_bonds:
+                logger.info(f"Including {len(valid_bonds)} fidelity bond address(es) in scan")
+            for address, locktime, index in valid_bonds:
                 descriptors.append(f"addr({address})")
                 bond_address_to_info[address] = (locktime, index)
                 # Cache the address with the correct index from registry

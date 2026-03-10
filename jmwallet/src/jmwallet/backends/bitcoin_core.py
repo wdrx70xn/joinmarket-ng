@@ -49,6 +49,8 @@ class BitcoinCoreBackend(BlockchainBackend):
     Uses scantxoutset and other non-wallet RPC methods.
     """
 
+    supports_descriptor_scan: bool = True
+
     def __init__(
         self,
         rpc_url: str = "http://127.0.0.1:18443",

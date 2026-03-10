@@ -2047,13 +2047,13 @@ class Taker(TakerMonitoringMixin):
             self._apply_fee_randomization()
             return self._fee_rate
 
-        # 4. Fallback for neutrino without manual fee
-        self._fee_rate = 1.0
+        # 4. Neutrino backend without manual fee - fall back to 1.0 sat/vB
+        fallback_rate = 1.0
         logger.warning(
-            "No fee estimation available (neutrino backend). "
-            "Using fallback rate: 1.0 sat/vB. "
-            "Consider using --fee-rate for production."
+            f"Fee estimation is not available with the neutrino backend and no --fee-rate "
+            f"was specified. Falling back to {fallback_rate} sat/vB."
         )
+        self._fee_rate = fallback_rate
         self._apply_fee_randomization()
         return self._fee_rate
 

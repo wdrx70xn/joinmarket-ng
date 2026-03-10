@@ -99,6 +99,33 @@ class BlockchainBackend(ABC):
     Bitcoin Core wallet functionality (avoiding BerkeleyDB issues).
     """
 
+    supports_descriptor_scan: bool = False
+    """Whether this backend supports efficient descriptor-based UTXO scanning.
+
+    Backends that override ``scan_descriptors()`` with a real implementation
+    (e.g. Bitcoin Core's ``scantxoutset``) should set this to ``True``.
+    Light-client backends (Neutrino) leave it at the default ``False`` so that
+    ``sync_all()`` does not attempt descriptor scanning and fall back with a
+    confusing warning.
+    """
+
+    supports_watch_address: bool = False
+    """Whether this backend requires addresses to be pre-registered via ``add_watch_address()``.
+
+    Light-client backends (Neutrino) must be told which addresses to watch before
+    a rescan.  Full-node backends (Bitcoin Core, descriptor wallet) can query any
+    address on demand and do not need pre-registration.
+    Set to ``True`` only in backends that implement ``add_watch_address()``.
+    """
+
+    async def add_watch_address(self, address: str) -> None:
+        """Register an address for watching.
+
+        Only meaningful for backends with ``supports_watch_address = True``
+        (i.e. light-client backends that need explicit address registration
+        before a rescan).  Full-node backends can ignore this.
+        """
+
     @abstractmethod
     async def get_utxos(self, addresses: list[str]) -> list[UTXO]:
         """Get UTXOs for given addresses"""
