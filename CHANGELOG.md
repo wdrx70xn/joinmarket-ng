@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Maker tracking via offer reannouncements**: After a coinjoin, makers re-announce offers with an exact `maxsize` reflecting their new balance, allowing observers to correlate balance changes with on-chain transactions (especially when combined with fidelity bond identity). Two mitigations: (1) `maxsize` is now rounded down to the nearest power of 2 so that small balance changes produce no visible offer update and (2) a configurable random delay (`offer_reannounce_delay_max`, default 600s) is applied before re-announcing to break timing correlation with block confirmations.
+- **De-anonymization risk from mixdepth 0 UTXO merges**: Fixed a privacy issue where using multiple mixdepth 0 UTXOs in a single coinjoin could link a maker's fidelity bond to their regular deposits or change. The wallet now strictly restricts `mixdepth=0` to a single UTXO for coinjoin, preventing merges. The maker bot also clearly warns users on startup if they have both a fidelity bond and regular deposits in mixdepth 0.
 
 ## [0.20.0] - 2026-03-11
 
