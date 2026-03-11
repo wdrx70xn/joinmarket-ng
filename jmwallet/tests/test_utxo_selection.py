@@ -138,8 +138,8 @@ class TestSelectUtxos:
         assert selected[0].value == 100_000  # Largest UTXO
 
     def test_select_multiple_utxos_needed(self, wallet_service: WalletService):
-        """When multiple UTXOs needed, select minimum count."""
-        selected = wallet_service.select_utxos(0, 140_000, min_confirmations=1)
+        """When multiple UTXOs needed, select minimum count (non-md0)."""
+        selected = wallet_service.select_utxos(1, 140_000, min_confirmations=1)
         assert len(selected) == 2
         assert sum(u.value for u in selected) >= 140_000
 
@@ -156,15 +156,53 @@ class TestSelectUtxos:
             wallet_service.select_utxos(0, 500_000, min_confirmations=1)
 
     def test_select_with_include_utxos(self, wallet_service: WalletService):
-        """Mandatory UTXOs are always included."""
-        mandatory = [wallet_service.utxo_cache[0][2]]  # 30k UTXO
+        """Mandatory UTXOs are always included (non-md0)."""
+        mandatory = [wallet_service.utxo_cache[1][2]]  # 30k UTXO from md1
         selected = wallet_service.select_utxos(
-            0, 50_000, min_confirmations=1, include_utxos=mandatory
+            1, 50_000, min_confirmations=1, include_utxos=mandatory
         )
 
         # Mandatory UTXO should be included
         assert mandatory[0] in selected
         assert sum(u.value for u in selected) >= 50_000
+
+    def test_select_utxos_md0_returns_single_utxo(self, wallet_service: WalletService):
+        """select_utxos() for md0 only returns the single largest UTXO."""
+        selected = wallet_service.select_utxos(0, 80_000, min_confirmations=1)
+        assert len(selected) == 1
+        assert selected[0].value == 100_000
+
+    def test_select_utxos_md0_refuses_merge(self, wallet_service: WalletService):
+        """select_utxos() for md0 raises if no single UTXO covers the target."""
+        # md0 has 100k + 50k + 30k, but no single UTXO covers 140k
+        with pytest.raises(ValueError, match="Cannot merge md0 UTXOs for privacy reasons"):
+            wallet_service.select_utxos(0, 140_000, min_confirmations=1)
+
+    def test_select_utxos_md0_with_include_utxos(self, wallet_service: WalletService):
+        """select_utxos() for md0 honours mandatory UTXOs but adds at most 1 more."""
+        mandatory = [wallet_service.utxo_cache[0][2]]  # 30k UTXO
+        selected = wallet_service.select_utxos(
+            0, 50_000, min_confirmations=1, include_utxos=mandatory
+        )
+        # 30k mandatory + 100k largest eligible = 2 UTXOs
+        assert len(selected) == 2
+        assert mandatory[0] in selected
+        assert sum(u.value for u in selected) >= 50_000
+
+    def test_select_utxos_md0_include_utxos_sufficient_alone(self, wallet_service: WalletService):
+        """select_utxos() for md0 returns only mandatory UTXO if it covers target."""
+        mandatory = [wallet_service.utxo_cache[0][0]]  # 100k UTXO
+        selected = wallet_service.select_utxos(
+            0, 80_000, min_confirmations=1, include_utxos=mandatory
+        )
+        assert len(selected) == 1
+        assert selected[0].value == 100_000
+
+    def test_select_utxos_md0_empty_raises(self, wallet_service: WalletService):
+        """select_utxos() for md0 raises when no eligible UTXOs exist."""
+        wallet_service.utxo_cache[0] = []
+        with pytest.raises(ValueError, match="no eligible UTXOs in mixdepth 0"):
+            wallet_service.select_utxos(0, 10_000, min_confirmations=1)
 
 
 class TestGetAllUtxos:
@@ -185,6 +223,42 @@ class TestGetAllUtxos:
         """Empty mixdepth returns empty list."""
         all_utxos = wallet_service.get_all_utxos(2, min_confirmations=1)
         assert len(all_utxos) == 0
+
+
+class TestGetBalanceForOffersMd0:
+    """Tests that get_balance_for_offers() respects the md0 single-UTXO constraint."""
+
+    @pytest.mark.asyncio
+    async def test_md0_returns_largest_single_utxo(self, wallet_service: WalletService):
+        """For md0, effective balance is the largest single UTXO, not the sum."""
+        balance = await wallet_service.get_balance_for_offers(0, min_confirmations=1)
+        # md0 has 100k + 50k + 30k, but only the largest single UTXO counts
+        assert balance == 100_000
+
+    @pytest.mark.asyncio
+    async def test_md1_returns_total_sum(self, wallet_service: WalletService):
+        """For non-md0, effective balance is the sum of all eligible UTXOs."""
+        balance = await wallet_service.get_balance_for_offers(1, min_confirmations=1)
+        # md1 has 100k + 50k + 30k + 20k + 10k = 210k
+        assert balance == 210_000
+
+    @pytest.mark.asyncio
+    async def test_md0_empty_returns_zero(self, wallet_service: WalletService):
+        """For md0 with no eligible UTXOs, returns 0."""
+        wallet_service.utxo_cache[0] = []
+        balance = await wallet_service.get_balance_for_offers(0, min_confirmations=1)
+        assert balance == 0
+
+    @pytest.mark.asyncio
+    async def test_md0_respects_confirmations(self, wallet_service: WalletService):
+        """For md0, confirmation filter applies before selecting largest."""
+        # Only 100k has 10 confirms, 50k has 5 confirms
+        balance = await wallet_service.get_balance_for_offers(0, min_confirmations=6)
+        assert balance == 100_000
+
+        # With min_confirmations=11, no UTXO qualifies
+        balance = await wallet_service.get_balance_for_offers(0, min_confirmations=11)
+        assert balance == 0
 
 
 class TestSelectUtxosWithMerge:
@@ -485,10 +559,14 @@ class TestFidelityBondUTXOFiltering:
     async def test_get_balance_for_offers_excludes_fidelity_bonds(
         self, wallet_with_timelocked: WalletService
     ):
-        """get_balance_for_offers() excludes fidelity bond UTXOs."""
+        """get_balance_for_offers() excludes fidelity bond UTXOs.
+
+        For md0 it also returns only the largest single UTXO value
+        because merging md0 UTXOs is forbidden for privacy reasons.
+        """
         balance = await wallet_with_timelocked.get_balance_for_offers(0)
-        # Same as get_balance(include_fidelity_bonds=False)
-        assert balance == 150_000
+        # md0 has 100k + 50k regular UTXOs, but only largest single UTXO counts
+        assert balance == 100_000
 
     @pytest.mark.asyncio
     async def test_get_fidelity_bond_balance(self, wallet_with_timelocked: WalletService):
@@ -537,9 +615,12 @@ class TestFidelityBondUTXOFiltering:
     def test_select_utxos_cannot_reach_fidelity_bond_amount(
         self, wallet_with_timelocked: WalletService
     ):
-        """select_utxos() fails when needing fidelity bond funds to reach target."""
-        # Request 200k - more than non-FB 150k, but less than total 650k
-        with pytest.raises(ValueError, match="Insufficient funds"):
+        """select_utxos() fails when needing fidelity bond funds to reach target.
+
+        In md0 this is a privacy-driven error because merging is forbidden.
+        """
+        # Request 200k - more than non-FB 150k, largest single UTXO is 100k
+        with pytest.raises(ValueError, match="Cannot merge md0 UTXOs for privacy reasons"):
             wallet_with_timelocked.select_utxos(0, 200_000, min_confirmations=1)
 
     def test_get_all_utxos_excludes_fidelity_bonds_by_default(
@@ -686,9 +767,14 @@ class TestFrozenUTXOFiltering:
         assert not selected[0].frozen
 
     def test_select_utxos_insufficient_due_to_frozen(self, wallet_with_frozen: WalletService):
-        """select_utxos() raises when frozen UTXOs would be needed."""
-        # Total spendable: 50k + 30k = 80k. Requesting 90k fails.
-        with pytest.raises(ValueError, match="Insufficient funds"):
+        """select_utxos() raises when frozen UTXOs would be needed.
+
+        In md0 this is a privacy-driven error: no single UTXO covers the
+        target and merging is forbidden.
+        """
+        # Spendable md0: 50k + 30k, but only single UTXO allowed.
+        # Largest eligible (50k) < 90k -> raises.
+        with pytest.raises(ValueError, match="Cannot merge md0 UTXOs for privacy reasons"):
             wallet_with_frozen.select_utxos(0, 90_000, min_confirmations=1)
 
     def test_get_all_utxos_excludes_frozen(self, wallet_with_frozen: WalletService):

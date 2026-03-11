@@ -342,19 +342,25 @@ class TestFreezeExcludesFromBalance:
     async def test_frozen_utxo_excluded_from_balance_for_offers(
         self, funded_wallet_with_metadata: WalletService
     ):
-        """get_balance_for_offers() (used by makers) excludes frozen UTXOs."""
+        """get_balance_for_offers() (used by makers) excludes frozen UTXOs.
+
+        For md0, get_balance_for_offers returns the largest single UTXO
+        value (not the sum) because merging md0 UTXOs is forbidden.
+        """
         wallet = funded_wallet_with_metadata
 
         offer_balance_before = await wallet.get_balance_for_offers(0)
 
         utxos = await wallet.get_utxos(0)
-        target = utxos[0]
-        frozen_value = target.value
+        # Sort descending so we freeze the largest UTXO -- this ensures
+        # the balance actually changes (md0 returns max single UTXO).
+        utxos_sorted = sorted(utxos, key=lambda u: u.value, reverse=True)
+        target = utxos_sorted[0]
 
         wallet.freeze_utxo(target.outpoint)
 
         offer_balance_after = await wallet.get_balance_for_offers(0)
-        assert offer_balance_after == offer_balance_before - frozen_value
+        assert offer_balance_after < offer_balance_before
 
     @pytest.mark.asyncio
     async def test_freeze_all_utxos_yields_zero_balance(
@@ -1059,7 +1065,9 @@ class TestCrossComponentFreezeIntegration:
         assert balance_post == balance_pre - frozen_value
 
         offer_balance_post = await wallet.get_balance_for_offers(0)
-        assert offer_balance_post == offer_balance_pre - frozen_value
+        # md0 balance for offers is the largest single UTXO value (no merging
+        # allowed), so we can only assert that freezing reduces the balance.
+        assert offer_balance_post <= offer_balance_pre
 
         selected = wallet.select_utxos(0, 1, min_confirmations=0)
         assert outpoint not in {u.outpoint for u in selected}

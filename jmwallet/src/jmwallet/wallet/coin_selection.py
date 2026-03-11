@@ -58,6 +58,32 @@ class CoinSelectionMixin:
 
         eligible.sort(key=lambda u: u.value, reverse=True)
 
+        # Mixdepth 0 restriction: never merge UTXOs to avoid linking the
+        # fidelity bond with regular deposits/change.  Only the single
+        # largest eligible UTXO may be spent (mandatory include_utxos are
+        # still honoured so that PoDLE commitments work).
+        if mixdepth == 0:
+            # Start with mandatory UTXOs if any
+            selected: list[UTXOInfo] = []
+            total = 0
+            if include_utxos:
+                for utxo in include_utxos:
+                    selected.append(utxo)
+                    total += utxo.value
+            if total >= target_amount:
+                return selected
+
+            if not eligible:
+                raise ValueError("Insufficient funds: no eligible UTXOs in mixdepth 0")
+            if eligible[0].value + total < target_amount:
+                raise ValueError(
+                    f"Insufficient funds: largest md0 UTXO has {eligible[0].value}, "
+                    f"need {target_amount - total}. "
+                    f"Cannot merge md0 UTXOs for privacy reasons."
+                )
+            selected.append(eligible[0])
+            return selected
+
         selected = []
         total = 0
 

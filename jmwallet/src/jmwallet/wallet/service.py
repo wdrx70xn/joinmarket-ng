@@ -304,7 +304,24 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
 
         Fidelity bonds should never be automatically spent in CoinJoins,
         so makers must exclude them when calculating available offer amounts.
+
+        For mixdepth 0, only the largest single UTXO value is returned because
+        merging md0 UTXOs is forbidden for privacy reasons (it would link the
+        fidelity bond to regular deposits/change).
         """
+        if mixdepth == 0:
+            if mixdepth not in self.utxo_cache:
+                await self.sync_mixdepth(mixdepth)
+            utxos = self.utxo_cache.get(mixdepth, [])
+            eligible = [
+                u
+                for u in utxos
+                if not u.frozen and not u.is_fidelity_bond and u.confirmations >= min_confirmations
+            ]
+            if not eligible:
+                return 0
+            return max(u.value for u in eligible)
+
         return await self.get_balance(
             mixdepth, include_fidelity_bonds=False, min_confirmations=min_confirmations
         )

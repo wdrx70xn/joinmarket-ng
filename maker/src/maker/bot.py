@@ -520,9 +520,15 @@ class MakerBot(BackgroundTasksMixin, ProtocolHandlersMixin, DirectConnectionMixi
                 )
                 md0_utxos = self.wallet.get_all_utxos(0, include_fidelity_bonds=False)
                 if md0_utxos:
+                    total_md0 = sum(u.value for u in md0_utxos)
                     logger.warning(
-                        "You have a fidelity bond and deposit or change in mixdepth 0.\n"
-                        "This might link your identity to your fidelity bond.\n"
+                        f"PRIVACY RISK: You have a fidelity bond AND "
+                        f"{len(md0_utxos)} regular UTXO(s) ({total_md0:,} sats) "
+                        f"in mixdepth 0.\n"
+                        f"Using md0 UTXOs in coinjoins can link your identity "
+                        f"to your fidelity bond.\n"
+                        f"Recommendation: sweep md0 funds to mixdepth 1 as a "
+                        f"taker coinjoin, then freeze or spend the md0 UTXOs."
                     )
             else:
                 logger.warning("No fidelity bond found (offers will have no bond proof)")

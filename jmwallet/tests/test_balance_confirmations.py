@@ -116,10 +116,19 @@ async def test_get_balance_respects_min_confirmations(wallet_service):
 
 @pytest.mark.asyncio
 async def test_get_balance_for_offers_respects_min_confirmations(wallet_service):
-    # Tests that get_balance_for_offers passes min_confirmations to get_balance
-    assert await wallet_service.get_balance_for_offers(0, min_confirmations=0) == 15000
-    assert await wallet_service.get_balance_for_offers(0, min_confirmations=1) == 14000
-    assert await wallet_service.get_balance_for_offers(0, min_confirmations=5) == 12000
+    # For md0, get_balance_for_offers returns the largest single UTXO value
+    # (not the sum) because merging md0 UTXOs is forbidden.
+    # md0 UTXOs: 1000 (0 conf), 2000 (1 conf), 4000 (5 conf), 8000 (10 conf)
+    assert await wallet_service.get_balance_for_offers(0, min_confirmations=0) == 8000
+    assert await wallet_service.get_balance_for_offers(0, min_confirmations=1) == 8000
+    assert await wallet_service.get_balance_for_offers(0, min_confirmations=5) == 8000
+    # min_confirmations=11: no eligible UTXOs
+    assert await wallet_service.get_balance_for_offers(0, min_confirmations=11) == 0
+
+    # For md1, get_balance_for_offers returns the sum of all eligible UTXOs
+    # md1 UTXOs: 10000 (0 conf), 20000 (1 conf)
+    assert await wallet_service.get_balance_for_offers(1, min_confirmations=0) == 30000
+    assert await wallet_service.get_balance_for_offers(1, min_confirmations=1) == 20000
 
 
 @pytest.mark.asyncio
