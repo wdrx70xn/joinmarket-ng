@@ -301,5 +301,216 @@ async def test_channel_consistency_direct_first():
     assert session.comm_channel == "direct"  # Unchanged
 
 
+@pytest.mark.asyncio
+async def test_neutrino_maker_rejects_legacy_taker_auth():
+    """Test that a neutrino maker explicitly rejects auth from a legacy taker.
+
+    When a taker doesn't send extended UTXO metadata (scriptpubkey + blockheight),
+    the neutrino backend cannot verify the UTXO. The maker should return a clear
+    error with error_code 'neutrino_incompatible' rather than silently failing
+    on get_utxo() returning None.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from jmcore.encryption import CryptoSession
+    from jmcore.models import Offer, OfferType
+
+    from maker.coinjoin import CoinJoinSession
+
+    mock_wallet = MagicMock()
+    mock_backend = MagicMock()
+    # Simulate neutrino backend
+    mock_backend.requires_neutrino_metadata.return_value = True
+    mock_backend.get_utxo = AsyncMock(return_value=None)
+
+    offer = Offer(
+        counterparty="J5NeutrinoMaker",
+        ordertype=OfferType.SW0_RELATIVE,
+        oid=0,
+        minsize=10_000,
+        maxsize=100_000_000,
+        txfee=1000,
+        cjfee="0.0003",
+    )
+
+    session = CoinJoinSession(
+        taker_nick="J5LegacyTaker",
+        offer=offer,
+        wallet=mock_wallet,
+        backend=mock_backend,
+    )
+
+    # Simulate fill phase
+    taker_crypto = CryptoSession()
+    taker_pk = taker_crypto.get_pubkey_hex()
+    success, _ = await session.handle_fill(
+        amount=1_000_000,
+        commitment="aa" * 32,
+        taker_pk=taker_pk,
+    )
+    assert success
+
+    # Simulate auth with a legacy taker revelation (NO extended metadata)
+    # We mock verify_podle to always succeed so we can test the UTXO path
+    revelation = {
+        "utxo": "bb" * 32 + ":0",  # Legacy format: txid:vout only
+        "P": "02" + "cc" * 32,
+        "P2": "02" + "dd" * 32,
+        "sig": "ee" * 32,
+        "e": "ff" * 16,
+    }
+
+    with patch("maker.coinjoin.verify_podle", return_value=(True, None)):
+        with patch("maker.coinjoin.parse_podle_revelation") as mock_parse:
+            mock_parse.return_value = {
+                "P": bytes.fromhex("02" + "cc" * 32),
+                "P2": bytes.fromhex("02" + "dd" * 32),
+                "sig": bytes.fromhex("ee" * 32),
+                "e": bytes.fromhex("ff" * 16),
+                "txid": "bb" * 32,
+                "vout": 0,
+                # No scriptpubkey or blockheight -> legacy taker
+            }
+
+            success, response = await session.handle_auth(
+                commitment="aa" * 32,
+                revelation=revelation,
+                kphex="",
+            )
+
+    # Should fail with neutrino_incompatible error
+    assert not success
+    assert response["error_code"] == "neutrino_incompatible"
+    assert "neutrino" in response["error"].lower()
+
+    # get_utxo should NOT have been called (we fail early)
+    mock_backend.get_utxo.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_neutrino_maker_accepts_neutrino_compat_taker_auth():
+    """Test that a neutrino maker succeeds when taker sends extended metadata.
+
+    Verifies that verify_utxo_with_metadata() is called (not get_utxo()) and
+    that the session proceeds to select UTXOs and respond with !ioauth data.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from jmcore.encryption import CryptoSession
+    from jmcore.models import Offer, OfferType
+
+    from maker.coinjoin import CoinJoinSession
+
+    mock_wallet = MagicMock()
+    mock_backend = MagicMock()
+    # Simulate neutrino backend
+    mock_backend.requires_neutrino_metadata.return_value = True
+    mock_backend.get_utxo = AsyncMock(return_value=None)
+
+    # verify_utxo_with_metadata returns a successful result
+    mock_verify_result = MagicMock()
+    mock_verify_result.valid = True
+    mock_verify_result.value = 2_000_000
+    mock_verify_result.confirmations = 10
+    mock_backend.verify_utxo_with_metadata = AsyncMock(return_value=mock_verify_result)
+
+    offer = Offer(
+        counterparty="J5NeutrinoMaker",
+        ordertype=OfferType.SW0_RELATIVE,
+        oid=0,
+        minsize=10_000,
+        maxsize=100_000_000,
+        txfee=1000,
+        cjfee="0.0003",
+    )
+
+    session = CoinJoinSession(
+        taker_nick="J5CompatTaker",
+        offer=offer,
+        wallet=mock_wallet,
+        backend=mock_backend,
+        taker_utxo_age=1,
+        taker_utxo_amtpercent=10,
+    )
+
+    # Simulate fill phase
+    taker_crypto = CryptoSession()
+    taker_pk = taker_crypto.get_pubkey_hex()
+    success, _ = await session.handle_fill(
+        amount=1_000_000,
+        commitment="aa" * 32,
+        taker_pk=taker_pk,
+    )
+    assert success
+
+    revelation = {
+        "utxo": "bb" * 32 + ":0:0014" + "ab" * 20 + ":100",
+        "P": "02" + "cc" * 32,
+        "P2": "02" + "dd" * 32,
+        "sig": "ee" * 32,
+        "e": "ff" * 16,
+    }
+
+    # Mock _select_our_utxos to avoid needing a real wallet
+    mock_utxo_info = MagicMock()
+    mock_utxo_info.value = 5_000_000
+    mock_utxo_info.scriptpubkey = "0014" + "ab" * 20
+    mock_utxo_info.height = 100
+    mock_utxo_info.address = "bcrt1q" + "a" * 38
+
+    mock_key = MagicMock()
+    mock_key.get_public_key_bytes.return_value = bytes.fromhex("02" + "ab" * 32)
+    mock_key.get_private_key_bytes.return_value = bytes(32)
+    mock_wallet.get_key_for_address.return_value = mock_key
+
+    with (
+        patch("maker.coinjoin.verify_podle", return_value=(True, None)),
+        patch("maker.coinjoin.parse_podle_revelation") as mock_parse,
+        patch.object(
+            session,
+            "_select_our_utxos",
+            new_callable=AsyncMock,
+            return_value=(
+                {("cc" * 32, 0): mock_utxo_info},
+                "bcrt1q_cj_addr",
+                "bcrt1q_change_addr",
+                0,
+            ),
+        ),
+        patch("jmcore.crypto.ecdsa_sign", return_value="mock_sig"),
+    ):
+        mock_parse.return_value = {
+            "P": bytes.fromhex("02" + "cc" * 32),
+            "P2": bytes.fromhex("02" + "dd" * 32),
+            "sig": bytes.fromhex("ee" * 32),
+            "e": bytes.fromhex("ff" * 16),
+            "txid": "bb" * 32,
+            "vout": 0,
+            "scriptpubkey": "0014" + "ab" * 20,
+            "blockheight": 100,
+        }
+
+        success, response = await session.handle_auth(
+            commitment="aa" * 32,
+            revelation=revelation,
+            kphex="",
+        )
+
+    # Should succeed
+    assert success
+    assert "utxo_list" in response
+    assert "cj_addr" in response
+    assert "change_addr" in response
+
+    # verify_utxo_with_metadata should have been called (not get_utxo)
+    mock_backend.verify_utxo_with_metadata.assert_called_once_with(
+        txid="bb" * 32,
+        vout=0,
+        scriptpubkey="0014" + "ab" * 20,
+        blockheight=100,
+    )
+    mock_backend.get_utxo.assert_not_called()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
