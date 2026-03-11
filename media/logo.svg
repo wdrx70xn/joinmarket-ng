@@ -12,13 +12,9 @@
     </filter>
 
     <style>
-      /* Monospace font for a technical/terminal feel */
-      .text-label { font-family: 'Courier New', monospace; font-weight: 900; fill: #ffffff; }
       .btc-symbol { font-family: Arial, sans-serif; font-weight: bold; fill: white; }
     </style>
   </defs>
-
-  <rect width="800" height="800" fill="#13151a" />
 
   <g stroke="url(#flowGradientDense)" stroke-width="3" fill="none" stroke-linecap="round" filter="url(#glowDense)" opacity="0.8">
     <path d="M 50 80  C 250 80,  300 400, 350 400" />
@@ -60,10 +56,8 @@
     <path d="M 450 400 C 500 400, 550 720, 750 720" />
   </g>
 
-  <circle cx="400" cy="400" r="70" fill="#13151a" stroke="#f7931a" stroke-width="8" />
+  <circle cx="400" cy="400" r="70" fill="none" stroke="#f7931a" stroke-width="8" />
   <circle cx="400" cy="400" r="60" fill="#f7931a" />
   <text x="400" y="428" text-anchor="middle" font-size="80" class="btc-symbol">₿</text>
 
-  <text x="170" y="420" text-anchor="middle" font-size="100" class="text-label" stroke="#13151a" stroke-width="8" paint-order="stroke">JM</text>
-  <text x="630" y="420" text-anchor="middle" font-size="100" class="text-label" stroke="#13151a" stroke-width="8" paint-order="stroke">NG</text>
 </svg>
