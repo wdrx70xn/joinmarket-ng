@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+from jmwalletd.routers.obwatch import _get_obwatch_url
+from jmwalletd.state import DaemonState
 
 
 @pytest.fixture
@@ -14,6 +18,35 @@ def client(app: TestClient) -> TestClient:
 
 
 class TestObWatch:
+    def test_get_obwatch_url_prefers_env(self) -> None:
+        state = cast(DaemonState, object())
+        with patch.dict("os.environ", {"OBWATCH_URL": "http://127.0.0.1:39123"}, clear=False):
+            assert _get_obwatch_url(state=state) == "http://127.0.0.1:39123"
+
+    def test_get_obwatch_url_from_settings(self) -> None:
+        state = cast(DaemonState, object())
+        mock_settings = AsyncMock()
+        mock_settings.orderbook_watcher.http_host = "127.0.0.1"
+        mock_settings.orderbook_watcher.http_port = 39123
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("jmcore.settings.get_settings", return_value=mock_settings),
+        ):
+            assert _get_obwatch_url(state=state) == "http://127.0.0.1:39123"
+
+    def test_get_obwatch_url_maps_bind_all_to_loopback(self) -> None:
+        state = cast(DaemonState, object())
+        mock_settings = AsyncMock()
+        mock_settings.orderbook_watcher.http_host = "0.0.0.0"
+        mock_settings.orderbook_watcher.http_port = 39123
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("jmcore.settings.get_settings", return_value=mock_settings),
+        ):
+            assert _get_obwatch_url(state=state) == "http://127.0.0.1:39123"
+
     @patch("jmwalletd.routers.obwatch.aiohttp.ClientSession.get")
     def test_get_orderbook(self, mock_get: AsyncMock, client: TestClient) -> None:
         mock_resp = AsyncMock()
