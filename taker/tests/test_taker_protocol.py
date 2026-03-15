@@ -123,6 +123,21 @@ async def test_taker_initialization(mock_wallet, mock_backend, mock_config):
 
 
 @pytest.mark.asyncio
+async def test_do_coinjoin_fails_early_when_swap_input_without_mempool_access(
+    mock_wallet, mock_backend, mock_config
+):
+    """Swap input should fail fast on backends without mempool visibility."""
+    mock_backend.has_mempool_access = Mock(return_value=False)
+    mock_config.swap_input.enabled = True
+
+    taker = Taker(mock_wallet, mock_backend, mock_config)
+    result = await taker.do_coinjoin(amount=100_000, destination="INTERNAL", mixdepth=0)
+
+    assert result is None
+    assert taker.state == TakerState.FAILED
+
+
+@pytest.mark.asyncio
 async def test_encryption_session_setup():
     """Test NaCl encryption session setup between taker and maker."""
     taker_crypto, maker_crypto = make_crypto_pair()

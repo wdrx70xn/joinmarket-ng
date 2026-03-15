@@ -328,3 +328,27 @@ class TestSwapClientBlockchainWatching:
 
         with pytest.raises(TimeoutError, match="Lockup transaction not seen"):
             await client._wait_for_lockup(response, timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_lockup_detected_when_utxo_appears_during_polling(self) -> None:
+        backend = AsyncMock()
+        client, response, _, _, expected_spk_hex = self._setup_client_for_lockup(backend)
+
+        unseen: list[object] = []
+        seen = [
+            MagicMock(
+                txid="11" * 32,
+                vout=1,
+                value=response.onchain_amount,
+                confirmations=0,
+                scriptpubkey=expected_spk_hex,
+            )
+        ]
+        backend.get_utxos = AsyncMock(side_effect=[unseen, unseen, seen])
+
+        with patch("taker.swap.client.asyncio.sleep", new=AsyncMock()):
+            swap_input = await client._wait_for_lockup(response, timeout=5.0)
+
+        assert swap_input.txid == "11" * 32
+        assert swap_input.vout == 1
+        assert swap_input.value == response.onchain_amount

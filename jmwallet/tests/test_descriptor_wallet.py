@@ -338,6 +338,84 @@ class TestDescriptorWalletBackendUnit:
         assert utxos[0].height == 1000  # 1000 - 1 + 1
 
     @pytest.mark.asyncio
+    async def test_get_utxos_fallback_scans_external_address_when_wallet_empty(
+        self, mock_backend: DescriptorWalletBackend
+    ):
+        """When listunspent is empty for explicit addresses, mempool fallback is used."""
+        backend = mock_backend
+
+        async def mock_rpc(method, params=None, client=None, use_wallet=True):
+            if method == "getblockchaininfo":
+                return {"blocks": 1000}
+            if method == "listunspent":
+                return []
+            if method == "getrawmempool":
+                return ["aa" * 32]
+            if method == "getrawtransaction":
+                return {
+                    "txid": "aa" * 32,
+                    "vout": [
+                        {
+                            "n": 1,
+                            "value": 0.0002,
+                            "scriptPubKey": {
+                                "hex": "0020" + "11" * 32,
+                                "address": "tb1qexternal",
+                            },
+                        }
+                    ],
+                }
+            raise ValueError(f"Unexpected method: {method}")
+
+        backend._rpc_call = mock_rpc
+        utxos = await backend.get_utxos(["tb1qexternal"])
+
+        assert len(utxos) == 1
+        assert utxos[0].txid == "aa" * 32
+        assert utxos[0].address == "tb1qexternal"
+        assert utxos[0].confirmations == 0
+
+    @pytest.mark.asyncio
+    async def test_get_utxos_fallback_detects_mempool_external_utxo(
+        self, mock_backend: DescriptorWalletBackend
+    ):
+        """Fallback should also detect unconfirmed outputs in mempool txs."""
+        backend = mock_backend
+
+        async def mock_rpc(method, params=None, client=None, use_wallet=True):
+            if method == "getblockchaininfo":
+                return {"blocks": 1000}
+            if method == "listunspent":
+                return []
+            if method == "scantxoutset":
+                return {"unspents": []}
+            if method == "getrawmempool":
+                return ["ff" * 32]
+            if method == "getrawtransaction":
+                return {
+                    "txid": "ff" * 32,
+                    "vout": [
+                        {
+                            "n": 0,
+                            "value": 0.0003,
+                            "scriptPubKey": {
+                                "hex": "0020" + "22" * 32,
+                                "address": "tb1qexternal",
+                            },
+                        }
+                    ],
+                }
+            raise ValueError(f"Unexpected method: {method}")
+
+        backend._rpc_call = mock_rpc
+        utxos = await backend.get_utxos(["tb1qexternal"])
+
+        assert len(utxos) == 1
+        assert utxos[0].txid == "ff" * 32
+        assert utxos[0].confirmations == 0
+        assert utxos[0].address == "tb1qexternal"
+
+    @pytest.mark.asyncio
     async def test_get_utxos_no_filter(self, mock_backend: DescriptorWalletBackend):
         """Test that get_utxos returns all UTXOs when no addresses provided.
 

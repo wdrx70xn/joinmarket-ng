@@ -902,12 +902,80 @@ class DescriptorWalletBackend(BlockchainBackend):
                 )
                 utxos.append(utxo)
 
+            # For external (non-wallet) addresses, listunspent returns nothing.
+            # Swap lockup detection needs fast visibility of newly-broadcast lockups,
+            # so for small explicit address sets we do a mempool-only fallback.
+            #
+            # NOTE: We intentionally avoid scantxoutset here because on real nodes
+            # it can take many seconds/minutes, which is too slow for per-poll
+            # lockup detection in the swap flow.
+            if addresses and len(utxos) == 0 and len(addresses) <= 5:
+                fallback_utxos = await self._scan_external_address_mempool_utxos(addresses)
+                if fallback_utxos:
+                    logger.debug(
+                        f"Found {len(fallback_utxos)} external-address UTXOs via fallback scan"
+                    )
+                    return fallback_utxos
+
             logger.debug(f"Found {len(utxos)} UTXOs via listunspent")
             return utxos
 
         except Exception as e:
             logger.error(f"Failed to get UTXOs via listunspent: {e}")
             return []
+
+    async def _scan_external_address_mempool_utxos(
+        self,
+        addresses: list[str],
+    ) -> list[UTXO]:
+        """Find unconfirmed UTXOs for non-wallet addresses from mempool.
+
+        This is used as a narrow fallback when ``listunspent`` returns no rows
+        for a small explicit address set (typically swap lockup detection).
+        """
+        utxos: list[UTXO] = []
+        seen: set[tuple[str, int]] = set()
+        address_set = set(addresses)
+
+        # Unconfirmed UTXOs in mempool
+        try:
+            mempool = await self._rpc_call("getrawmempool", [False], use_wallet=False)
+            txids = mempool if isinstance(mempool, list) else []
+            for txid in txids:
+                tx = await self._rpc_call("getrawtransaction", [txid, True], use_wallet=False)
+                if not tx:
+                    continue
+                for vout in tx.get("vout", []):
+                    n = int(vout.get("n", 0))
+                    key = (txid, n)
+                    if key in seen:
+                        continue
+
+                    spk = vout.get("scriptPubKey", {})
+                    addr = spk.get("address")
+                    if not addr:
+                        addrs = spk.get("addresses", [])
+                        if isinstance(addrs, list) and addrs:
+                            addr = addrs[0]
+                    if not addr or addr not in address_set:
+                        continue
+
+                    seen.add(key)
+                    utxos.append(
+                        UTXO(
+                            txid=txid,
+                            vout=n,
+                            value=btc_to_sats(vout.get("value", 0)),
+                            address=addr,
+                            confirmations=0,
+                            scriptpubkey=spk.get("hex", ""),
+                            height=None,
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"External-address mempool fallback failed: {e}")
+
+        return utxos
 
     async def get_all_utxos(self) -> list[UTXO]:
         """

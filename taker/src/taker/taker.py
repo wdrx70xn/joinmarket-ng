@@ -395,6 +395,18 @@ class Taker(TakerMonitoringMixin):
         try:
             n_makers = counterparty_count or self.config.counterparty_count
 
+            if self.config.swap_input.enabled and not self.backend.has_mempool_access():
+                logger.error(
+                    "Swap input requires mempool-aware backend for lockup detection, "
+                    "but current backend has no mempool access"
+                )
+                logger.error(
+                    "Disable swap_input or use a full-node backend "
+                    "(bitcoin_core/descriptor_wallet/scantxoutset)"
+                )
+                self.state = TakerState.FAILED
+                return None
+
             # Determine destination address
             if destination == "INTERNAL":
                 dest_mixdepth = (mixdepth + 1) % self.wallet.mixdepth_count
@@ -1151,6 +1163,8 @@ class Taker(TakerMonitoringMixin):
 
             # Calculate total input value (taker + maker UTXOs)
             taker_input_value = sum(utxo.value for utxo in self.selected_utxos)
+            if self.swap_input is not None:
+                taker_input_value += self.swap_input.value
             maker_input_value = sum(
                 utxo["value"] for session in self.maker_sessions.values() for utxo in session.utxos
             )
