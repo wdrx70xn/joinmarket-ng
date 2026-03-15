@@ -105,7 +105,7 @@ def build_taker_config(
     bondless_require_zero_fee: bool | None = None,
     # Swap input options
     swap_input: bool | None = None,
-    swap_provider_pubkey: str | None = None,
+    swap_provider_offer_id: str | None = None,
 ) -> TakerConfig:
     """
     Build TakerConfig from unified settings with CLI overrides.
@@ -220,10 +220,10 @@ def build_taker_config(
         swap_config_kwargs["enabled"] = swap_input
     elif hasattr(settings, "swap") and hasattr(settings.swap, "enabled"):
         swap_config_kwargs["enabled"] = settings.swap.enabled
-    if swap_provider_pubkey is not None:
-        swap_config_kwargs["provider_pubkey"] = swap_provider_pubkey
-    elif hasattr(settings, "swap") and hasattr(settings.swap, "provider_pubkey"):
-        swap_config_kwargs["provider_pubkey"] = settings.swap.provider_pubkey
+    if swap_provider_offer_id is not None:
+        swap_config_kwargs["provider_offer_id"] = swap_provider_offer_id
+    elif hasattr(settings, "swap") and hasattr(settings.swap, "provider_offer_id"):
+        swap_config_kwargs["provider_offer_id"] = settings.swap.provider_offer_id
     # Pull remaining swap settings from config file if available
     if hasattr(settings, "swap"):
         swap_settings = settings.swap
@@ -454,12 +454,12 @@ def coinjoin(
             help="Acquire swap UTXO to hide taker role (fee/change balancing)",
         ),
     ] = None,
-    swap_provider_pubkey: Annotated[
+    swap_provider_offer_id: Annotated[
         str | None,
         typer.Option(
-            "--swap-provider-pubkey",
-            envvar="SWAP_PROVIDER_PUBKEY",
-            help="Preferred Nostr swap provider pubkey",
+            "--swap-provider-offer-id",
+            envvar="SWAP_PROVIDER_OFFER_ID",
+            help="Preferred Nostr swap offer id",
         ),
     ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")] = False,
@@ -520,7 +520,7 @@ def coinjoin(
             bond_value_exponent=bond_value_exponent,
             bondless_require_zero_fee=bondless_require_zero_fee,
             swap_input=swap_input,
-            swap_provider_pubkey=swap_provider_pubkey,
+            swap_provider_offer_id=swap_provider_offer_id,
         )
     except ValueError as e:
         logger.error(str(e))
@@ -532,8 +532,10 @@ def coinjoin(
     logger.info(f"Tor SOCKS: {config.socks_host}:{config.socks_port}")
     if config.swap_input.enabled:
         provider_suffix = ""
-        if config.swap_input.provider_pubkey:
-            provider_suffix = f" (preferred pubkey: {config.swap_input.provider_pubkey[:16]}...)"
+        if config.swap_input.provider_offer_id:
+            provider_suffix = (
+                f" (preferred offer id: {config.swap_input.provider_offer_id[:16]}...)"
+            )
         logger.info(f"Swap input: ENABLED (Nostr discovery){provider_suffix}")
 
     try:

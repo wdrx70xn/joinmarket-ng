@@ -86,7 +86,7 @@ def _compute_pow_bits(pubkey_hex: str, nonce_hex: str) -> int:
     return bits
 
 
-def _parse_offer_content(content: str, pubkey: str) -> SwapProvider | None:
+def _parse_offer_content(content: str, pubkey: str, offer_id: str) -> SwapProvider | None:
     """Parse a swap provider offer from Nostr event content.
 
     Args:
@@ -108,6 +108,7 @@ def _parse_offer_content(content: str, pubkey: str) -> SwapProvider | None:
         pow_bits = _compute_pow_bits(pubkey, pow_nonce) if pow_nonce else 0
 
         return SwapProvider(
+            offer_id=offer_id,
             pubkey=pubkey,
             percentage_fee=float(data.get("percentage_fee", 0.5)),
             mining_fee=int(data.get("mining_fee", 1500)),
@@ -311,6 +312,7 @@ class NostrSwapDiscovery:
                                     provider = _parse_offer_content(
                                         event.get("content", ""),
                                         event.get("pubkey", ""),
+                                        event.get("id", ""),
                                     )
                                     if provider:
                                         providers.append(provider)

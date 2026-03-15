@@ -35,6 +35,7 @@ class SwapProvider(BaseModel):
     """
 
     # Identity
+    offer_id: str = Field(description="Nostr offer event id (hex)")
     pubkey: str = Field(description="Provider's Nostr public key (hex)")
 
     # Terms

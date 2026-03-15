@@ -57,7 +57,7 @@ class SwapClient:
     def __init__(
         self,
         # Provider selection
-        preferred_provider_pubkey: str | None = None,
+        preferred_offer_id: str | None = None,
         nostr_relays: list[str] | None = None,
         # Network
         network: str = "mainnet",
@@ -77,7 +77,7 @@ class SwapClient:
         """Initialize the swap client.
 
         Args:
-            preferred_provider_pubkey: Preferred provider pubkey from Nostr discovery.
+            preferred_offer_id: Preferred offer event id from Nostr discovery.
             nostr_relays: Nostr relay URLs for provider discovery.
             network: Bitcoin network name.
             socks_host: SOCKS5 proxy host for Tor.
@@ -91,7 +91,7 @@ class SwapClient:
                 When provided, lockup detection is fully trustless — the client
                 watches its own node instead of asking the swap provider.
         """
-        self.preferred_provider_pubkey = preferred_provider_pubkey
+        self.preferred_offer_id = preferred_offer_id
         self.nostr_relays = nostr_relays
         self.network = network
         self.socks_host = socks_host
@@ -180,7 +180,7 @@ class SwapClient:
         if self._provider is not None:
             provider = self._provider
             logger.debug(
-                f"Using pre-discovered provider: pubkey={provider.pubkey[:16]}..., "
+                f"Using pre-discovered provider: offer_id={provider.offer_id[:16]}..., "
                 f"min_amount={provider.min_amount:,}"
             )
         else:
@@ -416,7 +416,8 @@ class SwapClient:
 
                 top = ranked[:5]
                 summary = ", ".join(
-                    f"{p.pubkey} fee@{amount_for_ranking:,}={p.calculate_fee(amount_for_ranking):,}"
+                    f"id={p.offer_id} pubkey={p.pubkey} "
+                    f"fee@{amount_for_ranking:,}={p.calculate_fee(amount_for_ranking):,}"
                     for p in top
                 )
                 if top:
@@ -431,24 +432,27 @@ class SwapClient:
                         key=lambda p: (p.calculate_fee(amount_for_ranking), -p.pow_bits),
                     )
 
-                if self.preferred_provider_pubkey:
-                    preferred = self.preferred_provider_pubkey.lower()
-                    exact = [p for p in ranked if p.pubkey.lower() == preferred]
+                if self.preferred_offer_id:
+                    preferred = self.preferred_offer_id.lower()
+                    exact = [p for p in ranked if p.offer_id.lower() == preferred]
                     if exact:
                         selected = exact[0]
-                        logger.info(f"Selected preferred swap provider {selected.pubkey}")
+                        logger.info(
+                            f"Selected preferred swap offer {selected.offer_id} "
+                            f"(pubkey={selected.pubkey})"
+                        )
                         if attempt > 1:
                             logger.info(
                                 f"Swap provider discovered on attempt {attempt}/{max_attempts}"
                             )
                         return selected
 
-                    prefix_matches = [p for p in ranked if p.pubkey.lower().startswith(preferred)]
+                    prefix_matches = [p for p in ranked if p.offer_id.lower().startswith(preferred)]
                     if len(prefix_matches) == 1:
                         selected = prefix_matches[0]
                         logger.info(
-                            "Selected preferred swap provider by pubkey prefix "
-                            f"{preferred}: {selected.pubkey}"
+                            "Selected preferred swap offer by id prefix "
+                            f"{preferred}: {selected.offer_id} (pubkey={selected.pubkey})"
                         )
                         if attempt > 1:
                             logger.info(
@@ -457,14 +461,14 @@ class SwapClient:
                         return selected
 
                     if len(prefix_matches) > 1:
-                        matches = ", ".join(p.pubkey for p in prefix_matches[:5])
+                        matches = ", ".join(p.offer_id for p in prefix_matches[:5])
                         logger.warning(
-                            f"Preferred swap provider prefix is ambiguous, matches: {matches}"
+                            f"Preferred swap offer id prefix is ambiguous, matches: {matches}"
                         )
                     else:
                         logger.warning(
-                            "Preferred swap provider pubkey not found in current Nostr offers: "
-                            f"{self.preferred_provider_pubkey}"
+                            "Preferred swap offer id not found in current Nostr offers: "
+                            f"{self.preferred_offer_id}"
                         )
 
                 if attempt > 1:

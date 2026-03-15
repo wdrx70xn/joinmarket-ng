@@ -615,6 +615,7 @@ class TestSwapClientNostrRPC:
         from taker.swap.models import SwapProvider
 
         provider = SwapProvider(
+            offer_id="11" * 32,
             pubkey="aa" * 32,
             percentage_fee=0.5,
             mining_fee=150,
@@ -660,6 +661,7 @@ class TestSwapClientNostrRPC:
         from taker.swap.models import SwapProvider
 
         provider = SwapProvider(
+            offer_id="22" * 32,
             pubkey="cc" * 32,
             percentage_fee=0.5,
             mining_fee=150,

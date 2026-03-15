@@ -313,9 +313,9 @@
 # Enable swap input for CoinJoin fee/change balancing
 # enabled = false
 
-# Preferred swap provider pubkey (optional)
-# If set, taker will try to pick this provider from discovered Nostr offers
-# provider_pubkey = ""
+# Preferred swap offer id (optional)
+# If set, taker will try to pick this offer from discovered Nostr offers
+# provider_offer_id = ""
 
 # Nostr relay URLs for provider discovery (empty = use Electrum defaults)
 # nostr_relays = []

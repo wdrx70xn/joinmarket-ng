@@ -140,6 +140,7 @@ class TestSwapClientDiscoverProvider:
     @pytest.mark.asyncio
     async def test_discover_via_nostr(self) -> None:
         mock_provider = MagicMock(
+            offer_id="aa" * 32,
             pubkey="aabbccdd" * 8,
             percentage_fee=0.4,
             mining_fee=150,
@@ -164,6 +165,7 @@ class TestSwapClientDiscoverProvider:
     @pytest.mark.asyncio
     async def test_preferred_pubkey_selected(self) -> None:
         better_fee = MagicMock(
+            offer_id="11" * 32,
             pubkey="11" * 32,
             percentage_fee=0.2,
             mining_fee=100,
@@ -174,6 +176,7 @@ class TestSwapClientDiscoverProvider:
             calculate_fee=lambda amount: int(amount * 0.002) + 100,
         )
         preferred = MagicMock(
+            offer_id="22" * 32,
             pubkey="22" * 32,
             percentage_fee=0.5,
             mining_fee=150,
@@ -189,13 +192,14 @@ class TestSwapClientDiscoverProvider:
             mock_discovery.discover_providers = AsyncMock(return_value=[better_fee, preferred])
             mock_discovery_cls.return_value = mock_discovery
 
-            client = SwapClient(network="signet", preferred_provider_pubkey="22" * 32)
+            client = SwapClient(network="signet", preferred_offer_id="22" * 32)
             provider = await client.discover_provider(target_amount_sats=100_000)
             assert provider is preferred
 
     @pytest.mark.asyncio
-    async def test_preferred_pubkey_prefix_selected_when_unique(self) -> None:
+    async def test_preferred_offer_id_prefix_selected_when_unique(self) -> None:
         provider_a = MagicMock(
+            offer_id="8b7a324427723d113ad6314afa44d85f5e10e04e904d0df5a68fd4510932e03c",
             pubkey="8b7a324427723d113ad6314afa44d85f5e10e04e904d0df5a68fd4510932e03c",
             percentage_fee=0.5,
             mining_fee=150,
@@ -206,6 +210,7 @@ class TestSwapClientDiscoverProvider:
             calculate_fee=lambda amount: int(amount * 0.005) + 150,
         )
         provider_b = MagicMock(
+            offer_id="c70d7bc9de7e98280c039e6b741c075b66f3f56e4798e3d9c3b4c93dc0511f27",
             pubkey="c70d7bc9de7e98280c039e6b741c075b66f3f56e4798e3d9c3b4c93dc0511f27",
             percentage_fee=0.2,
             mining_fee=150,
@@ -221,7 +226,7 @@ class TestSwapClientDiscoverProvider:
             mock_discovery.discover_providers = AsyncMock(return_value=[provider_b, provider_a])
             mock_discovery_cls.return_value = mock_discovery
 
-            client = SwapClient(network="signet", preferred_provider_pubkey="8b7a324427723d11")
+            client = SwapClient(network="signet", preferred_offer_id="8b7a324427723d11")
             provider = await client.discover_provider(target_amount_sats=100_000)
             assert provider is provider_a
 

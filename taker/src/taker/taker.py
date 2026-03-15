@@ -698,7 +698,7 @@ class Taker(TakerMonitoringMixin):
                     estimated_swap_amount = total_fee + estimated_tx_fee + early_fake_fee
 
                     self._swap_client = SwapClient(
-                        preferred_provider_pubkey=self.config.swap_input.provider_pubkey or None,
+                        preferred_offer_id=self.config.swap_input.provider_offer_id or None,
                         nostr_relays=self.config.swap_input.nostr_relays or None,
                         network=(self.config.bitcoin_network or self.config.network).value,
                         socks_host=self.config.socks_host,
@@ -718,6 +718,7 @@ class Taker(TakerMonitoringMixin):
                     swap_fee = provider.calculate_fee(actual_swap_amount)
 
                     swap_provider_info = {
+                        "offer_id": provider.offer_id,
                         "provider_pubkey": provider.pubkey,
                         "provider_fee_pct": provider.percentage_fee,
                         "provider_mining_fee": provider.mining_fee,
@@ -730,6 +731,8 @@ class Taker(TakerMonitoringMixin):
 
                     logger.info(
                         f"Swap provider discovered: "
+                        f"offer_id={provider.offer_id}, "
+                        f"pubkey={provider.pubkey}, "
                         f"fee={provider.percentage_fee}% + {provider.mining_fee} sats, "
                         f"min_amount={provider.min_amount:,}"
                     )
@@ -2014,8 +2017,7 @@ class Taker(TakerMonitoringMixin):
                         from taker.swap.client import SwapClient
 
                         swap_client = SwapClient(
-                            preferred_provider_pubkey=self.config.swap_input.provider_pubkey
-                            or None,
+                            preferred_offer_id=self.config.swap_input.provider_offer_id or None,
                             nostr_relays=self.config.swap_input.nostr_relays or None,
                             network=(self.config.bitcoin_network or self.config.network).value,
                             socks_host=self.config.socks_host,

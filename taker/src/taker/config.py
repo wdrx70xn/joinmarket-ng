@@ -61,9 +61,9 @@ class SwapInputConfig(BaseModel):
         default=False,
         description="Enable swap input for CoinJoin fee/change balancing",
     )
-    provider_pubkey: str = Field(
+    provider_offer_id: str = Field(
         default="",
-        description="Preferred swap provider pubkey (optional, from Nostr offers)",
+        description="Preferred swap offer id (optional, from Nostr offers)",
     )
     nostr_relays: list[str] = Field(
         default_factory=list,
