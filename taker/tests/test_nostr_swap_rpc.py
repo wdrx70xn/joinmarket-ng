@@ -22,7 +22,7 @@ from taker.swap.nip04 import (
     nip04_decrypt,
     privkey_to_xonly_pubkey,
 )
-from taker.swap.nostr import NostrSwapRPC
+from taker.swap.nostr import NostrSwapRPC, _event_matches_network
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,6 +135,41 @@ class TestNostrSwapRPCInit:
 
         assert rpc1._privkey != rpc2._privkey
         assert rpc1._pubkey != rpc2._pubkey
+
+
+class TestEventNetworkFiltering:
+    """Tests for network tag filtering on Nostr offer events."""
+
+    @pytest.mark.parametrize(
+        ("tags", "network", "expected"),
+        [
+            ([], "mainnet", True),
+            ([], "signet", False),
+            ([["r", "net:mainnet"]], "mainnet", True),
+            ([["r", "net:mainnet"]], "signet", False),
+            ([["r", "net:signet"]], "signet", True),
+            ([["r", "net:signet"]], "mainnet", False),
+            ([["r", "wss://relay.example.com"]], "mainnet", True),
+            ([["r", "wss://relay.example.com"]], "signet", False),
+            (
+                [["r", "net:mainnet"], ["r", "net:signet"]],
+                "signet",
+                True,
+            ),
+            (
+                [["d", "electrum-swapserver-5"], ["r", "net:signet"]],
+                "mainnet",
+                False,
+            ),
+        ],
+    )
+    def test_event_matches_network(
+        self,
+        tags: list[list[str]],
+        network: str,
+        expected: bool,
+    ) -> None:
+        assert _event_matches_network(tags, network) is expected
 
 
 # ---------------------------------------------------------------------------

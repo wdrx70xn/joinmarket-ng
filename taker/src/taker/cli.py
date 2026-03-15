@@ -43,6 +43,37 @@ app = typer.Typer(
 )
 
 
+def _build_confirmation_additional_info(
+    maker_details: list[dict[str, Any]],
+    fee_rate: float | None,
+    mixdepth: int,
+    swap_info: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the confirmation details map shown to the user."""
+    from jmcore.confirmation import format_maker_summary
+
+    additional_info = format_maker_summary(maker_details, fee_rate=fee_rate)
+    additional_info["Source Mixdepth"] = mixdepth
+
+    if swap_info:
+        additional_info["Swap Provider Fee"] = (
+            f"{swap_info.get('provider_fee_pct', '?')}% "
+            f"+ {swap_info.get('provider_mining_fee', '?')} sats"
+        )
+        swap_fee = swap_info.get("swap_fee")
+        if isinstance(swap_fee, int):
+            additional_info["Swap Fee"] = f"{swap_fee:,} sats"
+        swap_amount = swap_info.get("actual_swap_amount", 0)
+        if swap_amount:
+            additional_info["Swap Amount"] = f"{swap_amount:,} sats"
+        if swap_info.get("padded"):
+            additional_info["Swap Padded"] = (
+                f"Yes (provider min: {swap_info.get('provider_min_amount', '?'):,} sats)"
+            )
+
+    return additional_info
+
+
 def build_taker_config(
     settings: JoinMarketSettings,
     mnemonic: str,
@@ -587,23 +618,14 @@ async def _run_coinjoin(
         swap_info: dict[str, Any] | None = None,
     ) -> bool:
         """Callback for user confirmation after maker selection."""
-        from jmcore.confirmation import confirm_transaction, format_maker_summary
+        from jmcore.confirmation import confirm_transaction
 
-        additional_info = format_maker_summary(maker_details, fee_rate=fee_rate)
-        additional_info["Source Mixdepth"] = mixdepth
-
-        if swap_info:
-            additional_info["Swap Provider Fee"] = (
-                f"{swap_info.get('provider_fee_pct', '?')}% "
-                f"+ {swap_info.get('provider_mining_fee', '?')} sats"
-            )
-            swap_amount = swap_info.get("actual_swap_amount", 0)
-            if swap_amount:
-                additional_info["Swap Amount"] = f"{swap_amount:,} sats"
-            if swap_info.get("padded"):
-                additional_info["Swap Padded"] = (
-                    f"Yes (provider min: {swap_info.get('provider_min_amount', '?'):,} sats)"
-                )
+        additional_info = _build_confirmation_additional_info(
+            maker_details=maker_details,
+            fee_rate=fee_rate,
+            mixdepth=mixdepth,
+            swap_info=swap_info,
+        )
 
         return confirm_transaction(
             operation="coinjoin",

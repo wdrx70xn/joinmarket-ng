@@ -117,6 +117,31 @@ def _parse_offer_content(content: str, pubkey: str) -> SwapProvider | None:
         return None
 
 
+def _event_matches_network(tags: list[Any], network: str) -> bool:
+    """Return True when the Nostr event is valid for the requested network.
+
+    Network is encoded in ``r`` tags as ``net:<network>`` (e.g. ``net:signet``).
+
+    Compatibility rule:
+    - If no network tags are present, treat as mainnet-only legacy behavior.
+    - Non-mainnet networks (signet/testnet/regtest) require an explicit match.
+    """
+    tag_networks: set[str] = set()
+    for tag in tags:
+        if not isinstance(tag, list) or len(tag) < 2:
+            continue
+        key = tag[0]
+        value = tag[1]
+        if key != "r" or not isinstance(value, str):
+            continue
+        if value.startswith("net:"):
+            tag_networks.add(value[4:])
+
+    if not tag_networks:
+        return network == "mainnet"
+    return network in tag_networks
+
+
 class NostrSwapDiscovery:
     """Discovers swap providers via Nostr relays.
 
@@ -170,10 +195,9 @@ class NostrSwapDiscovery:
         providers: dict[str, SwapProvider] = {}  # pubkey -> provider (dedup)
 
         now = int(time.time())
-        # Primary filter: match by d-tag only.  The #r network tag is a
-        # convention that not all implementations follow (e.g. the Electrum
-        # swapserver plugin does not tag events with r:net:<network>), so we
-        # omit it from the subscription and instead filter locally if needed.
+        # Primary filter: match by d-tag only. We enforce network tags locally
+        # to avoid accidentally selecting a provider for a different network.
+        # Untagged legacy offers are treated as mainnet-only.
         subscription_filter = {
             "kinds": [NOSTR_EVENT_KIND_OFFER],
             "limit": max_providers,
@@ -238,10 +262,7 @@ class NostrSwapDiscovery:
 
         async with aiohttp.ClientSession(connector=connector) as session:
             try:
-                async with session.ws_connect(
-                    relay_url,
-                    timeout=self.connection_timeout,
-                ) as ws:
+                async with session.ws_connect(relay_url) as ws:
                     # Send subscription request
                     req = json.dumps(["REQ", sub_id, subscription_filter])
                     await ws.send_str(req)
@@ -267,6 +288,10 @@ class NostrSwapDiscovery:
                             if isinstance(data, list):
                                 if data[0] == "EVENT" and len(data) >= 3:
                                     event = data[2]
+                                    if not _event_matches_network(
+                                        event.get("tags", []), self.network
+                                    ):
+                                        continue
                                     provider = _parse_offer_content(
                                         event.get("content", ""),
                                         event.get("pubkey", ""),
@@ -426,7 +451,7 @@ class NostrSwapRPC:
         sub_id = secrets.token_hex(16)
 
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.ws_connect(relay_url, timeout=self.connection_timeout) as ws:
+            async with session.ws_connect(relay_url) as ws:
                 # --- Step 2: subscribe for responses ---
                 sub_filter = {
                     "kinds": [NOSTR_EVENT_KIND_DM],
@@ -661,7 +686,7 @@ class HTTPSwapTransport:
                 async with session.post(
                     url,
                     json=params,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
+                    timeout=timeout,
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -701,7 +726,7 @@ class HTTPSwapTransport:
             try:
                 async with session.get(
                     url,
-                    timeout=aiohttp.ClientTimeout(total=timeout),
+                    timeout=timeout,
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
