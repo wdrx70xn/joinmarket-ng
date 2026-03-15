@@ -7,6 +7,7 @@ A clean, performant, and secure orderbook watcher for JoinMarket that aggregates
 -  **Tor Integration**: Connects to directory nodes via Tor for privacy
 -  **Multi-Directory Aggregation**: Fetches and combines orderbooks from multiple directory nodes
 -  **Web Interface**: Clean, modern UI with real-time updates
+-  **Swap Provider Discovery Page**: Browser-side Electrum swap offer discovery (mainnet/signet) over Nostr WebSockets
 -  **Advanced Filtering**: Filter by offer type, directory node, and counterparty
 -  **Directory Statistics**: See offer counts per directory node
 -  **Mempool.space Integration**: Validates fidelity bonds using mempool.space API
@@ -183,3 +184,19 @@ Returns the aggregated orderbook in JSON format:
 
 ### GET /health
 Health check endpoint
+
+### GET /swap-providers
+Standalone page that discovers Electrum Lightning swap provider offers directly from Nostr relays in the browser.
+No CDN dependencies are used; all HTML/CSS/JS assets are served locally from `/static/`.
+
+The page ships with Electrum's default relay set for plug-and-play discovery:
+
+- `wss://relay.getalby.com/v1`
+- `wss://nos.lol`
+- `wss://relay.damus.io`
+- `wss://brb.io`
+- `wss://relay.primal.net`
+- `wss://ftp.halifax.rwth-aachen.de/nostr`
+- `wss://eu.purplerelay.com`
+- `wss://nostr.einundzwanzig.space`
+- `wss://nostr.mom`
