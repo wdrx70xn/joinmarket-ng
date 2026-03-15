@@ -120,7 +120,7 @@ FROM python:${PYTHON_VERSION}-slim@${PYTHON_SLIM_DIGEST} AS jmwalletd
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini=0.19.0-3+b5 \
+    tini=0.19.0-3+b6 \
     libsodium23=1.0.18-1+deb13u1 \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /var/log/dpkg.log /var/log/apt/*.log /var/cache/ldconfig/aux-cache
