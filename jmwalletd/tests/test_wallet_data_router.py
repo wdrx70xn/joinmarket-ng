@@ -169,6 +169,30 @@ class TestNewAddress:
         data = resp.json()
         assert data["address"] == "bcrt1qnewaddr123"
 
+    def test_get_new_address_calls_wallet_service_each_time(
+        self, authed_client: tuple[TestClient, str]
+    ) -> None:
+        client, token = authed_client
+        state = get_daemon_state()
+        ws = state.wallet_service
+        ws.mixdepth_count = 5
+        ws.get_new_address = Mock(side_effect=["bcrt1qaddr1", "bcrt1qaddr2"])
+
+        resp1 = client.get(
+            "/api/v1/wallet/test_wallet.jmdat/address/new/0",
+            headers=_auth_headers(token),
+        )
+        resp2 = client.get(
+            "/api/v1/wallet/test_wallet.jmdat/address/new/0",
+            headers=_auth_headers(token),
+        )
+
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
+        assert resp1.json()["address"] == "bcrt1qaddr1"
+        assert resp2.json()["address"] == "bcrt1qaddr2"
+        assert ws.get_new_address.call_count == 2
+
     def test_invalid_mixdepth(self, authed_client: tuple[TestClient, str]) -> None:
         client, token = authed_client
         state = get_daemon_state()

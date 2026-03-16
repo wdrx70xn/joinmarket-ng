@@ -80,6 +80,9 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
         # These addresses have been shared with a taker but the CoinJoin hasn't
         # completed yet. They must not be reused until the session ends.
         self.reserved_addresses: set[str] = set()
+        # Track receive addresses that were already handed out via API/CLI.
+        # Even if they do not appear on-chain yet, we should not reissue them.
+        self.issued_receive_addresses: set[str] = set()
         # Cache for fidelity bond locktimes (address -> locktime)
         self.fidelity_bond_locktime_cache: dict[str, int] = {}
 
@@ -440,6 +443,15 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
                 if md == mixdepth and ch == change and idx > max_index:
                     max_index = idx
 
+        # Check receive addresses that were already issued to callers.
+        # This prevents repeated GET /address/new/{mixdepth} calls from
+        # returning the same address when no on-chain history exists yet.
+        for address in self.issued_receive_addresses:
+            if address in self.address_cache:
+                md, ch, idx = self.address_cache[address]
+                if md == mixdepth and ch == change and idx > max_index:
+                    max_index = idx
+
         return max_index + 1
 
     def reserve_addresses(self, addresses: set[str]) -> None:
@@ -467,7 +479,9 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
     def get_new_address(self, mixdepth: int) -> str:
         """Get next unused receive address for a mixdepth."""
         next_index = self.get_next_address_index(mixdepth, 0)
-        return self.get_receive_address(mixdepth, next_index)
+        address = self.get_receive_address(mixdepth, next_index)
+        self.issued_receive_addresses.add(address)
+        return address
 
     async def close(self) -> None:
         """Close backend connection"""

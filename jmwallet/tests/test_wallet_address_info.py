@@ -1035,3 +1035,43 @@ class TestAddressReservation:
         # Next external should be 1
         index = wallet.get_next_address_index(mixdepth=0, change=0)
         assert index == 1
+
+
+class TestIssuedReceiveAddresses:
+    """Tests for issued receive-address tracking."""
+
+    @pytest.fixture
+    def mock_backend(self):
+        backend = Mock()
+        backend.get_utxos = AsyncMock(return_value=[])
+        backend.close = AsyncMock()
+        return backend
+
+    @pytest.fixture
+    def wallet(self, mock_backend, test_mnemonic, test_network):
+        wallet = WalletService(
+            mnemonic=test_mnemonic,
+            backend=mock_backend,
+            network=test_network,
+            mixdepth_count=5,
+        )
+        wallet.utxo_cache = {i: [] for i in range(5)}
+        return wallet
+
+    def test_get_new_address_returns_unique_addresses(self, wallet):
+        """Repeated get_new_address() calls must not return the same address."""
+        first = wallet.get_new_address(0)
+        second = wallet.get_new_address(0)
+        third = wallet.get_new_address(0)
+
+        assert first != second
+        assert second != third
+        assert first != third
+
+    def test_issued_receive_addresses_advance_next_index(self, wallet):
+        """Issued receive addresses should be considered used for index selection."""
+        first = wallet.get_new_address(0)
+        assert first in wallet.issued_receive_addresses
+
+        next_index = wallet.get_next_address_index(mixdepth=0, change=0)
+        assert next_index == 1
