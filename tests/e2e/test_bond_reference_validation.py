@@ -11,7 +11,7 @@ from jmcore.crypto import bitcoin_message_hash_bytes
 import pytest
 
 
-pytestmark = pytest.mark.reference
+pytestmark = [pytest.mark.reference, pytest.mark.requires_jmclient]
 
 
 def _sign_message_bitcoin(private_key: PrivateKey, message: bytes) -> bytes:

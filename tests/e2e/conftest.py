@@ -61,13 +61,13 @@ def pytest_collection_modifyitems(
 
     1. Tests marked with e2e, reference, neutrino, or reference_maker are also
        automatically marked with 'docker', so they get excluded by default.
-    2. Tests marked with 'reference' that require the reference implementation
-       (joinmarket-clientserver) are deselected when jmclient is not importable.
+    2. Tests marked with 'requires_jmclient' are deselected when jmclient is
+       not importable.
        This prevents --fail-on-skip from converting expected skips into failures.
     """
     docker_marker = pytest.mark.docker
 
-    # Check if jmclient is importable (needed by reference-marked tests)
+    # Check if jmclient is importable (needed by tests marked requires_jmclient)
     jmclient_available = True
     try:
         import importlib
@@ -95,8 +95,8 @@ def pytest_collection_modifyitems(
         if item_markers & profile_markers and "docker" not in item_markers:
             item.add_marker(docker_marker)
 
-        # Deselect reference tests when jmclient is not available
-        if "reference" in item_markers and not jmclient_available:
+        # Deselect tests that explicitly require local jmclient source
+        if "requires_jmclient" in item_markers and not jmclient_available:
             deselected.append(item)
         else:
             selected.append(item)

@@ -376,21 +376,37 @@ main() {
     sleep 30
     restart_makers
 
-    COVERAGE_FILE=.coverage.reference run_test_suite "Reference Tests" \
+    # Match CI split: interop + legacy
+    COVERAGE_FILE=.coverage.reference_interop run_test_suite "Reference Interop Tests" \
         -lv -m reference \
         --timeout=300 --reruns=1 --reruns-delay=10 \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
         --cov-report=term-missing \
-        --cov-report=html:htmlcov/reference \
-        tests/
+        --cov-report=html:htmlcov/reference_interop \
+        tests/e2e/test_our_maker_reference_taker.py
 
-    # Coverage file already saved with correct name
-    if [ -f .coverage.reference ]; then
-        COVERAGE_FILES+=(".coverage.reference")
-        log_info "Saved reference test coverage"
+    if [ -f .coverage.reference_interop ]; then
+        COVERAGE_FILES+=(".coverage.reference_interop")
+        log_info "Saved reference interop coverage"
     else
-        log_warning "No .coverage file found for reference tests"
+        log_warning "No .coverage file found for reference interop tests"
+    fi
+
+    COVERAGE_FILE=.coverage.reference_legacy run_test_suite "Reference Legacy Tests" \
+        -lv -m reference \
+        --timeout=300 --reruns=1 --reruns-delay=10 \
+        --cov=jmcore --cov=jmwallet --cov=directory_server \
+        --cov=orderbook_watcher --cov=maker --cov=taker \
+        --cov-report=term-missing \
+        --cov-report=html:htmlcov/reference_legacy \
+        tests/e2e/test_reference_coinjoin.py tests/e2e/test_reference_bond_import.py
+
+    if [ -f .coverage.reference_legacy ]; then
+        COVERAGE_FILES+=(".coverage.reference_legacy")
+        log_info "Saved reference legacy coverage"
+    else
+        log_warning "No .coverage file found for reference legacy tests"
     fi
 
     echo
@@ -547,7 +563,8 @@ main() {
         echo "  ✓ Unit Tests"
         echo "  ✓ E2E Tests"
         echo "  ✓ Docker Integration Tests"
-        echo "  ✓ Reference Compatibility Tests"
+        echo "  ✓ Reference Interop Tests"
+        echo "  ✓ Reference Legacy Tests"
         echo "  ✓ Reference Maker Tests"
         echo "  ✓ Neutrino Basic Tests"
         echo "  ✓ Neutrino CoinJoin Tests"
