@@ -80,7 +80,7 @@ def pytest_collection_modifyitems(
         if ref_path not in sys.path:
             sys.path.insert(0, ref_path)
         importlib.import_module("jmclient.fidelity_bond")
-    except (ImportError, ModuleNotFoundError):
+    except Exception:
         jmclient_available = False
 
     selected: list[pytest.Item] = []

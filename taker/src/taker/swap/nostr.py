@@ -27,6 +27,7 @@ import json
 import secrets
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 from jmcore.tor_isolation import (
@@ -159,6 +160,17 @@ def _proxy_connector_from_isolated_url(proxy_url: str) -> aiohttp.TCPConnector:
     return ProxyConnector.from_url(normalized.url, rdns=normalized.rdns)
 
 
+def _should_use_proxy_for_url(url: str) -> bool:
+    """Return whether a URL should go through Tor SOCKS proxy.
+
+    Local relay/service URLs used in tests (localhost/127.0.0.1/::1) must bypass
+    Tor; routing them through SOCKS typically fails and breaks local e2e flows.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return host not in {"localhost", "127.0.0.1", "::1"}
+
+
 class NostrSwapDiscovery:
     """Discovers swap providers via Nostr relays.
 
@@ -263,7 +275,7 @@ class NostrSwapDiscovery:
         sub_id = secrets.token_hex(16)
 
         proxy = None
-        if self.socks_host:
+        if self.socks_host and _should_use_proxy_for_url(relay_url):
             proxy = build_isolated_proxy_url(
                 self.socks_host,
                 self.socks_port,
@@ -435,9 +447,9 @@ class NostrSwapRPC:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_connector(self) -> aiohttp.TCPConnector | None:
+    def _build_connector(self, relay_url: str) -> aiohttp.TCPConnector | None:
         """Build an aiohttp connector, optionally with Tor SOCKS5 proxy."""
-        if not self.socks_host:
+        if not self.socks_host or not _should_use_proxy_for_url(relay_url):
             return None
         try:
             proxy_url = build_isolated_proxy_url(
@@ -465,7 +477,7 @@ class NostrSwapRPC:
         4. Send NIP-04 encrypted request.
         5. Wait for matching response (``reply_to``).
         """
-        connector = self._build_connector()
+        connector = self._build_connector(relay_url)
         sub_id = secrets.token_hex(16)
 
         async with aiohttp.ClientSession(connector=connector) as session:
@@ -686,7 +698,8 @@ class HTTPSwapTransport:
             ValueError: If provider returns an error.
         """
         connector = None
-        if self.socks_host:
+        url = f"{self.base_url}/{method}"
+        if self.socks_host and _should_use_proxy_for_url(url):
             try:
                 proxy_url = build_isolated_proxy_url(
                     self.socks_host,
@@ -696,8 +709,6 @@ class HTTPSwapTransport:
                 connector = _proxy_connector_from_isolated_url(proxy_url)
             except ImportError:
                 logger.warning("aiohttp_socks not installed, connecting without Tor")
-
-        url = f"{self.base_url}/{method}"
 
         async with aiohttp.ClientSession(connector=connector) as session:
             try:
@@ -727,7 +738,8 @@ class HTTPSwapTransport:
             Parsed pairs response with fees and limits.
         """
         connector = None
-        if self.socks_host:
+        url = f"{self.base_url}/getpairs"
+        if self.socks_host and _should_use_proxy_for_url(url):
             try:
                 proxy_url = build_isolated_proxy_url(
                     self.socks_host,
@@ -737,8 +749,6 @@ class HTTPSwapTransport:
                 connector = _proxy_connector_from_isolated_url(proxy_url)
             except ImportError:
                 pass
-
-        url = f"{self.base_url}/getpairs"
 
         async with aiohttp.ClientSession(connector=connector) as session:
             try:
@@ -775,6 +785,7 @@ class HTTPSwapTransport:
             fees = pair_data.get("fees", {})
             limits = pair_data.get("limits", {})
             return SwapProvider(
+                offer_id="http-provider",
                 pubkey="http-provider",
                 percentage_fee=float(fees.get("percentage", 0.5)),
                 mining_fee=int(
@@ -787,6 +798,7 @@ class HTTPSwapTransport:
         else:
             # Direct Electrum format
             return SwapProvider(
+                offer_id="http-provider",
                 pubkey="http-provider",
                 percentage_fee=float(pairs_data.get("percentage_fee", 0.5)),
                 mining_fee=int(pairs_data.get("mining_fee", 1500)),

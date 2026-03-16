@@ -48,6 +48,7 @@ class TestSwapProvider:
     @pytest.fixture
     def provider(self) -> SwapProvider:
         return SwapProvider(
+            offer_id="b" * 64,
             pubkey="a" * 64,
             percentage_fee=0.5,
             mining_fee=1500,

@@ -1153,8 +1153,9 @@ class Taker(TakerMonitoringMixin):
             # Final confirmation before broadcast
             # Calculate exact transaction details
             num_taker_inputs = len(self.selected_utxos)
+            swap_input_count = 1 if self.swap_input is not None else 0
             num_maker_inputs = sum(len(s.utxos) for s in self.maker_sessions.values())
-            total_inputs = num_taker_inputs + num_maker_inputs
+            total_inputs = num_taker_inputs + num_maker_inputs + swap_input_count
 
             # Parse transaction to count outputs and sum output values
             tx = deserialize_transaction(self.final_tx)
@@ -1193,10 +1194,10 @@ class Taker(TakerMonitoringMixin):
             logger.info(
                 f"  Makers: {', '.join(nick[:10] + '...' for nick in self.maker_sessions.keys())}"
             )
-            logger.info(
-                f"Transaction inputs:   {total_inputs} ({num_taker_inputs} yours, "
-                f"{num_maker_inputs} makers)"
-            )
+            input_breakdown = f"{num_taker_inputs} yours, {num_maker_inputs} makers"
+            if swap_input_count:
+                input_breakdown += ", 1 swap"
+            logger.info(f"Transaction inputs:   {total_inputs} ({input_breakdown})")
             logger.info(f"Transaction outputs:  {total_outputs}")
             logger.info(f"Maker fees:           {total_maker_fees:,} sats")
             logger.info(
@@ -2050,10 +2051,7 @@ class Taker(TakerMonitoringMixin):
                         desired_amount_sats=swap_needed,
                         current_block_height=current_height,
                         wait_for_lockup=True,
-                        lockup_timeout=min(
-                            self.config.swap_input.lockup_timeout,
-                            float(self.config.maker_timeout_sec),
-                        ),
+                        lockup_timeout=self.config.swap_input.lockup_timeout,
                     )
 
                     logger.info(
