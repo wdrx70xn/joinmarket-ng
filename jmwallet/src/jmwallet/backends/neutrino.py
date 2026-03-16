@@ -152,37 +152,40 @@ class NeutrinoBackend(BlockchainBackend):
             logger.error(f"Neutrino API call failed: {endpoint} - {e}")
             raise
 
-    async def _wait_for_rescan(self, timeout: float = 300.0, poll_interval: float = 2.0) -> None:
+    async def _wait_for_rescan(self, timeout: float = 300.0, poll_interval: float = 2.0) -> bool:
         """
         Wait until the neutrino daemon reports no rescan is in progress.
 
         Polls ``GET /v1/rescan/status`` every *poll_interval* seconds until
-        ``in_progress`` is False or *timeout* is exceeded.  Falls back
-        gracefully (logs a warning) when the endpoint is unavailable so that
-        older neutrino-api versions still work.
+        ``in_progress`` is False or *timeout* is exceeded.
 
         Args:
             timeout: Maximum seconds to wait (default 300 s / 5 min).
             poll_interval: Seconds between status polls (default 2 s).
+
+        Returns:
+            True if rescan completion was confirmed via status polling,
+            False if status could not be confirmed (timeout or endpoint error).
         """
         start = asyncio.get_event_loop().time()
         while True:
             try:
                 status = await self._api_call("GET", "v1/rescan/status")
                 if not status.get("in_progress", False):
-                    return
+                    return True
             except Exception as e:
-                # Endpoint not available (old server version or any error) – stop waiting
+                # Endpoint not available (old server version or any error) –
+                # do not assume completion.
                 if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 404:
                     logger.warning("GET /v1/rescan/status not available")
                 else:
                     logger.warning(f"GET /v1/rescan/status failed ({e})")
-                return
+                return False
 
             elapsed = asyncio.get_event_loop().time() - start
             if elapsed >= timeout:
                 logger.warning(f"Rescan did not complete within {timeout:.0f}s; proceeding anyway")
-                return
+                return False
 
             await asyncio.sleep(poll_interval)
 
@@ -318,12 +321,18 @@ class NeutrinoBackend(BlockchainBackend):
                     },
                 )
                 # Wait for rescan to complete by polling /v1/rescan/status
-                await self._wait_for_rescan()
-                self._initial_rescan_done = True
-                self._last_rescan_height = current_height
-                self._rescan_in_progress = False
-                self._just_rescanned = True
-                logger.info("Initial blockchain rescan completed")
+                completed = await self._wait_for_rescan()
+                if completed:
+                    self._initial_rescan_done = True
+                    self._last_rescan_height = current_height
+                    self._rescan_in_progress = False
+                    self._just_rescanned = True
+                    logger.info("Initial blockchain rescan completed")
+                else:
+                    logger.warning(
+                        "Initial rescan completion could not be confirmed; will retry on next sync"
+                    )
+                    self._rescan_in_progress = False
             except Exception as e:
                 logger.warning(f"Initial rescan failed (will retry on next sync): {e}")
                 self._rescan_in_progress = False
@@ -355,14 +364,22 @@ class NeutrinoBackend(BlockchainBackend):
                 # 1. Match block filters
                 # 2. Download full blocks that match
                 # 3. Extract and index UTXOs
-                await self._wait_for_rescan()
+                completed = await self._wait_for_rescan()
 
-                self._last_rescan_height = current_height
-                self._rescan_in_progress = False
-                self._just_rescanned = True
-                logger.info(
-                    f"Incremental rescan completed from block {start_height} to {current_height}"
-                )
+                if completed:
+                    self._last_rescan_height = current_height
+                    self._rescan_in_progress = False
+                    self._just_rescanned = True
+                    logger.info(
+                        "Incremental rescan completed from block "
+                        f"{start_height} to {current_height}"
+                    )
+                else:
+                    logger.warning(
+                        "Incremental rescan completion could not be confirmed; "
+                        "will retry from previous height"
+                    )
+                    self._rescan_in_progress = False
             except Exception as e:
                 logger.warning(f"Incremental rescan failed: {e}")
                 self._rescan_in_progress = False

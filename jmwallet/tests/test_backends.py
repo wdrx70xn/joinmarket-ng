@@ -322,9 +322,10 @@ class TestNeutrinoBackend:
         backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
         backend._api_call = AsyncMock(return_value={"in_progress": False})
 
-        await backend._wait_for_rescan()
+        completed = await backend._wait_for_rescan()
 
         backend._api_call.assert_called_once_with("GET", "v1/rescan/status")
+        assert completed is True
         await backend.close()
 
     @pytest.mark.asyncio
@@ -355,10 +356,51 @@ class TestNeutrinoBackend:
         backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
         backend._api_call = AsyncMock(side_effect=Exception("endpoint not found"))
 
-        # Should not raise, just return
-        await backend._wait_for_rescan()
+        # Should not raise, and should report unconfirmed completion
+        completed = await backend._wait_for_rescan()
 
         backend._api_call.assert_called_once()
+        assert completed is False
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_get_utxos_retries_initial_rescan_when_status_unavailable(self):
+        """Initial rescan should retry if completion cannot be confirmed."""
+        from unittest.mock import AsyncMock, call, patch
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="signet")
+        backend.get_block_height = AsyncMock(return_value=100)
+        backend._api_call = AsyncMock(return_value={"utxos": []})
+
+        with patch.object(backend, "_wait_for_rescan", new_callable=AsyncMock) as mock_wait:
+            mock_wait.return_value = False
+            await backend.get_utxos(["tb1qtest123"])
+            await backend.get_utxos(["tb1qtest123"])
+
+        assert backend._initial_rescan_done is False
+        rescan_call = call(
+            "POST",
+            "v1/rescan",
+            data={"addresses": ["tb1qtest123"], "start_height": 0},
+        )
+        assert backend._api_call.call_args_list.count(rescan_call) == 2
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_get_utxos_marks_initial_rescan_done_when_confirmed(self):
+        """Initial rescan state should persist in-process after confirmed completion."""
+        from unittest.mock import AsyncMock, patch
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="signet")
+        backend.get_block_height = AsyncMock(return_value=321)
+        backend._api_call = AsyncMock(return_value={"utxos": []})
+
+        with patch.object(backend, "_wait_for_rescan", new_callable=AsyncMock) as mock_wait:
+            mock_wait.return_value = True
+            await backend.get_utxos(["tb1qtest123"])
+
+        assert backend._initial_rescan_done is True
+        assert backend._last_rescan_height == 321
         await backend.close()
 
     @pytest.mark.asyncio
