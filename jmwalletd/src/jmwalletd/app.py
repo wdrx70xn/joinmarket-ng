@@ -36,6 +36,11 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
         title="JoinMarket wallet daemon",
         description="JAM-compatible HTTP/WebSocket API for JoinMarket-NG",
         version="0.17.0",
+        swagger_ui_init_oauth={
+            "clientId": "jmwalletd-local",
+            "appName": "JoinMarket Wallet Daemon",
+            "usePkceWithAuthorizationCodeGrant": False,
+        },
     )
 
     # ------------------------------------------------------------------
@@ -110,6 +115,20 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
     app.include_router(ws_router, prefix="/api/v1/ws")
 
     # ------------------------------------------------------------------
+    # CORS preflight handler for root (matching reference).
+    # Registered before SPA catch-all so GET / can be served by JAM.
+    # ------------------------------------------------------------------
+    @app.options("/")
+    async def cors_preflight() -> JSONResponse:
+        return JSONResponse(
+            content={},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST",
+            },
+        )
+
+    # ------------------------------------------------------------------
     # Serve JAM static files (if present).
     # ------------------------------------------------------------------
     # Look in data_dir/jam, system path, or Flatpak prefix /app
@@ -143,25 +162,24 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
 
             full_path = request.path_params.get("full_path", "")
             path_obj = static_dir / full_path
-            if full_path and path_obj.exists() and path_obj.is_file():
-                return FileResponse(path_obj)
+            if full_path:
+                try:
+                    resolved_path = path_obj.resolve(strict=False)
+                    static_root = static_dir.resolve(strict=True)
+                    if (
+                        resolved_path != static_root
+                        and static_root in resolved_path.parents
+                        and resolved_path.exists()
+                        and resolved_path.is_file()
+                    ):
+                        return FileResponse(resolved_path)
+                except OSError:
+                    # Invalid path input should fall back to index.html
+                    pass
             return FileResponse(static_dir / "index.html")
 
         app.router.routes.append(
             Route("/{full_path:path}", endpoint=serve_spa, methods=["GET", "HEAD"])
-        )
-
-    # ------------------------------------------------------------------
-    # CORS preflight handler for root (matching reference).
-    # ------------------------------------------------------------------
-    @app.options("/")
-    async def cors_preflight() -> JSONResponse:
-        return JSONResponse(
-            content={},
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST",
-            },
         )
 
     logger.info("jmwalletd app created (data_dir={})", state.data_dir)

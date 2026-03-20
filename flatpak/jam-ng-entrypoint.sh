@@ -361,6 +361,7 @@ export TOR__CONTROL_PORT="${TOR_CONTROL_PORT}"
 export TOR__COOKIE_PATH="${TOR_DATA_DIR}/control_auth_cookie"
 export BITCOIN__BACKEND_TYPE="${BITCOIN__BACKEND_TYPE:-neutrino}"
 export BITCOIN__NEUTRINO_URL="http://127.0.0.1:${NEUTRINO_PORT}"
+export JMWALLETD_NO_TLS="${JMWALLETD_NO_TLS:-false}"
 export NETWORK_CONFIG__NETWORK="${NETWORK}"
 export NETWORK_CONFIG__BITCOIN_NETWORK="${NETWORK}"
 export JMWALLETD_PORT="${JMWALLETD_PORT}"
@@ -431,6 +432,26 @@ except Exception:
     pass
 " 2>/dev/null || true)
 
+    # Read optional add-peers list (preferred peers while still allowing discovery).
+    local add_peers
+    add_peers=$(python3 -c "
+import sys
+try:
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+    with open('${CONFIG_FILE}', 'rb') as f:
+        config = tomllib.load(f)
+    peers = config.get('bitcoin', {}).get('neutrino_add_peers', [])
+    if isinstance(peers, list):
+        print(','.join(peers))
+    elif peers:
+        print(peers)
+except Exception:
+    pass
+" 2>/dev/null || true)
+
     log "Starting neutrino-api light client..."
     NETWORK="${NETWORK}" \
     LISTEN_ADDR="127.0.0.1:${NEUTRINO_PORT}" \
@@ -438,6 +459,7 @@ except Exception:
     LOG_LEVEL="${NEUTRINO_LOG_LEVEL:-info}" \
     TOR_PROXY="127.0.0.1:${TOR_SOCKS_PORT}" \
     CONNECT_PEERS="${connect_peers}" \
+    ADD_PEERS="${add_peers}" \
     neutrinod > "${LOG_DIR}/neutrino.log" 2>&1 &
     local pid=$!
     PIDS+=("$pid")
@@ -478,7 +500,11 @@ start_jmwalletd() {
     export BITCOIN__BACKEND_TYPE="${BITCOIN__BACKEND_TYPE:-neutrino}"
     export BITCOIN__NEUTRINO_URL="${BITCOIN__NEUTRINO_URL:-http://127.0.0.1:${NEUTRINO_PORT}}"
 
-    jmwalletd --no-tls --port "${JMWALLETD_PORT}" > "${LOG_DIR}/jmwalletd.log" 2>&1 &
+    if [ "${JMWALLETD_NO_TLS:-false}" = "true" ]; then
+        jmwalletd --no-tls --port "${JMWALLETD_PORT}" > "${LOG_DIR}/jmwalletd.log" 2>&1 &
+    else
+        jmwalletd --port "${JMWALLETD_PORT}" > "${LOG_DIR}/jmwalletd.log" 2>&1 &
+    fi
     local pid=$!
     PIDS+=("$pid")
     CRITICAL_PIDS+=("$pid")
@@ -488,7 +514,11 @@ start_jmwalletd() {
 }
 
 open_browser() {
-    local url="http://127.0.0.1:${JMWALLETD_PORT}"
+    local scheme="https"
+    if [ "${JMWALLETD_NO_TLS:-false}" = "true" ]; then
+        scheme="http"
+    fi
+    local url="${scheme}://127.0.0.1:${JMWALLETD_PORT}"
     log "Opening JAM web UI at ${url}"
     # Use xdg-open via the Flatpak portal
     xdg-open "${url}" 2>/dev/null || log "Could not open browser. Navigate to ${url} manually."
@@ -574,7 +604,11 @@ main() {
         open_browser
     fi
 
-    log "All services running. JAM UI: http://127.0.0.1:${JMWALLETD_PORT}"
+    local ui_scheme="https"
+    if [ "${JMWALLETD_NO_TLS:-false}" = "true" ]; then
+        ui_scheme="http"
+    fi
+    log "All services running. JAM UI: ${ui_scheme}://127.0.0.1:${JMWALLETD_PORT}"
     log "Logs: ${LOG_DIR}/"
     log "Config: ${CONFIG_FILE}"
 

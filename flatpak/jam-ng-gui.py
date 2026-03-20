@@ -36,6 +36,8 @@ LOG_DIR = DATA_DIR / "logs"
 JMWALLETD_PORT = os.environ.get("JMWALLETD_PORT", "28183")
 NETWORK = os.environ.get("NETWORK", "mainnet")
 PIDFILE_DIR = DATA_DIR / "run"
+NO_TLS = os.environ.get("JMWALLETD_NO_TLS", "false").lower() == "true"
+JMWALLETD_SCHEME = "http" if NO_TLS else "https"
 
 ENTRYPOINT_PID = os.getppid()
 
@@ -430,7 +432,7 @@ class JamNGPanel(Gtk.Window):
         net_bar.pack_start(restart_btn, False, False, 0)
 
         # URL on the right
-        url_label = Gtk.Label(label=f"http://127.0.0.1:{JMWALLETD_PORT}")
+        url_label = Gtk.Label(label=f"{JMWALLETD_SCHEME}://127.0.0.1:{JMWALLETD_PORT}")
         url_label.set_opacity(0.4)
         net_bar.pack_end(url_label, False, False, 0)
 
@@ -486,7 +488,7 @@ class JamNGPanel(Gtk.Window):
     # ---- Actions ------------------------------------------------------------
 
     def _on_open_browser(self, _w: Any = None) -> None:
-        url = f"http://127.0.0.1:{JMWALLETD_PORT}"
+        url = f"{JMWALLETD_SCHEME}://127.0.0.1:{JMWALLETD_PORT}"
         try:
             subprocess.Popen(
                 ["xdg-open", url],

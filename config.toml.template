@@ -64,6 +64,13 @@
 #   "your-filter-peer:38333",
 # ]
 
+# Additional preferred neutrino peers (host:port) that should be tried first
+# while still allowing DNS/discovery peers. Unlike neutrino_connect_peers,
+# this does not disable broader peer discovery.
+# neutrino_add_peers = [
+#   "another-peer:38333",
+# ]
+
 # ============================================================================
 # Network Settings
 # ============================================================================
@@ -339,8 +346,8 @@
 # update_interval = 60
 
 # Mempool API settings
-# mempool_api_url = "http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion/api"
-# mempool_web_url = "https://mempool.sgn.space"
+# mempool_api_url = ""  # Disabled by default for privacy (no external API calls)
+# mempool_web_url = ""  # Optional explorer URL for UI links
 
 # Connection settings
 # max_message_size = 2097152   # 2MB

@@ -102,7 +102,7 @@ All configuration is done via environment variables or config file (`~/.joinmark
 | `NETWORK__DIRECTORY_SERVERS` | JSON array of directory servers (e.g., `["host1:port1", "host2:port2"]`) | (required) |
 | `TOR__SOCKS_HOST` | Tor SOCKS proxy host | 127.0.0.1 |
 | `TOR__SOCKS_PORT` | Tor SOCKS proxy port | 9050 |
-| `ORDERBOOK_WATCHER__MEMPOOL_API_URL` | Mempool.space API base URL | http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion/api |
+| `ORDERBOOK_WATCHER__MEMPOOL_API_URL` | Mempool.space API base URL | disabled by default (set explicitly to enable) |
 | `ORDERBOOK_WATCHER__MEMPOOL_WEB_URL` | Base URL for transaction links (optional) | https://mempool.sgn.space |
 | `ORDERBOOK_WATCHER__MEMPOOL_WEB_ONION_URL` | Onion base URL for transaction links (optional) | http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion |
 | `ORDERBOOK_WATCHER__HTTP_HOST` | HTTP server bind address | 0.0.0.0 |

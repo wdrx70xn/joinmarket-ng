@@ -179,6 +179,14 @@ class BitcoinSettings(BaseModel):
             "Leave empty to rely on DNS seeds."
         ),
     )
+    neutrino_add_peers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Preferred peer addresses for neutrino (host:port) while still allowing "
+            "DNS/discovery peers. Unlike neutrino_connect_peers, this does not restrict "
+            "connections to only the listed peers."
+        ),
+    )
 
 
 class NetworkSettings(BaseModel):
@@ -829,6 +837,10 @@ class JoinMarketSettings(BaseSettings):
     def get_neutrino_connect_peers(self) -> list[str]:
         """Get the configured neutrino connect peers."""
         return self.bitcoin.neutrino_connect_peers
+
+    def get_neutrino_add_peers(self) -> list[str]:
+        """Get the configured neutrino add peers."""
+        return self.bitcoin.neutrino_add_peers
 
 
 class TomlConfigSettingsSource(PydanticBaseSettingsSource):

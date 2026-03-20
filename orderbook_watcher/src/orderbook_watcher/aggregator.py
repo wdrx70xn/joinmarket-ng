@@ -183,13 +183,17 @@ class OrderbookAggregator:
             self._hc_password = hc_c.password
         else:
             socks_proxy = f"socks5h://{socks_host}:{socks_port}"
-        logger.info(f"Configuring MempoolAPI with SOCKS proxy: {socks_proxy}")
-        mempool_timeout = 60.0
-        self.mempool_api = MempoolAPI(
-            base_url=mempool_api_url, socks_proxy=socks_proxy, timeout=mempool_timeout
-        )
-
-        self._socks_test_task = asyncio.create_task(self._test_socks_connection())
+        self.mempool_api: MempoolAPI | None = None
+        self._socks_test_task: asyncio.Task[Any] | None = None
+        if mempool_api_url:
+            logger.info(f"Configuring MempoolAPI with SOCKS proxy: {socks_proxy}")
+            mempool_timeout = 60.0
+            self.mempool_api = MempoolAPI(
+                base_url=mempool_api_url, socks_proxy=socks_proxy, timeout=mempool_timeout
+            )
+            self._socks_test_task = asyncio.create_task(self._test_socks_connection())
+        else:
+            logger.info("Mempool API disabled by configuration; external mempool lookups are off")
         self.current_orderbook: OrderBook = OrderBook()
         self._lock = asyncio.Lock()
         self.clients: dict[str, DirectoryClient] = {}
@@ -1106,6 +1110,9 @@ class OrderbookAggregator:
         if bond.bond_value is not None:
             return bond
 
+        if self.mempool_api is None:
+            return bond
+
         async with self._mempool_semaphore:
             try:
                 tx_data = await self.mempool_api.get_transaction(bond.utxo_txid)
@@ -1243,6 +1250,10 @@ class OrderbookAggregator:
 
     async def _calculate_bond_values_via_mempool(self, orderbook: OrderBook) -> None:
         """Calculate bond values via mempool API (legacy path)."""
+        if self.mempool_api is None:
+            logger.debug("Skipping mempool bond calculation (mempool API disabled)")
+            return
+
         current_time = int(datetime.now(UTC).timestamp())
 
         tasks = [
@@ -1253,6 +1264,9 @@ class OrderbookAggregator:
 
     async def _test_socks_connection(self) -> None:
         """Test SOCKS proxy connection on startup."""
+        if self.mempool_api is None:
+            return
+
         try:
             success = await self.mempool_api.test_connection()
             if success:

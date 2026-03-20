@@ -364,26 +364,66 @@ class TestNeutrinoBackend:
         await backend.close()
 
     @pytest.mark.asyncio
-    async def test_get_utxos_retries_initial_rescan_when_status_unavailable(self):
-        """Initial rescan should retry if completion cannot be confirmed."""
-        from unittest.mock import AsyncMock, call, patch
+    async def test_wait_for_rescan_require_started_rejects_immediate_false(self):
+        """When require_started=True, immediate false should be unconfirmed."""
+        from unittest.mock import AsyncMock
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+        backend._api_call = AsyncMock(return_value={"in_progress": False})
+
+        completed = await backend._wait_for_rescan(
+            require_started=True,
+            start_timeout=0.01,
+            poll_interval=0.01,
+        )
+
+        assert completed is False
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_rescan_require_started_accepts_true_then_false(self):
+        """When require_started=True, true->false should confirm completion."""
+        from unittest.mock import AsyncMock
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
+        backend._api_call = AsyncMock(
+            side_effect=[
+                {"in_progress": True},
+                {"in_progress": False},
+            ]
+        )
+
+        completed = await backend._wait_for_rescan(require_started=True, poll_interval=0.01)
+
+        assert completed is True
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_get_utxos_does_not_restart_initial_rescan_while_pending(self):
+        """Once initial rescan starts, later calls should poll instead of restarting."""
+        from unittest.mock import AsyncMock, patch
 
         backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="signet")
         backend.get_block_height = AsyncMock(return_value=100)
         backend._api_call = AsyncMock(return_value={"utxos": []})
 
         with patch.object(backend, "_wait_for_rescan", new_callable=AsyncMock) as mock_wait:
-            mock_wait.return_value = False
+            mock_wait.side_effect = [False, False]
             await backend.get_utxos(["tb1qtest123"])
             await backend.get_utxos(["tb1qtest123"])
 
         assert backend._initial_rescan_done is False
-        rescan_call = call(
-            "POST",
-            "v1/rescan",
-            data={"addresses": ["tb1qtest123"], "start_height": 0},
-        )
-        assert backend._api_call.call_args_list.count(rescan_call) == 2
+        assert backend._initial_rescan_started is True
+
+        rescan_posts = [
+            call
+            for call in backend._api_call.call_args_list
+            if call[0][0] == "POST" and call[0][1] == "v1/rescan"
+        ]
+        assert len(rescan_posts) == 1
+
+        assert mock_wait.call_args_list[0][1]["require_started"] is True
+        assert mock_wait.call_args_list[1][1]["require_started"] is False
         await backend.close()
 
     @pytest.mark.asyncio
@@ -401,6 +441,25 @@ class TestNeutrinoBackend:
 
         assert backend._initial_rescan_done is True
         assert backend._last_rescan_height == 321
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_get_utxos_uses_extended_timeout_for_initial_rescan(self):
+        """Initial rescan should wait longer than incremental rescans."""
+        from unittest.mock import AsyncMock, patch
+
+        backend = NeutrinoBackend(neutrino_url="http://localhost:8334", network="signet")
+        backend.get_block_height = AsyncMock(return_value=321)
+        backend._api_call = AsyncMock(return_value={"utxos": []})
+
+        with patch.object(backend, "_wait_for_rescan", new_callable=AsyncMock) as mock_wait:
+            mock_wait.return_value = True
+            await backend.get_utxos(["tb1qtest123"])
+
+        mock_wait.assert_called_once_with(
+            require_started=True,
+            timeout=backend._INITIAL_RESCAN_TIMEOUT_SECONDS,
+        )
         await backend.close()
 
     @pytest.mark.asyncio

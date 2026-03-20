@@ -205,6 +205,19 @@ class TestNewAddress:
         # Should return 400 for invalid mixdepth
         assert resp.status_code in (400, 422)
 
+    def test_walletname_must_match_unlocked_wallet(
+        self, authed_client: tuple[TestClient, str]
+    ) -> None:
+        client, token = authed_client
+        state = get_daemon_state()
+        state.wallet_service.mixdepth_count = 5
+
+        resp = client.get(
+            "/api/v1/wallet/other_wallet.jmdat/address/new/0",
+            headers=_auth_headers(token),
+        )
+        assert resp.status_code == 400
+
 
 class TestGetSeed:
     def test_requires_auth(self, authed_client: tuple[TestClient, str]) -> None:

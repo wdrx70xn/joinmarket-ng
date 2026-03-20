@@ -50,6 +50,8 @@ class NeutrinoBackend(BlockchainBackend):
     """
 
     supports_watch_address: bool = True
+    _INITIAL_RESCAN_TIMEOUT_SECONDS: float = 1800.0
+    _ONGOING_INITIAL_RESCAN_CHECK_TIMEOUT_SECONDS: float = 30.0
 
     def __init__(
         self,
@@ -94,6 +96,7 @@ class NeutrinoBackend(BlockchainBackend):
 
         # Track if we've done the initial rescan
         self._initial_rescan_done: bool = False
+        self._initial_rescan_started: bool = False
 
         # Track the last block height we rescanned to (for incremental rescans)
         self._last_rescan_height: int = 0
@@ -152,7 +155,13 @@ class NeutrinoBackend(BlockchainBackend):
             logger.error(f"Neutrino API call failed: {endpoint} - {e}")
             raise
 
-    async def _wait_for_rescan(self, timeout: float = 300.0, poll_interval: float = 2.0) -> bool:
+    async def _wait_for_rescan(
+        self,
+        timeout: float = 300.0,
+        poll_interval: float = 2.0,
+        require_started: bool = False,
+        start_timeout: float = 10.0,
+    ) -> bool:
         """
         Wait until the neutrino daemon reports no rescan is in progress.
 
@@ -162,16 +171,35 @@ class NeutrinoBackend(BlockchainBackend):
         Args:
             timeout: Maximum seconds to wait (default 300 s / 5 min).
             poll_interval: Seconds between status polls (default 2 s).
+            require_started: If True, require observing ``in_progress=True`` at
+                least once before accepting completion.
+            start_timeout: Seconds to wait for ``in_progress=True`` to appear
+                when ``require_started`` is enabled.
 
         Returns:
             True if rescan completion was confirmed via status polling,
             False if status could not be confirmed (timeout or endpoint error).
         """
         start = asyncio.get_event_loop().time()
+        saw_in_progress = False
         while True:
             try:
                 status = await self._api_call("GET", "v1/rescan/status")
-                if not status.get("in_progress", False):
+                in_progress = bool(status.get("in_progress", False))
+                if in_progress:
+                    saw_in_progress = True
+                elif require_started and not saw_in_progress:
+                    elapsed = asyncio.get_event_loop().time() - start
+                    if elapsed < start_timeout:
+                        await asyncio.sleep(poll_interval)
+                        continue
+                    logger.warning(
+                        "Rescan status never entered in_progress=true; "
+                        "treating completion as unconfirmed"
+                    )
+                    return False
+
+                if not in_progress:
                     return True
             except Exception as e:
                 # Endpoint not available (old server version or any error) –
@@ -305,36 +333,50 @@ class NeutrinoBackend(BlockchainBackend):
             f"last_rescan={self._last_rescan_height}, current={current_height}"
         )
         if not self._initial_rescan_done and self._watched_addresses:
-            logger.info(
-                f"Performing initial blockchain rescan for {len(self._watched_addresses)} "
-                f"watched addresses from height {self._scan_start_height} "
-                "(this may take a moment)..."
-            )
-            try:
-                # Trigger rescan from configured start height for all watched addresses
-                await self._api_call(
-                    "POST",
-                    "v1/rescan",
-                    data={
-                        "addresses": list(self._watched_addresses),
-                        "start_height": self._scan_start_height,
-                    },
+            completed = False
+            if not self._initial_rescan_started:
+                logger.info(
+                    f"Performing initial blockchain rescan for {len(self._watched_addresses)} "
+                    f"watched addresses from height {self._scan_start_height} "
+                    "(this may take a moment)..."
                 )
-                # Wait for rescan to complete by polling /v1/rescan/status
-                completed = await self._wait_for_rescan()
-                if completed:
-                    self._initial_rescan_done = True
-                    self._last_rescan_height = current_height
-                    self._rescan_in_progress = False
-                    self._just_rescanned = True
-                    logger.info("Initial blockchain rescan completed")
-                else:
-                    logger.warning(
-                        "Initial rescan completion could not be confirmed; will retry on next sync"
+                try:
+                    # Trigger rescan from configured start height for all watched addresses.
+                    # Only trigger this once; if completion is still pending later, keep
+                    # polling status instead of restarting from genesis.
+                    await self._api_call(
+                        "POST",
+                        "v1/rescan",
+                        data={
+                            "addresses": list(self._watched_addresses),
+                            "start_height": self._scan_start_height,
+                        },
                     )
-                    self._rescan_in_progress = False
-            except Exception as e:
-                logger.warning(f"Initial rescan failed (will retry on next sync): {e}")
+                    self._initial_rescan_started = True
+                    completed = await self._wait_for_rescan(
+                        require_started=True,
+                        timeout=self._INITIAL_RESCAN_TIMEOUT_SECONDS,
+                    )
+                except Exception as e:
+                    self._initial_rescan_started = False
+                    logger.warning(f"Initial rescan failed (will retry on next sync): {e}")
+            else:
+                completed = await self._wait_for_rescan(
+                    require_started=False,
+                    timeout=self._ONGOING_INITIAL_RESCAN_CHECK_TIMEOUT_SECONDS,
+                )
+
+            if completed:
+                self._initial_rescan_done = True
+                self._initial_rescan_started = False
+                self._last_rescan_height = current_height
+                self._rescan_in_progress = False
+                self._just_rescanned = True
+                logger.info("Initial blockchain rescan completed")
+            else:
+                logger.warning(
+                    "Initial rescan completion could not be confirmed; rescan still pending"
+                )
                 self._rescan_in_progress = False
         elif current_height > self._last_rescan_height and not self._rescan_in_progress:
             # New blocks have arrived since last rescan - need to scan them
@@ -364,7 +406,7 @@ class NeutrinoBackend(BlockchainBackend):
                 # 1. Match block filters
                 # 2. Download full blocks that match
                 # 3. Extract and index UTXOs
-                completed = await self._wait_for_rescan()
+                completed = await self._wait_for_rescan(require_started=True)
 
                 if completed:
                     self._last_rescan_height = current_height
@@ -1090,6 +1132,7 @@ class NeutrinoBackend(BlockchainBackend):
         self._filter_header_tip = 0
         self._synced = False
         self._initial_rescan_done = False
+        self._initial_rescan_started = False
         self._last_rescan_height = 0
         self._rescan_in_progress = False
         self._just_rescanned = False

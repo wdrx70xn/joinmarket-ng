@@ -108,7 +108,7 @@ async def run_watcher(log_level: str | None = None) -> None:
     if watcher_settings.mempool_api_url:
         logger.info(f"Mempool API: {watcher_settings.mempool_api_url}")
     else:
-        logger.warning("Mempool API not configured")
+        logger.info("Mempool API disabled; bond lookups use local backend only")
 
     # Directory nodes from env var (DIRECTORY_NODES) or config
     directory_nodes_str = os.environ.get("DIRECTORY_NODES", "")

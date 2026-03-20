@@ -68,8 +68,7 @@ def daemon_state_with_wallet(
     """DaemonState with a loaded wallet."""
     daemon_state.wallet_service = mock_wallet_service
     daemon_state.wallet_name = "test_wallet.jmdat"
-    token_pair = daemon_state.token_authority.issue("test_wallet.jmdat")
-    daemon_state._last_token_pair = token_pair
+    daemon_state.token_authority.issue("test_wallet.jmdat")
     return daemon_state
 
 
@@ -96,4 +95,19 @@ def app_with_wallet(
     """FastAPI TestClient with a loaded wallet."""
     application = create_app(data_dir=daemon_state_with_wallet.data_dir)
     set_daemon_state(daemon_state_with_wallet)
+    return TestClient(application)
+
+
+@pytest.fixture
+def app_with_jam_assets(tmp_path: Path, daemon_state: DaemonState) -> TestClient:
+    """TestClient with a temporary JAM static directory configured."""
+    jam_dir = tmp_path / "jam"
+    assets_dir = jam_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (jam_dir / "index.html").write_text("<html>jam</html>", encoding="utf-8")
+    (assets_dir / "app.js").write_text("console.log('jam')", encoding="utf-8")
+
+    daemon_state.data_dir = tmp_path
+    application = create_app(data_dir=tmp_path)
+    set_daemon_state(daemon_state)
     return TestClient(application)

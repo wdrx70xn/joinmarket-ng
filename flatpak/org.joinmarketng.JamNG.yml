@@ -96,14 +96,14 @@ modules:
       - type: file
         only-arches:
           - x86_64
-        url: https://github.com/m0wer/neutrino-api/releases/download/v0.7.0/neutrinod-linux-amd64
-        sha256: 210bfc3b61bc676fde6bae4895706f4b8bacdf65fc9f5a0b3ddeb6d314c13daa
+        url: https://github.com/m0wer/neutrino-api/releases/download/v0.8.0/neutrinod-linux-amd64
+        sha256: 258638b6937405810fdd5f593463cd449bd8f5c131814c424754cd11e1a30692
         dest-filename: neutrinod
       - type: file
         only-arches:
           - aarch64
-        url: https://github.com/m0wer/neutrino-api/releases/download/v0.7.0/neutrinod-linux-arm64
-        sha256: 6c8eb53fd4ea999ddb043b8bc24936611129d2fc3ae2a6659f6fa8a4b0fde6e3
+        url: https://github.com/m0wer/neutrino-api/releases/download/v0.8.0/neutrinod-linux-arm64
+        sha256: 63f95f8e03af7a300166bed5815f706c328a2e4d487d72bd17e44350020a7a53
         dest-filename: neutrinod
 
   # =========================================================================
@@ -126,11 +126,11 @@ modules:
       - npm ci
       - npm run build
       - mkdir -p /app/share/jmwalletd/jam
-      - cp -r build/* /app/share/jmwalletd/jam/
+      - 'if [ -d dist ]; then cp -r dist/* /app/share/jmwalletd/jam/; elif [ -d build ]; then cp -r build/* /app/share/jmwalletd/jam/; else echo "ERROR: no frontend build output (expected dist/ or build/)"; exit 1; fi'
     sources:
       - type: git
         url: https://github.com/joinmarket-webui/jam.git
-        commit: dcfab496a044f6e7d31beace8bc910ce04183942
+        commit: c9c2ea7989f42295f3f4a9b52054923cb69a41f7
 
   # =========================================================================
   # Module 6: Python application

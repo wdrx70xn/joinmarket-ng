@@ -163,7 +163,11 @@ class OrderbookServer:
             "directory_stats": directory_stats,
             "feature_stats": feature_stats,
             "mempool_url": self.settings.mempool_web_url
-            or self.settings.mempool_api_url.replace("/api", ""),
+            or (
+                self.settings.mempool_api_url.replace("/api", "")
+                if self.settings.mempool_api_url
+                else None
+            ),
         }
 
     async def _handle_health(self, _request: web.Request) -> web.Response:

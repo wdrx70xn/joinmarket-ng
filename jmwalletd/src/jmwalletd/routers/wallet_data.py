@@ -182,6 +182,9 @@ async def get_new_address(
         raise InvalidRequestFormat(f"Invalid mixdepth: {mixdepth}") from exc
 
     ws = state.wallet_service
+    if walletname != state.wallet_name:
+        raise InvalidRequestFormat(f"Wallet {walletname} is not unlocked")
+
     if md < 0 or md >= ws.mixdepth_count:
         raise InvalidRequestFormat(f"Mixdepth {md} out of range (0-{ws.mixdepth_count - 1})")
 

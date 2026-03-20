@@ -88,3 +88,21 @@ def test_server_handles_nodes_without_status() -> None:
     assert "node2.onion:5222" in result["directory_stats"]
     assert result["directory_stats"]["node1.onion:5222"]["offer_count"] == 0
     assert result["directory_stats"]["node2.onion:5222"]["offer_count"] == 0
+
+
+def test_server_handles_disabled_mempool_url() -> None:
+    """When mempool API is disabled, mempool_url should be null in output."""
+    settings = OrderbookWatcherSettings(mempool_api_url="", mempool_web_url=None)
+
+    aggregator = MagicMock(spec=OrderbookAggregator)
+    aggregator.directory_nodes = [("node1.onion", 5222)]
+    aggregator.node_statuses = {}
+    aggregator.clients = {}
+
+    server = OrderbookServer(settings, aggregator)
+    orderbook = OrderBook(timestamp=datetime.now(UTC))
+
+    result = server._format_orderbook(orderbook)
+
+    assert "mempool_url" in result
+    assert result["mempool_url"] is None
