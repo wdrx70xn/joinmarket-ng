@@ -17,14 +17,19 @@ from loguru import logger
 
 
 def _get_network() -> str:
-    """Return the configured Bitcoin network name (e.g. ``"signet"``).
+    """Return the configured wallet address network (e.g. ``"regtest"``).
 
-    Reads the ``network_config.network`` value from :class:`JoinMarketSettings`
-    so that ``WalletService`` derives addresses with the correct HRP.
+    Uses ``network_config.bitcoin_network`` when set, otherwise falls back to
+    ``network_config.network``. This allows protocol network (directory
+    handshakes) to differ from Bitcoin address network in regtest-compatible
+    mixed deployments.
     """
     from jmcore.settings import get_settings
 
-    return get_settings().network_config.network.value
+    network_config = get_settings().network_config
+    if network_config.bitcoin_network is not None:
+        return network_config.bitcoin_network.value
+    return network_config.network.value
 
 
 async def create_wallet(

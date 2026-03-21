@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from jmwalletd.wallet_ops import (
+    _get_network,
     _load_wallet_file,
     _save_wallet_file,
     create_wallet,
@@ -136,6 +137,24 @@ class TestCreateWallet:
                 wallet_type="invalid-type",
                 data_dir=tmp_path,
             )
+
+
+class TestGetNetwork:
+    def test_prefers_bitcoin_network_when_set(self) -> None:
+        mock_settings = MagicMock()
+        mock_settings.network_config.network.value = "testnet"
+        mock_settings.network_config.bitcoin_network.value = "regtest"
+
+        with patch("jmcore.settings.get_settings", return_value=mock_settings):
+            assert _get_network() == "regtest"
+
+    def test_falls_back_to_protocol_network(self) -> None:
+        mock_settings = MagicMock()
+        mock_settings.network_config.network.value = "signet"
+        mock_settings.network_config.bitcoin_network = None
+
+        with patch("jmcore.settings.get_settings", return_value=mock_settings):
+            assert _get_network() == "signet"
 
 
 class TestRecoverWallet:
