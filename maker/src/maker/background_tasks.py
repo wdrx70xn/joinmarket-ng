@@ -379,7 +379,7 @@ class BackgroundTasksMixin:
                         for offer in self.current_offers:
                             try:
                                 offer_msg = self._format_offer_announcement(
-                                    offer, include_bond=False
+                                    offer, include_bond=True
                                 )
                                 await client.send_public_message(offer_msg)
                             except Exception as e:
