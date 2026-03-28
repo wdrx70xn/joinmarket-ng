@@ -14,4 +14,29 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Validate commit messages
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            RANGE="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+              RANGE="HEAD~1..HEAD"
+            else
+              RANGE="${{ github.event.before }}..${{ github.sha }}"
+            fi
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+
+          echo "Validating commit range: ${RANGE}"
+          python scripts/validate_commit_message.py --rev-range "${RANGE}"
+
       - uses: j178/prek-action@v1

@@ -48,6 +48,26 @@ Test markers:
 - `reference`: JAM compatibility tests
 - `neutrino`: Light client tests
 
+### Commit and Changelog Workflow
+
+- Commit messages must follow Conventional Commits.
+- `feat:` and `fix:` commits must include at least one `Changelog:` trailer in the commit body/footer:
+
+```text
+feat(wallet): improve selection reliability
+
+Changelog: Improve wallet UTXO selection reliability under low liquidity
+```
+
+- Types like `test:`, `build:`, `refactor:`, `docs:`, and `chore:` are still valid Conventional Commits but are ignored for release changelog generation.
+- Local commit-msg validation is configured in `.pre-commit-config.yaml` and CI enforces the same rule in `.github/workflows/pre-commit.yaml`.
+- Release changelog generation runs automatically in `scripts/bump_version.py` by calling `scripts/generate_changelog.py --since <current-version-tag> --update`.
+- To preview generated entries without modifying files:
+
+```bash
+python scripts/generate_changelog.py --since <tag> --preview
+```
+
 ### Reproducible Builds
 
 Docker images are built reproducibly using `SOURCE_DATE_EPOCH` to ensure identical builds from the same source code. This allows independent verification that released binaries match the source.

@@ -4,11 +4,12 @@ Version bumping script for JoinMarket NG.
 
 This script automates the release process by:
 1. Bumping the version in all relevant files
-2. Updating the CHANGELOG.md with version and date
-3. Updating install.sh DEFAULT_VERSION
-4. Creating a git commit with a standard message
-5. Creating a git tag
-6. Pushing the changes and tag (default, use --no-push to skip)
+2. Generating changelog entries from commit trailers (feat/fix only)
+3. Updating the CHANGELOG.md with version and date
+4. Updating install.sh DEFAULT_VERSION
+5. Creating a git commit with a standard message
+6. Creating a git tag
+7. Pushing the changes and tag (default, use --no-push to skip)
 
 Usage:
     python scripts/bump_version.py patch          # 0.10.0 -> 0.10.1
@@ -236,6 +237,27 @@ def run_command(
     return subprocess.run(cmd, check=check, cwd=PROJECT_ROOT)
 
 
+def generate_changelog_entries(
+    current_version: str, dry_run: bool = False, allow_missing_trailers: bool = False
+) -> None:
+    """Generate changelog entries from commit trailers since the current version tag."""
+    cmd = [
+        "python",
+        "scripts/generate_changelog.py",
+        "--since",
+        current_version,
+    ]
+    if dry_run:
+        cmd.append("--preview")
+    else:
+        cmd.append("--update")
+
+    if allow_missing_trailers:
+        cmd.append("--allow-missing-trailers")
+
+    run_command(cmd, dry_run=dry_run)
+
+
 def git_commit_and_tag(
     new_version: str, dry_run: bool = False, push: bool = True
 ) -> None:
@@ -311,6 +333,14 @@ def main() -> None:
         action="store_true",
         help="Skip dirty working directory check",
     )
+    parser.add_argument(
+        "--allow-missing-trailers",
+        action="store_true",
+        help=(
+            "Allow feat/fix commits without Changelog trailers while generating changelog "
+            "(not recommended)"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -356,6 +386,11 @@ def main() -> None:
 
     # Update files
     print("Updating files...")
+    generate_changelog_entries(
+        current_version,
+        dry_run=args.dry_run,
+        allow_missing_trailers=args.allow_missing_trailers,
+    )
     update_version_file(new_version, dry_run=args.dry_run)
     update_pyproject_files(new_version, dry_run=args.dry_run)
     update_install_script(new_version, dry_run=args.dry_run)

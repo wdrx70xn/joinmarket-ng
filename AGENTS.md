@@ -56,6 +56,14 @@ Tests use pytest markers to organize by Docker profile:
 - If you add or change settings, update config.toml.template
 - Finally, update CHANGELOG.md with a summary of your changes.
 
+## Commit and Changelog Policy
+
+- Follow Conventional Commits for all commit titles.
+- For `feat:` and `fix:` commits, include at least one `Changelog:` trailer in the commit body/footer.
+  - Example: `Changelog: Improve reconnect handling when directory nodes flap`
+- `docs:`, `test:`, `build:`, `refactor:`, `chore:`, and `ci:` commits do not require changelog trailers and are ignored by release changelog generation.
+- Changelog entries are generated at release time from commit trailers via `scripts/generate_changelog.py` (called by `scripts/bump_version.py`) to avoid merge conflicts in `CHANGELOG.md` during normal feature/fix development.
+
 ## Project Structure
 Monorepo with `src/` layout. Root `pytest.ini` handles global tests.
 Components: `jmcore` (Lib), `directory_server`, `jmwallet`, `maker`, `taker`, `orderbook_watcher`.

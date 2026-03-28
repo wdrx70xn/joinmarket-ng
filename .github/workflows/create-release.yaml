@@ -21,11 +21,6 @@ on:
         required: false
         type: boolean
         default: false
-      generate_changelog:
-        description: 'Auto-generate changelog from conventional commits'
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: write
@@ -82,24 +77,6 @@ jobs:
           echo "Current version: $CURRENT_VERSION"
           echo "New version: $NEW_VERSION"
 
-      - name: Generate changelog from commits
-        if: ${{ inputs.generate_changelog && !inputs.dry_run }}
-        run: |
-          python scripts/generate_changelog.py --update
-          # Check if changelog was modified
-          if git diff --quiet CHANGELOG.md; then
-            echo "No changelog changes generated"
-          else
-            echo "Changelog updated with new entries"
-            git add CHANGELOG.md
-            git commit -m "docs: update changelog for ${{ steps.version.outputs.new_version }}"
-          fi
-
-      - name: Preview changelog (dry run)
-        if: ${{ inputs.generate_changelog && inputs.dry_run }}
-        run: |
-          python scripts/generate_changelog.py --preview
-
       - name: Bump version
         if: ${{ !inputs.dry_run }}
         run: |
@@ -126,7 +103,6 @@ jobs:
           echo "| New Version | ${{ steps.version.outputs.new_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bump Type | ${{ inputs.version_bump }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dry Run | ${{ inputs.dry_run }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Changelog Generated | ${{ inputs.generate_changelog }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then

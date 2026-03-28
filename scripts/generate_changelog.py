@@ -1,87 +1,52 @@
 #!/usr/bin/env python3
-"""
-Generate changelog entries from conventional commits.
+"""Generate changelog entries from conventional commits.
 
-This script parses git commit messages following the Conventional Commits spec
-(https://www.conventionalcommits.org/) and generates changelog entries in the
-Keep a Changelog format.
+This script parses git commits and extracts changelog text from commit trailers.
 
 Usage:
-    python scripts/generate_changelog.py                    # Since last tag
-    python scripts/generate_changelog.py --since 0.11.0     # Since specific tag
-    python scripts/generate_changelog.py --preview          # Preview without modifying
-    python scripts/generate_changelog.py --update           # Update CHANGELOG.md
+    python scripts/generate_changelog.py                       # Since last tag
+    python scripts/generate_changelog.py --since 0.11.0        # Since specific tag
+    python scripts/generate_changelog.py --preview             # Preview without modifying
+    python scripts/generate_changelog.py --update              # Update CHANGELOG.md
+    python scripts/generate_changelog.py --allow-missing-trailers
 
-Conventional Commit Types -> Changelog Categories:
-    feat:     Added
-    fix:      Fixed
-    perf:     Improved
-    security: Security
-    docs:     (skipped - documentation only)
-    style:    (skipped - formatting only)
-    refactor: Changed
-    test:     (skipped - tests only)
-    build:    (skipped - build system only)
-    ci:       (skipped - CI only)
-    chore:    (skipped - maintenance only)
-
-Breaking changes (commits with BREAKING CHANGE: or !) are highlighted.
+Rules:
+    - Only feat/fix commits are included in generated changelog entries
+    - Changelog text is taken from one or more "Changelog: ..." commit trailers
+    - Commit order is chronological (oldest first)
 """
 
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from changelog_commit_utils import ParsedCommit, parse_commit
+
 PROJECT_ROOT = Path(__file__).parent.parent
 CHANGELOG = PROJECT_ROOT / "CHANGELOG.md"
 
-# Map conventional commit types to changelog categories
 TYPE_TO_CATEGORY = {
     "feat": "Added",
     "fix": "Fixed",
-    "perf": "Improved",
-    "security": "Security",
-    "refactor": "Changed",
 }
-
-# Types to skip (don't include in changelog)
-SKIP_TYPES = {"docs", "style", "test", "build", "ci", "chore", "release"}
-
-# Regex patterns
-CONVENTIONAL_COMMIT_PATTERN = re.compile(
-    r"^(?P<type>\w+)"  # Type
-    r"(?:\((?P<scope>[^)]+)\))?"  # Optional scope
-    r"(?P<breaking>!)?"  # Optional breaking change indicator
-    r":\s*"  # Colon separator
-    r"(?P<description>.+)$"  # Description
-)
-
-BREAKING_CHANGE_PATTERN = re.compile(
-    r"BREAKING[ -]CHANGE:\s*(.+)", re.IGNORECASE | re.MULTILINE
-)
 
 
 @dataclass
 class Commit:
-    """Represents a parsed commit."""
-
     hash: str
     type: str
     scope: str | None
     description: str
-    body: str
     is_breaking: bool
-    breaking_description: str | None
+    changelog_entries: list[str]
 
 
 def run_git_command(args: list[str]) -> str:
-    """Run a git command and return output."""
     result = subprocess.run(
         ["git", *args],
         capture_output=True,
@@ -93,7 +58,6 @@ def run_git_command(args: list[str]) -> str:
 
 
 def get_latest_tag() -> str | None:
-    """Get the most recent git tag."""
     try:
         return run_git_command(["describe", "--tags", "--abbrev=0"])
     except subprocess.CalledProcessError:
@@ -101,23 +65,19 @@ def get_latest_tag() -> str | None:
 
 
 def get_commits_since(since_ref: str | None = None) -> list[Commit]:
-    """Get all commits since a reference (tag or commit), parsing conventional format."""
-    # Build git log command
-    # Format: hash, subject, body separated by special delimiter
     delimiter = "---COMMIT_DELIMITER---"
     format_str = f"%H%n%s%n%b{delimiter}"
 
-    if since_ref:
-        ref_range = f"{since_ref}..HEAD"
-    else:
-        ref_range = "HEAD"
+    ref_range = f"{since_ref}..HEAD" if since_ref else "HEAD"
 
     try:
-        output = run_git_command(["log", ref_range, f"--format={format_str}"])
+        output = run_git_command(
+            ["log", "--reverse", ref_range, f"--format={format_str}"]
+        )
     except subprocess.CalledProcessError:
         return []
 
-    commits = []
+    commits: list[Commit] = []
     for commit_text in output.split(delimiter):
         commit_text = commit_text.strip()
         if not commit_text:
@@ -131,168 +91,55 @@ def get_commits_since(since_ref: str | None = None) -> list[Commit]:
         subject = lines[1]
         body = lines[2] if len(lines) > 2 else ""
 
-        # Parse conventional commit format
-        match = CONVENTIONAL_COMMIT_PATTERN.match(subject)
-        if not match:
-            continue  # Skip non-conventional commits
-
-        commit_type = match.group("type").lower()
-        scope = match.group("scope")
-        description = match.group("description")
-        is_breaking = bool(match.group("breaking"))
-
-        # Check for BREAKING CHANGE in body
-        breaking_description = None
-        breaking_match = BREAKING_CHANGE_PATTERN.search(body)
-        if breaking_match:
-            is_breaking = True
-            breaking_description = breaking_match.group(1).strip()
+        parsed: ParsedCommit | None = parse_commit(subject, body)
+        if parsed is None:
+            continue
 
         commits.append(
             Commit(
                 hash=commit_hash[:8],
-                type=commit_type,
-                scope=scope,
-                description=description,
-                body=body,
-                is_breaking=is_breaking,
-                breaking_description=breaking_description,
+                type=parsed.type,
+                scope=parsed.scope,
+                description=parsed.description,
+                is_breaking=parsed.is_breaking,
+                changelog_entries=parsed.changelog_entries,
             )
         )
 
     return commits
 
 
-def parse_body_bullets(body: str) -> list[str]:
-    """Extract bullet points from commit body.
-
-    Supports:
-    - Lines starting with '- ' or '* '
-    - Numbered lists like '1. ', '2. '
-    - Continuation lines (indented or following a bullet)
-    """
-    if not body.strip():
-        return []
-
-    bullets: list[str] = []
-    current_bullet: list[str] = []
-
-    for line in body.split("\n"):
-        stripped = line.strip()
-
-        # Skip empty lines between bullets
-        if not stripped:
-            if current_bullet:
-                bullets.append(" ".join(current_bullet))
-                current_bullet = []
-            continue
-
-        # Skip BREAKING CHANGE lines (handled separately)
-        if stripped.upper().startswith(
-            "BREAKING CHANGE:"
-        ) or stripped.upper().startswith("BREAKING-CHANGE:"):
-            continue
-
-        # Check if this is a new bullet point
-        is_bullet = (
-            stripped.startswith("- ")
-            or stripped.startswith("* ")
-            or re.match(r"^\d+\.\s", stripped)
-        )
-
-        if is_bullet:
-            # Save previous bullet if exists
-            if current_bullet:
-                bullets.append(" ".join(current_bullet))
-
-            # Start new bullet (remove bullet marker)
-            if stripped.startswith("- ") or stripped.startswith("* "):
-                current_bullet = [stripped[2:]]
-            else:
-                # Numbered list - remove "N. " prefix
-                current_bullet = [re.sub(r"^\d+\.\s*", "", stripped)]
-        elif current_bullet:
-            # Continuation of previous bullet
-            current_bullet.append(stripped)
-        # else: ignore lines before first bullet
-
-    # Don't forget the last bullet
-    if current_bullet:
-        bullets.append(" ".join(current_bullet))
-
-    return bullets
+def format_changelog_entry(commit: Commit, trailer_text: str) -> str:
+    text = trailer_text.strip()
+    if commit.is_breaking and not text.lower().startswith("**breaking**"):
+        text = f"**BREAKING**: {text}"
+    return f"- {text} ({commit.hash})"
 
 
-def format_changelog_entry(commit: Commit) -> str:
-    """Format a single commit as a changelog entry.
-
-    Format:
-    - **Scope**: Description (hash)
-      - Body bullet 1
-      - Body bullet 2
-    """
-    lines = []
-
-    # Build the main entry line
-    parts = []
-
-    # Add scope prefix if present
-    if commit.scope:
-        parts.append(f"**{commit.scope.title()}**:")
-
-    # Add description (capitalize first letter)
-    desc = commit.description[0].upper() + commit.description[1:]
-    parts.append(desc)
-
-    entry = " ".join(parts)
-
-    # Add breaking change notice
-    if commit.is_breaking:
-        if commit.breaking_description:
-            entry = f"**BREAKING**: {entry} - {commit.breaking_description}"
-        else:
-            entry = f"**BREAKING**: {entry}"
-
-    # Add commit hash reference
-    entry = f"{entry} ({commit.hash})"
-
-    lines.append(f"- {entry}")
-
-    # Add body bullets as sub-items
-    body_bullets = parse_body_bullets(commit.body)
-    for bullet in body_bullets:
-        lines.append(f"  - {bullet}")
-
-    return "\n".join(lines)
-
-
-def generate_changelog_section(commits: list[Commit]) -> str:
-    """Generate a changelog section from commits."""
-    # Group commits by category
+def generate_changelog_section(
+    commits: list[Commit], require_trailers: bool = True
+) -> tuple[str, list[str]]:
     categories: dict[str, list[Commit]] = defaultdict(list)
-    breaking_changes: list[Commit] = []
+    errors: list[str] = []
 
     for commit in commits:
-        # Skip certain types
-        if commit.type in SKIP_TYPES:
-            continue
-
-        # Map type to category
         category = TYPE_TO_CATEGORY.get(commit.type)
         if not category:
             continue
 
+        if require_trailers and not commit.changelog_entries:
+            errors.append(
+                (
+                    f"commit {commit.hash} ({commit.type}) is missing required "
+                    "'Changelog: ...' trailer"
+                )
+            )
+            continue
+
         categories[category].append(commit)
 
-        # Track breaking changes separately
-        if commit.is_breaking:
-            breaking_changes.append(commit)
-
-    # Generate output
-    lines = []
-
-    # Order: Breaking Changes first, then standard categories
-    category_order = ["Added", "Changed", "Fixed", "Security", "Improved"]
+    lines: list[str] = []
+    category_order = ["Added", "Fixed"]
 
     for category in category_order:
         if category not in categories:
@@ -301,28 +148,49 @@ def generate_changelog_section(commits: list[Commit]) -> str:
         lines.append(f"### {category}")
         lines.append("")
         for commit in categories[category]:
-            lines.append(format_changelog_entry(commit))
+            for trailer_text in commit.changelog_entries:
+                lines.append(format_changelog_entry(commit, trailer_text))
         lines.append("")
 
-    return "\n".join(lines).rstrip()
+    return "\n".join(lines).rstrip(), errors
 
 
 def update_changelog(new_content: str) -> None:
-    """Update CHANGELOG.md with new content under [Unreleased]."""
     if not CHANGELOG.exists():
         print(f"Error: {CHANGELOG} not found")
         sys.exit(1)
 
     content = CHANGELOG.read_text()
+    marker = "## [Unreleased]"
+    marker_index = content.find(marker)
 
-    # Find the [Unreleased] section and insert content after it
-    unreleased_pattern = r"(## \[Unreleased\]\n)"
-    replacement = f"\\1\n{new_content}\n"
+    if marker_index == -1:
+        print("Warning: Could not find [Unreleased] section in CHANGELOG.md")
+        return
 
-    new_changelog = re.sub(unreleased_pattern, replacement, content, count=1)
+    start = marker_index + len(marker)
+    remainder = content[start:]
+    next_header_index = remainder.find("\n## [")
+
+    if next_header_index == -1:
+        section_body = remainder
+        tail = ""
+    else:
+        section_body = remainder[:next_header_index]
+        tail = remainder[next_header_index:]
+
+    section_body = section_body.strip("\n")
+    generated = new_content.strip("\n")
+
+    if section_body:
+        merged_body = f"{section_body}\n\n{generated}\n"
+    else:
+        merged_body = f"{generated}\n"
+
+    new_changelog = content[:start] + "\n\n" + merged_body + tail
 
     if new_changelog == content:
-        print("Warning: Could not find [Unreleased] section in CHANGELOG.md")
+        print("No changes applied to CHANGELOG.md")
         return
 
     CHANGELOG.write_text(new_changelog)
@@ -336,8 +204,7 @@ def main() -> None:
         epilog=__doc__,
     )
     parser.add_argument(
-        "--since",
-        help="Generate changelog since this tag/ref (default: last tag)",
+        "--since", help="Generate changelog since this tag/ref (default: last tag)"
     )
     parser.add_argument(
         "--preview",
@@ -349,10 +216,14 @@ def main() -> None:
         action="store_true",
         help="Update CHANGELOG.md with generated entries",
     )
+    parser.add_argument(
+        "--allow-missing-trailers",
+        action="store_true",
+        help="Do not fail when feat/fix commits are missing Changelog trailers",
+    )
 
     args = parser.parse_args()
 
-    # Determine the reference point
     since_ref = args.since
     if not since_ref:
         since_ref = get_latest_tag()
@@ -361,21 +232,26 @@ def main() -> None:
         else:
             print("No tags found, generating changelog from all commits")
 
-    # Get commits
     commits = get_commits_since(since_ref)
-
     if not commits:
         print("No conventional commits found")
         return
 
-    # Filter out skipped types for reporting
-    relevant_commits = [c for c in commits if c.type not in SKIP_TYPES]
+    relevant_commits = [c for c in commits if c.type in TYPE_TO_CATEGORY]
     print(
         f"Found {len(commits)} commits, {len(relevant_commits)} relevant for changelog"
     )
 
-    # Generate changelog section
-    changelog_section = generate_changelog_section(commits)
+    changelog_section, errors = generate_changelog_section(
+        commits,
+        require_trailers=not args.allow_missing_trailers,
+    )
+
+    if errors:
+        print("Validation errors:")
+        for error in errors:
+            print(f"- {error}")
+        sys.exit(1)
 
     if not changelog_section.strip():
         print("No changelog entries generated (all commits may be skipped types)")
