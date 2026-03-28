@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build API documentation using pdoc3 and convert DOCS.md to HTML."""
+"""Build API documentation using pdoc3 and convert docs/index.md to HTML."""
 
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def inject_dark_theme() -> None:
     updated_count = 0
 
     for html_file in html_files:
-        # Skip our main index.html (DOCS.md conversion)
+        # Skip our main index.html (docs/index.md conversion)
         if html_file.name == "index.html" and html_file.parent == OUTPUT_DIR:
             continue
 
@@ -152,10 +152,10 @@ def inject_dark_theme() -> None:
 
 
 def convert_docs_md() -> None:
-    """Convert DOCS.md to HTML."""
-    print("Converting DOCS.md to HTML...")
+    """Convert docs/index.md to HTML."""
+    print("Converting docs/index.md to HTML...")
 
-    docs_md = ROOT / "DOCS.md"
+    docs_md = ROOT / "docs" / "index.md"
     if not docs_md.exists():
         print(f"Warning: {docs_md} not found", file=sys.stderr)
         return
@@ -524,7 +524,7 @@ def convert_docs_md() -> None:
     with open(output_file, "w") as f:
         f.write(html)
 
-    print(f"✓ DOCS.md converted to {output_file}")
+    print(f"✓ docs/index.md converted to {output_file}")
 
 
 def create_nojekyll() -> None:
@@ -575,7 +575,7 @@ def main() -> None:
     # Inject dark theme into API docs
     inject_dark_theme()
 
-    # Convert DOCS.md
+    # Convert docs/index.md
     convert_docs_md()
 
     # Create .nojekyll for GitHub Pages

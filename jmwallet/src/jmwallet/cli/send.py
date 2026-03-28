@@ -226,7 +226,7 @@ async def _send_transaction(
                 f"Manual fee rate {resolved_fee_rate:.2f} sat/vB is below node's minimum relay "
                 f"fee {mempool_min_fee:.2f} sat/vB. Using mempool minimum instead. "
                 f"To use lower fee rates, configure minrelaytxfee in your Bitcoin node's "
-                f"bitcoin.conf (see DOCS.md for details)."
+                f"bitcoin.conf (see docs/technical/configuration.md, 'Minimum Relay Fee')."
             )
             resolved_fee_rate = mempool_min_fee
         logger.info(f"Using manual fee rate: {resolved_fee_rate:.2f} sat/vB")

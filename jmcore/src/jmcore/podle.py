@@ -16,7 +16,8 @@ Protocol flow:
 5. Maker verifies: P = k*G and P2 = k*J (same k)
 
 For detailed cryptographic documentation including NUMS point generation algorithm
-and secp256k1 curve parameters, see DOCS.md section "Cryptographic Foundations".
+and secp256k1 curve parameters, see docs/technical/privacy.md section
+"Cryptographic Foundations".
 
 Reference: https://gist.github.com/AdamISZ/9cbba5e9408d23813ca8
 Reference: joinmarket-clientserver/src/jmclient/podle.py

@@ -47,7 +47,7 @@ Tests use pytest markers to organize by Docker profile:
 
 ## General Guidelines
 
-- Check the documentation at README.md and DOCS.md.
+- Check the documentation at README.md and docs/.
 - Add tests and verify the new and existing tests pass, you can use the docker compose setup.
 - Improve the documentation as needed.
 - Don't break backwards compatibility even with the reference implementation. Use feature flags if needed.
@@ -70,7 +70,7 @@ Components: `jmcore` (Lib), `directory_server`, `jmwallet`, `maker`, `taker`, `o
 
 ## Documentation
 
-- Single file DOCS.md for architecture, protocols, and design decisions.
+- Technical docs are split under docs/technical/ for architecture, protocols, and design decisions.
   - Focus on high-level concepts over implementation details.
   - Don't use more than 3 levels of headings.
 - Component-specific READMEs for setup and usage.
