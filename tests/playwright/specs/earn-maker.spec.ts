@@ -52,8 +52,8 @@ test.describe("Maker / Earn", () => {
 
     // Verify the offer card displays the expected details.
     await expect(page.getByText("absolute", { exact: true })).toBeVisible();
-    await expect(page.getByText("Minimum Size")).toBeVisible();
-    await expect(page.getByText("Maximum Size")).toBeVisible();
+    await expect(page.getByText("Minimum Size", { exact: true })).toBeVisible();
+    await expect(page.getByText("Maximum Size", { exact: true })).toBeVisible();
     // The offer card shows a "Fee" field label when the maker is running.
     await expect(page.getByText("Fee", { exact: true }).first()).toBeVisible();
 
