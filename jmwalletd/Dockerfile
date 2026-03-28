@@ -4,13 +4,13 @@
 # Update with: ./scripts/update-base-images.sh
 # =============================================================================
 ARG PYTHON_VERSION=3.14
-ARG PYTHON_SLIM_DIGEST=sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456
+ARG PYTHON_SLIM_DIGEST=sha256:fb83750094b46fd6b8adaa80f66e2302ecbe45d513f6cece637a841e1025b4ca
 ARG NODE_VERSION=24
-ARG NODE_SLIM_DIGEST=sha256:e8e2e91b1378f83c5b2dd15f0247f34110e2fe895f6ca7719dbb780f929368eb
+ARG NODE_SLIM_DIGEST=sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b09d459fc2a9f
 
 # JAM frontend: pinned commit hash for reproducible builds
 # Update with: ./scripts/update-base-images.sh
-ARG JAM_COMMIT=c9c2ea7989f42295f3f4a9b52054923cb69a41f7
+ARG JAM_COMMIT=6fdedffe09bfc3c838467430754b3c7de69063e8
 
 # Pin build tools for reproducible builds
 # setuptools version is stamped into WHEEL metadata (Generator: setuptools (x.y.z))

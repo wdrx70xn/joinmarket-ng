@@ -8,6 +8,16 @@
 
 set -e
 
+run_pip_compile() {
+    if command -v pip-compile >/dev/null 2>&1; then
+        pip-compile "$@"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -m piptools compile "$@"
+    else
+        python -m piptools compile "$@"
+    fi
+}
+
 PACKAGES="jmcore directory_server orderbook_watcher jmwallet maker taker jmwalletd"
 UPDATE_PROD=true
 UPDATE_DEV=true
@@ -46,7 +56,7 @@ if [ "$UPDATE_PROD" = true ]; then
 
         if [ "$dir" = "jmcore" ]; then
             # jmcore has no local deps, compile directly
-            pip-compile -U --strip-extras --generate-hashes pyproject.toml -o requirements.txt
+            run_pip_compile -U --strip-extras --generate-hashes pyproject.toml -o requirements.txt
         else
             # For other packages, we need to temporarily remove local package references
             # from pyproject.toml because pip-compile can't resolve them from PyPI.
@@ -58,7 +68,7 @@ if [ "$UPDATE_PROD" = true ]; then
             sed -i '/^[[:space:]][[:space:]]*"jmwallet"/d' pyproject.toml
 
             # Compile
-            pip-compile -U --strip-extras --generate-hashes pyproject.toml -o requirements.txt
+            run_pip_compile -U --strip-extras --generate-hashes pyproject.toml -o requirements.txt
 
             # Restore original pyproject.toml
             mv pyproject.toml.bak pyproject.toml
@@ -78,14 +88,14 @@ if [ "$UPDATE_DEV" = true ]; then
         cd "$dir"
 
         if [ "$dir" = "jmcore" ]; then
-            pip-compile -U --strip-extras --generate-hashes --extra dev pyproject.toml -o requirements-dev.txt
+            run_pip_compile -U --strip-extras --generate-hashes --extra dev pyproject.toml -o requirements-dev.txt
         else
             cp pyproject.toml pyproject.toml.bak
             sed -i '/^[[:space:]][[:space:]]*"jmcore"/d' pyproject.toml
             sed -i '/^[[:space:]][[:space:]]*"jmwallet"/d' pyproject.toml
 
             # Compile dev deps
-            pip-compile -U --strip-extras --generate-hashes --extra dev pyproject.toml -o requirements-dev.txt
+            run_pip_compile -U --strip-extras --generate-hashes --extra dev pyproject.toml -o requirements-dev.txt
 
             # Restore original
             mv pyproject.toml.bak pyproject.toml
@@ -97,7 +107,7 @@ if [ "$UPDATE_DEV" = true ]; then
 
     # Documentation dependencies (root-level requirements-docs.in)
     echo "=== docs ==="
-    pip-compile -U --strip-extras --generate-hashes requirements-docs.in -o requirements-docs.txt
+    run_pip_compile -U --strip-extras --generate-hashes requirements-docs.in -o requirements-docs.txt
     echo ""
 fi
 
