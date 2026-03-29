@@ -48,6 +48,53 @@ Test markers:
 - `reference`: JAM compatibility tests
 - `neutrino`: Light client tests
 
+### Reference Implementation Setup
+
+Reference-marked tests (bond validation, coinjoin interop) import `jmclient` from the upstream [joinmarket-clientserver](https://github.com/JoinMarket-Org/joinmarket-clientserver) repo. `run_all_tests.sh` handles this automatically, but for running reference tests manually you need:
+
+1. **System dependency** -- `libsecp256k1` development headers:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y libsecp256k1-dev
+
+# Fedora
+sudo dnf install -y libsecp256k1-devel
+
+# macOS
+brew install libsecp256k1
+```
+
+2. **Clone the reference implementation** into the repo root (already in `.gitignore`):
+
+```bash
+git clone --depth 1 https://github.com/JoinMarket-Org/joinmarket-clientserver.git
+```
+
+3. **Install its Python dependencies**:
+
+```bash
+pip install \
+  chromalog==1.0.5 \
+  service-identity==21.1.0 \
+  twisted==24.7.0 \
+  txtorcon==23.11.0 \
+  python-bitcointx==1.1.5 \
+  argon2_cffi==21.3.0 \
+  autobahn==20.12.3 \
+  fastbencode==0.3.6 \
+  mnemonic==0.20 \
+  pyjwt==2.4.0 \
+  klein \
+  werkzeug
+```
+
+After this you can run reference tests directly:
+
+```bash
+pytest -m reference tests/e2e/test_bond_reference_validation.py -v
+```
+
 ### Commit and Changelog Workflow
 
 - Commit messages must follow Conventional Commits.

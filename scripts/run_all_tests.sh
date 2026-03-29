@@ -252,9 +252,39 @@ run_test_suite() {
 # Restart makers to sync blockchain state
 restart_makers() {
     log_info "Restarting makers to sync blockchain state..."
-    docker compose restart maker1 maker2 2>/dev/null || true
-    sleep 10
+    docker compose restart maker1 maker2 maker-neutrino 2>/dev/null || true
+    sleep 20
     log_success "Makers restarted"
+}
+
+# Ensure the reference implementation (joinmarket-clientserver) is cloned and
+# its Python dependencies are available.  The bond-validation and other
+# reference-marked tests import jmclient from that checkout.
+setup_reference_implementation() {
+    if [ -d "$PROJECT_ROOT/joinmarket-clientserver/src/jmclient" ]; then
+        log_info "Reference implementation already present"
+    else
+        log_info "Cloning reference implementation (joinmarket-clientserver)..."
+        git clone --depth 1 https://github.com/JoinMarket-Org/joinmarket-clientserver.git \
+            "$PROJECT_ROOT/joinmarket-clientserver"
+    fi
+
+    log_info "Installing reference implementation Python dependencies..."
+    pip install -q \
+        chromalog==1.0.5 \
+        service-identity==21.1.0 \
+        twisted==24.7.0 \
+        txtorcon==23.11.0 \
+        python-bitcointx==1.1.5 \
+        argon2_cffi==21.3.0 \
+        autobahn==20.12.3 \
+        fastbencode==0.3.6 \
+        mnemonic==0.20 \
+        pyjwt==2.4.0 \
+        klein \
+        werkzeug
+
+    log_success "Reference implementation ready"
 }
 
 # Main test execution
@@ -322,7 +352,7 @@ main() {
     # Run e2e tests from tests/ directory
     COVERAGE_FILE=.coverage.e2e run_test_suite "E2E Tests" \
         -lv -m e2e \
-        --timeout=300 --reruns=1 --reruns-delay=10 \
+        --timeout=300 \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
         --cov-report=term-missing \
@@ -365,6 +395,9 @@ main() {
     # ========================================================================
     log_info "=== Phase 3: Reference Compatibility Tests ==="
 
+    # Ensure reference implementation is available for import by tests
+    setup_reference_implementation
+
     log_info "Starting reference profile components (keeping e2e running)..."
     docker compose --profile reference up -d --build
 
@@ -378,7 +411,7 @@ main() {
 
     COVERAGE_FILE=.coverage.reference run_test_suite "Reference Tests" \
         -lv -m reference \
-        --timeout=300 --reruns=1 --reruns-delay=10 \
+        --timeout=300 \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
         --cov-report=term-missing \
@@ -421,7 +454,7 @@ main() {
     BITCOIN_RPC_URL="http://127.0.0.1:18445" \
     run_test_suite "Reference Maker Tests" \
         -lv -m reference_maker \
-        --timeout=300 --reruns=1 --reruns-delay=10 \
+        --timeout=300 \
         --cov=taker \
         --cov-report=term-missing \
         --cov-report=html:htmlcov/reference_maker \
@@ -456,7 +489,7 @@ main() {
     # Run basic neutrino tests (exclude coinjoin tests which need e2e makers)
     COVERAGE_FILE=.coverage.neutrino run_test_suite "Neutrino Basic Tests" \
         -lv -m "neutrino and not slow" \
-        --timeout=300 --reruns=1 --reruns-delay=10 \
+        --timeout=300 \
         --cov=jmcore --cov=jmwallet --cov=maker \
         --cov-report=term-missing \
         --cov-report=html:htmlcov/neutrino \
@@ -474,6 +507,7 @@ main() {
     log_info "Starting e2e makers for neutrino coinjoin tests..."
     docker compose --profile e2e up -d
     wait_for_wallet_funder
+    wait_for_neutrino
 
     log_info "Waiting for makers to connect..."
     sleep 20
@@ -481,7 +515,7 @@ main() {
 
     COVERAGE_FILE=.coverage.neutrino_slow run_test_suite "Neutrino CoinJoin Tests" \
         -lv -m 'neutrino and slow' \
-        --timeout=300 --reruns=1 --reruns-delay=10 \
+        --timeout=300 --reruns=1 --reruns-delay=15 \
         --cov=jmcore --cov=jmwallet --cov=maker --cov=taker \
         --cov-report=term-missing \
         --cov-report=html:htmlcov/neutrino_slow \
