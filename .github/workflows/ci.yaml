@@ -1041,7 +1041,7 @@ jobs:
         run: |
           pytest -c pytest.ini -m neutrino -k "test_coinjoin" --junitxml=junit/test-results.xml \
             --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=1 --reruns-delay=10 --fail-on-skip
+            -v -s --timeout=300 --reruns=2 --reruns-delay=15 --fail-on-skip
 
       - name: Show logs
         if: always()

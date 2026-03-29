@@ -46,6 +46,8 @@ GENERIC_TEST_MNEMONIC = (
     "abandon abandon abandon abandon abandon about"
 )
 
+COINBASE_MATURITY_CONFIRMATIONS = 100
+
 
 async def _wait_for_neutrino_ready(
     backend: NeutrinoBackend,
@@ -421,6 +423,7 @@ class TestNeutrinoCoinJoin:
             coinjoin_amount=50_000_000,  # 0.5 BTC
             counterparty_count=1,  # Only need 1 maker for this test
             minimum_makers=1,  # Allow single maker CoinJoin
+            taker_utxo_age=COINBASE_MATURITY_CONFIRMATIONS,
         )
 
         taker = Taker(
@@ -693,13 +696,16 @@ class TestNeutrinoCoinJoin:
 
         # For mixdepth 0, wallet policy does not merge multiple UTXOs for CoinJoin
         # input selection. Ensure at least one eligible md0 UTXO is large enough.
+        required_utxo_confirmations = COINBASE_MATURITY_CONFIRMATIONS
         cj_amount = 20_000_000  # 0.2 BTC
         required_single_utxo = cj_amount + 2_000_000  # Fee/headroom buffer
         md0_utxos = await taker_wallet.get_utxos(0)
         eligible_md0_values = [
             u.value
             for u in md0_utxos
-            if u.confirmations >= 5 and not u.frozen and not u.is_fidelity_bond
+            if u.confirmations >= required_utxo_confirmations
+            and not u.frozen
+            and not u.is_fidelity_bond
         ]
         largest_md0_utxo = max(eligible_md0_values) if eligible_md0_values else 0
 
@@ -737,7 +743,9 @@ class TestNeutrinoCoinJoin:
                 # are mature and spendable at current subsidy.
                 await rpc_call("generatetoaddress", [120, funder_addr])
                 await rpc_call("sendtoaddress", [topup_addr, 1.0], wallet=funder_wallet)
-                await rpc_call("generatetoaddress", [2, funder_addr])
+                await rpc_call(
+                    "generatetoaddress", [required_utxo_confirmations, funder_addr]
+                )
                 funded = True
             except Exception as exc:
                 logger.warning(
@@ -746,7 +754,9 @@ class TestNeutrinoCoinJoin:
 
             if not funded:
                 # Fallback to the previous mining-only approach.
-                funded = await ensure_wallet_funded(topup_addr, confirmations=2)
+                funded = await ensure_wallet_funded(
+                    topup_addr, confirmations=required_utxo_confirmations
+                )
 
             if funded:
                 # Neutrino indexing can lag; retry sync/balance refresh.
@@ -756,7 +766,7 @@ class TestNeutrinoCoinJoin:
                     eligible_md0_values = [
                         u.value
                         for u in md0_utxos
-                        if u.confirmations >= 5
+                        if u.confirmations >= required_utxo_confirmations
                         and not u.frozen
                         and not u.is_fidelity_bond
                     ]
@@ -772,7 +782,8 @@ class TestNeutrinoCoinJoin:
             pytest.xfail(
                 "Neutrino taker CoinJoin requires one large eligible md0 UTXO. "
                 f"Largest available: {largest_md0_utxo:,} sats; "
-                f"required: >= {required_single_utxo:,} sats."
+                f"required: >= {required_single_utxo:,} sats with "
+                f">= {required_utxo_confirmations} confirmations."
             )
 
         logger.info(
@@ -792,6 +803,7 @@ class TestNeutrinoCoinJoin:
             coinjoin_amount=50_000_000,  # 0.5 BTC
             counterparty_count=1,  # Only need 1 maker for this test
             minimum_makers=1,  # Allow single maker CoinJoin
+            taker_utxo_age=required_utxo_confirmations,
         )
 
         taker = Taker(
