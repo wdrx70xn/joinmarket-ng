@@ -64,7 +64,7 @@ def test_parse_changelog_trailers_supports_continuation_lines() -> None:
 def test_generate_changelog_section_uses_trailers() -> None:
     commits = [
         Commit(
-            hash="aaaa1111",
+            hash="aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
             type="feat",
             scope="wallet",
             description="add x",
@@ -72,7 +72,7 @@ def test_generate_changelog_section_uses_trailers() -> None:
             changelog_entries=["Add automated changelog generation"],
         ),
         Commit(
-            hash="bbbb2222",
+            hash="bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222",
             type="fix",
             scope="maker",
             description="fix y",
@@ -86,5 +86,11 @@ def test_generate_changelog_section_uses_trailers() -> None:
     assert errors == []
     assert "### Added" in section
     assert "### Fixed" in section
-    assert "- Add automated changelog generation (aaaa1111)" in section
-    assert "- Fix changelog merge conflict workflow (bbbb2222)" in section
+    assert (
+        "- Add automated changelog generation "
+        "([aaaa1111](../../commit/aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111))" in section
+    )
+    assert (
+        "- Fix changelog merge conflict workflow "
+        "([bbbb2222](../../commit/bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222))" in section
+    )

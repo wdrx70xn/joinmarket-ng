@@ -38,12 +38,16 @@ TYPE_TO_CATEGORY = {
 
 @dataclass
 class Commit:
-    hash: str
+    hash: str  # full 40-char commit hash
     type: str
     scope: str | None
     description: str
     is_breaking: bool
     changelog_entries: list[str]
+
+    @property
+    def short_hash(self) -> str:
+        return self.hash[:8]
 
 
 def run_git_command(args: list[str]) -> str:
@@ -97,7 +101,7 @@ def get_commits_since(since_ref: str | None = None) -> list[Commit]:
 
         commits.append(
             Commit(
-                hash=commit_hash[:8],
+                hash=commit_hash,
                 type=parsed.type,
                 scope=parsed.scope,
                 description=parsed.description,
@@ -113,7 +117,8 @@ def format_changelog_entry(commit: Commit, trailer_text: str) -> str:
     text = trailer_text.strip()
     if commit.is_breaking and not text.lower().startswith("**breaking**"):
         text = f"**BREAKING**: {text}"
-    return f"- {text} ({commit.hash})"
+    commit_link = f"[{commit.short_hash}](../../commit/{commit.hash})"
+    return f"- {text} ({commit_link})"
 
 
 def generate_changelog_section(
