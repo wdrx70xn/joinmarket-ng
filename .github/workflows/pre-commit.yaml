@@ -24,13 +24,37 @@ jobs:
 
       - name: Validate commit messages
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            RANGE="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
-              RANGE="HEAD~1..HEAD"
+          resolve_fallback_range() {
+            local base_ref="${1:-main}"
+            local merge_base=""
+
+            if git show-ref --verify --quiet "refs/remotes/origin/${base_ref}"; then
+              merge_base="$(git merge-base "origin/${base_ref}" HEAD)"
             else
-              RANGE="${{ github.event.before }}..${{ github.sha }}"
+              merge_base="$(git rev-parse HEAD~1)"
+            fi
+
+            printf "%s..HEAD" "${merge_base}"
+          }
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+            if git cat-file -e "${BASE_SHA}^{commit}" && git cat-file -e "${HEAD_SHA}^{commit}"; then
+              RANGE="${BASE_SHA}..${HEAD_SHA}"
+            else
+              RANGE="$(resolve_fallback_range "${{ github.base_ref }}")"
+            fi
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            BEFORE_SHA="${{ github.event.before }}"
+
+            if [[ "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+              RANGE="$(resolve_fallback_range "main")"
+            elif git cat-file -e "${BEFORE_SHA}^{commit}" && git merge-base --is-ancestor "${BEFORE_SHA}" "${{ github.sha }}"; then
+              RANGE="${BEFORE_SHA}..${{ github.sha }}"
+            else
+              RANGE="$(resolve_fallback_range "main")"
             fi
           else
             RANGE="HEAD~1..HEAD"
