@@ -251,10 +251,15 @@ run_test_suite() {
 
 # Restart makers to sync blockchain state
 restart_makers() {
+    log_info "Clearing maker commitment blacklists..."
+    for maker in jm-maker1 jm-maker2 jm-maker3 jm-maker-neutrino; do
+        docker exec "$maker" sh -c \
+            "rm -rf /home/jm/.joinmarket-ng/cmtdata/commitmentlist" 2>/dev/null || true
+    done
     log_info "Restarting makers to sync blockchain state..."
-    docker compose restart maker1 maker2 maker-neutrino 2>/dev/null || true
+    docker compose restart maker1 maker2 maker3 maker-neutrino 2>/dev/null || true
     sleep 20
-    log_success "Makers restarted"
+    log_success "Makers restarted with clean commitment state"
 }
 
 # Ensure the reference implementation (joinmarket-clientserver) is cloned and
@@ -401,6 +406,12 @@ main() {
     log_info "Starting reference profile components (keeping e2e running)..."
     docker compose --profile reference up -d --build
 
+    # If directory containers were recreated above, tor's HiddenServicePort
+    # backend mapping can be stale. Restart tor so onion routing to directory
+    # is refreshed before JAM taker tests.
+    log_info "Restarting tor to refresh hidden service backend mapping..."
+    docker compose restart tor
+
     # Wait for reference-specific services
     wait_for_tor_hidden_service
     wait_for_jam
@@ -449,7 +460,6 @@ main() {
     wait_for_tor_hidden_service
     wait_for_jam_makers
 
-    # Override RPC URL for this phase - reference-maker uses bitcoin-jam on port 18445
     COVERAGE_FILE=.coverage.reference_maker \
     BITCOIN_RPC_URL="http://127.0.0.1:18445" \
     run_test_suite "Reference Maker Tests" \

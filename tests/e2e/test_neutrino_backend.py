@@ -576,7 +576,12 @@ class TestNeutrinoCoinJoin:
         import asyncio
         import subprocess
 
-        from tests.e2e.rpc_utils import ensure_wallet_funded, mine_blocks
+        from tests.e2e.rpc_utils import (
+            BitcoinRPCError,
+            ensure_wallet_funded,
+            mine_blocks,
+            rpc_call,
+        )
 
         # Verify neutrino is synced
         height = await neutrino_backend.get_block_height()
@@ -656,6 +661,94 @@ class TestNeutrinoCoinJoin:
             f"Taker wallet funded with {taker_balance:,} sats via neutrino backend"
         )
 
+        # For mixdepth 0, wallet policy does not merge multiple UTXOs for CoinJoin
+        # input selection. Ensure at least one eligible md0 UTXO is large enough.
+        cj_amount = 20_000_000  # 0.2 BTC
+        required_single_utxo = cj_amount + 2_000_000  # Fee/headroom buffer
+        md0_utxos = await taker_wallet.get_utxos(0)
+        eligible_md0_values = [
+            u.value
+            for u in md0_utxos
+            if u.confirmations >= 5 and not u.frozen and not u.is_fidelity_bond
+        ]
+        largest_md0_utxo = max(eligible_md0_values) if eligible_md0_values else 0
+
+        if largest_md0_utxo < required_single_utxo:
+            logger.info(
+                f"Largest eligible md0 UTXO is too small for CoinJoin "
+                f"({largest_md0_utxo:,} < {required_single_utxo:,} sats). "
+                "Creating a dedicated 1 BTC output for md0..."
+            )
+
+            # Prefer an already-known md0 address to avoid discovery-gap issues
+            # with long-lived test wallets that have high address indexes.
+            topup_addr = (
+                md0_utxos[0].address
+                if md0_utxos
+                else taker_wallet.get_new_address(mixdepth=0)
+            )
+
+            # Mining directly to target address creates one UTXO per block with the
+            # current subsidy; at high regtest heights, subsidy can be < CoinJoin amount.
+            # Instead, fund from a temporary wallet with a single 1 BTC output.
+            funded = False
+            funder_wallet = "neutrino_taker_funder"
+            try:
+                try:
+                    await rpc_call("createwallet", [funder_wallet])
+                except BitcoinRPCError:
+                    # Wallet may already exist from a previous local run.
+                    pass
+
+                funder_addr = await rpc_call(
+                    "getnewaddress", ["", "bech32"], wallet=funder_wallet
+                )
+                # Mine enough blocks so at least some coinbase outputs in funder_wallet
+                # are mature and spendable at current subsidy.
+                await rpc_call("generatetoaddress", [120, funder_addr])
+                await rpc_call("sendtoaddress", [topup_addr, 1.0], wallet=funder_wallet)
+                await rpc_call("generatetoaddress", [2, funder_addr])
+                funded = True
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to create dedicated md0 top-up output via funder wallet: {exc}"
+                )
+
+            if not funded:
+                # Fallback to the previous mining-only approach.
+                funded = await ensure_wallet_funded(topup_addr, confirmations=2)
+
+            if funded:
+                # Neutrino indexing can lag; retry sync/balance refresh.
+                for _ in range(6):
+                    await taker_wallet.sync()
+                    md0_utxos = await taker_wallet.get_utxos(0)
+                    eligible_md0_values = [
+                        u.value
+                        for u in md0_utxos
+                        if u.confirmations >= 5
+                        and not u.frozen
+                        and not u.is_fidelity_bond
+                    ]
+                    largest_md0_utxo = (
+                        max(eligible_md0_values) if eligible_md0_values else 0
+                    )
+                    if largest_md0_utxo >= required_single_utxo:
+                        break
+                    await asyncio.sleep(2)
+
+        if largest_md0_utxo < required_single_utxo:
+            await taker_wallet.close()
+            pytest.xfail(
+                "Neutrino taker CoinJoin requires one large eligible md0 UTXO. "
+                f"Largest available: {largest_md0_utxo:,} sats; "
+                f"required: >= {required_single_utxo:,} sats."
+            )
+
+        logger.info(
+            f"Largest eligible md0 UTXO for CoinJoin: {largest_md0_utxo:,} sats"
+        )
+
         # Mine some blocks to ensure coinbase maturity for makers
         logger.info("Mining blocks for coinbase maturity...")
         await mine_blocks(10, "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080")
@@ -709,7 +802,6 @@ class TestNeutrinoCoinJoin:
             logger.info(f"Destination address (neutrino): {dest_address}")
 
             # Execute CoinJoin with neutrino taker
-            cj_amount = 20_000_000  # 0.2 BTC
             logger.info(
                 f"Initiating CoinJoin for {cj_amount:,} sats with neutrino taker..."
             )

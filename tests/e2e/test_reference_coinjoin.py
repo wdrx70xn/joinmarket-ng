@@ -37,9 +37,8 @@ from loguru import logger
 
 
 # Timeouts for reference implementation tests
-# Reduced timeouts to fail faster and identify issues
 STARTUP_TIMEOUT = 420  # 7 minutes for all services to start (Tor can be slow in CI)
-COINJOIN_TIMEOUT = 600  # 10 minutes for coinjoin to complete (increased from 240s)
+COINJOIN_TIMEOUT = 240  # 4 minutes for coinjoin to complete
 WALLET_FUND_TIMEOUT = 300  # 5 minutes for wallet funding
 
 
@@ -440,8 +439,33 @@ def restart_makers_and_wait(wait_time: int = 60) -> bool:
 
     This ensures makers have fresh UTXOs from the main bitcoin node
     and are properly connected to the directory server.
+    Also clears maker commitment blacklists to avoid PoDLE rejections
+    from previous test runs.
     """
     logger.info("Restarting makers to ensure fresh UTXO state...")
+
+    # Clear commitment blacklists before restarting to prevent PoDLE rejections
+    for maker in ["maker1", "maker2"]:
+        try:
+            result = run_compose_cmd(
+                [
+                    "exec",
+                    "-T",
+                    maker,
+                    "sh",
+                    "-c",
+                    "rm -rf /home/jm/.joinmarket-ng/cmtdata/commitmentlist",
+                ],
+                check=False,
+            )
+            if result.returncode == 0:
+                logger.debug(f"Cleared commitment blacklist for {maker}")
+            else:
+                logger.warning(
+                    f"Failed to clear commitment blacklist for {maker}: {result.stderr}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to clear commitment blacklist for {maker}: {e}")
 
     # Restart both makers
     result = run_compose_cmd(["restart", "maker1", "maker2"], check=False)
@@ -687,10 +711,10 @@ async def test_execute_reference_coinjoin(funded_jam_wallet):
 
     logger.info(f"Running sendpayment: {' '.join(cmd)}")
 
-    # Reduced timeout - if coinjoin takes longer than 240s, something is wrong
+    # Keep this bounded so failures don't stall the suite.
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=240, check=False
+            cmd, capture_output=True, text=True, timeout=COINJOIN_TIMEOUT, check=False
         )
     except subprocess.TimeoutExpired as e:
         logger.error("CoinJoin timed out!")

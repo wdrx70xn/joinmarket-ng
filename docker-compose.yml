@@ -296,7 +296,9 @@ services:
       - BITCOIN__RPC_USER=test
       - BITCOIN__RPC_PASSWORD=test
       - BITCOIN__DESCRIPTOR_WALLET_NAME=jm_playwright_regtest
-      - NETWORK_CONFIG__NETWORK=regtest
+      # Use testnet for protocol compatibility with directory server and makers
+      # (the reference JoinMarket implementation uses "testnet" for regtest networks)
+      - NETWORK_CONFIG__NETWORK=testnet
       - JMWALLETD_HOST=0.0.0.0
       - JMWALLETD_NO_TLS=true
       - LOGGING__LEVEL=DEBUG
