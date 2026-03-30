@@ -123,6 +123,9 @@ class HDKey:
         parent_key_int = int.from_bytes(self._private_key.secret, "big")
         offset_int = int.from_bytes(key_offset, "big")
 
+        if offset_int >= SECP256K1_N:
+            raise ValueError("Invalid child key")
+
         child_key_int = (parent_key_int + offset_int) % SECP256K1_N
 
         if child_key_int == 0:
@@ -177,6 +180,9 @@ class HDKey:
         else:
             version = XPUB_TESTNET
 
+        if self.depth > 255:
+            raise ValueError("Cannot serialize extended key with depth > 255")
+
         # BIP32 serialization format:
         # 4 bytes: version
         # 1 byte: depth
@@ -184,7 +190,7 @@ class HDKey:
         # 4 bytes: child number
         # 32 bytes: chain code
         # 33 bytes: public key (compressed)
-        depth_byte = min(self.depth, 255).to_bytes(1, "big")
+        depth_byte = self.depth.to_bytes(1, "big")
         child_num_bytes = self.child_number.to_bytes(4, "big")
         pubkey_bytes = self._public_key.format(compressed=True)
 
@@ -217,8 +223,11 @@ class HDKey:
         else:
             version = VPUB_TESTNET
 
+        if self.depth > 255:
+            raise ValueError("Cannot serialize extended key with depth > 255")
+
         # Same serialization format as xpub but with BIP84 version bytes
-        depth_byte = min(self.depth, 255).to_bytes(1, "big")
+        depth_byte = self.depth.to_bytes(1, "big")
         child_num_bytes = self.child_number.to_bytes(4, "big")
         pubkey_bytes = self._public_key.format(compressed=True)
 
@@ -248,7 +257,10 @@ class HDKey:
         else:
             version = XPRV_TESTNET
 
-        depth_byte = min(self.depth, 255).to_bytes(1, "big")
+        if self.depth > 255:
+            raise ValueError("Cannot serialize extended key with depth > 255")
+
+        depth_byte = self.depth.to_bytes(1, "big")
         child_num_bytes = self.child_number.to_bytes(4, "big")
         # Private key is prefixed with 0x00 to make it 33 bytes
         privkey_bytes = b"\x00" + self._private_key.secret

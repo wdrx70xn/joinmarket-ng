@@ -257,6 +257,94 @@ class TestSigning:
                 private_key=test_key.private_key,
             )
 
+    def test_compute_sighash_allows_non_default_type(self, test_key):
+        """compute_sighash_segwit should allow any sighash type (pure computation)."""
+        tx = Transaction(
+            version=2,
+            has_witness=True,
+            inputs=[
+                TxInput(
+                    txid_le=bytes(32),
+                    vout=0,
+                    scriptsig=b"",
+                    sequence=0xFFFFFFFF,
+                )
+            ],
+            outputs=[TxOutput(value=50000, script=bytes.fromhex("0014" + "00" * 20))],
+            locktime=0,
+            witnesses=[],
+        )
+        pubkey = test_key.get_public_key_bytes(compressed=True)
+        script_code = create_p2wpkh_script_code(pubkey)
+
+        # Should succeed -- compute is a pure BIP143 function, not a signing policy gate
+        sighash = compute_sighash_segwit(
+            tx=tx,
+            input_index=0,
+            script_code=script_code,
+            value=100000,
+            sighash_type=2,
+        )
+        assert len(sighash) == 32
+
+    def test_sign_p2wpkh_rejects_non_default_sighash(self, test_key):
+        """sign_p2wpkh_input should reject non-SIGHASH_ALL types."""
+        tx = Transaction(
+            version=2,
+            has_witness=True,
+            inputs=[
+                TxInput(
+                    txid_le=bytes(32),
+                    vout=0,
+                    scriptsig=b"",
+                    sequence=0xFFFFFFFF,
+                )
+            ],
+            outputs=[TxOutput(value=50000, script=bytes.fromhex("0014" + "00" * 20))],
+            locktime=0,
+            witnesses=[],
+        )
+        pubkey = test_key.get_public_key_bytes(compressed=True)
+        script_code = create_p2wpkh_script_code(pubkey)
+
+        with pytest.raises(TransactionSigningError, match="only SIGHASH_ALL"):
+            sign_p2wpkh_input(
+                tx=tx,
+                input_index=0,
+                script_code=script_code,
+                value=100000,
+                private_key=test_key.private_key,
+                sighash_type=2,
+            )
+
+    def test_sign_p2wsh_rejects_non_default_sighash(self, test_key):
+        """sign_p2wsh_input should reject non-SIGHASH_ALL types."""
+        tx = Transaction(
+            version=2,
+            has_witness=True,
+            inputs=[
+                TxInput(
+                    txid_le=bytes(32),
+                    vout=0,
+                    scriptsig=b"",
+                    sequence=0xFFFFFFFF,
+                )
+            ],
+            outputs=[TxOutput(value=50000, script=bytes.fromhex("0014" + "00" * 20))],
+            locktime=0,
+            witnesses=[],
+        )
+
+        with pytest.raises(TransactionSigningError, match="only SIGHASH_ALL"):
+            sign_p2wsh_input(
+                tx=tx,
+                input_index=0,
+                witness_script=b"\x00" * 32,
+                value=100000,
+                private_key=test_key.private_key,
+                sighash_type=0x83,  # SIGHASH_SINGLE|ANYONECANPAY
+            )
+
 
 class TestSignatureVerification:
     """Integration tests to verify signatures are valid."""

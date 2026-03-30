@@ -2,6 +2,8 @@
 Tests for BIP32 HD key derivation.
 """
 
+import pytest
+
 from jmwallet.wallet.bip32 import HDKey, mnemonic_to_seed
 
 
@@ -166,3 +168,37 @@ def test_child_number_tracking(test_mnemonic):
     # Non-hardened derivation at index 0
     grandchild = child._derive_child(0)
     assert grandchild.child_number == 0
+
+
+def test_derive_child_rejects_offset_out_of_range(test_mnemonic, monkeypatch):
+    seed = mnemonic_to_seed(test_mnemonic)
+    master_key = HDKey.from_seed(seed)
+
+    import hmac
+
+    class _FakeDigest:
+        def digest(self) -> bytes:
+            return (2**256 - 1).to_bytes(32, "big") + b"\x00" * 32
+
+    def fake_new(*args, **kwargs):
+        return _FakeDigest()
+
+    monkeypatch.setattr(hmac, "new", fake_new)
+
+    with pytest.raises(ValueError, match="Invalid child key"):
+        master_key._derive_child(0)
+
+
+def test_extended_key_serialization_rejects_depth_over_255(test_mnemonic):
+    seed = mnemonic_to_seed(test_mnemonic)
+    master_key = HDKey.from_seed(seed)
+    master_key.depth = 256
+
+    with pytest.raises(ValueError, match="depth > 255"):
+        master_key.get_xpub("mainnet")
+
+    with pytest.raises(ValueError, match="depth > 255"):
+        master_key.get_zpub("mainnet")
+
+    with pytest.raises(ValueError, match="depth > 255"):
+        master_key.get_xprv("mainnet")

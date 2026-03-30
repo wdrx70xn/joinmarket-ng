@@ -114,6 +114,11 @@ def sign_p2wpkh_input(
     Returns:
         DER-encoded signature with sighash type byte appended
     """
+    if sighash_type != 1:
+        raise TransactionSigningError(
+            f"Unsupported sighash type {sighash_type}; only SIGHASH_ALL (0x01) allowed for signing"
+        )
+
     sighash = compute_sighash_segwit(tx, input_index, script_code, value, sighash_type)
 
     # Sign the pre-hashed sighash (it's already SHA256d)
@@ -190,6 +195,11 @@ def sign_p2wsh_input(
     Returns:
         DER-encoded signature with sighash type byte appended
     """
+    if sighash_type != 1:
+        raise TransactionSigningError(
+            f"Unsupported sighash type {sighash_type}; only SIGHASH_ALL (0x01) allowed for signing"
+        )
+
     # For P2WSH, the scriptCode is the witness script itself
     sighash = compute_sighash_segwit(tx, input_index, witness_script, value, sighash_type)
 
