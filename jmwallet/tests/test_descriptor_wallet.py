@@ -198,6 +198,7 @@ class TestDescriptorWalletBackendUnit:
 
         assert result["success_count"] == 2
         assert result["error_count"] == 1
+        assert backend._descriptors_imported is False
 
     @pytest.mark.asyncio
     async def test_import_descriptors_wallet_not_loaded(self):

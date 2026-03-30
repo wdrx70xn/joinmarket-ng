@@ -523,7 +523,11 @@ class DescriptorWalletBackend(BlockchainBackend):
             except Exception as e:
                 logger.warning(f"Could not verify descriptor import: {e}")
 
-            self._descriptors_imported = True
+            self._descriptors_imported = error_count == 0 and success_count > 0
+            if not self._descriptors_imported:
+                logger.warning(
+                    "Descriptor import had failures; backend remains in not-fully-imported state"
+                )
 
             # Trigger background full rescan if needed
             background_rescan_started = False
