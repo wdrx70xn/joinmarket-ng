@@ -14,9 +14,7 @@ Relay server for peer discovery and message routing in the JoinMarket network.
 
 ## Installation
 
-See [Installation](install.md) for general installation instructions.
-
-**For directory server** (manual installation):
+See [Installation](install.md) for general setup. For local development:
 
 ```bash
 cd joinmarket-ng
@@ -55,158 +53,19 @@ LOG_LEVEL=INFO
 
 ### Docker Compose (Recommended)
 
-The recommended deployment uses Docker Compose with an isolated network where the directory server runs behind a Tor hidden service for privacy.
+Use the `directory_server/docker-compose.yml` deployment for production-style operation behind Tor hidden service.
 
-#### Initial Setup
-
-**Important**: The Tor directories and configuration must be set up with proper permissions before starting Docker Compose. If not created manually, Docker will create them as root, causing permission errors.
+Minimal run:
 
 ```bash
-# 1. Create directory structure with correct permissions
-mkdir -p tor/conf tor/data tor/run
-chmod 755 tor/conf tor/run
-chmod 700 tor/data
-chown -R 1000:1000 tor/
-
-# 2. Create Tor configuration file
-cat > tor/conf/torrc << 'EOF'
-# JoinMarket Directory Server Hidden Service
-HiddenServiceDir /var/lib/tor
-HiddenServiceVersion 3
-HiddenServicePort 5222 joinmarket_directory_server:5222
-EOF
-
-# 3. Start both directory server and Tor (uses pre-built image)
 docker compose up -d
-
-# 4. View logs
 docker compose logs -f
-
-# 5. Get your onion address (available after first tor startup)
-cat tor/data/hostname
-
-# Stop services
-docker compose down
-```
-
-By default, docker-compose.yml uses the pre-built image `ghcr.io/joinmarket-ng/joinmarket-ng/directory-server:main`. To build locally, uncomment the `build` section and comment out the `image` line in docker-compose.yml.
-
-#### Debug Image
-
-A debug variant is available with full Python debug symbols and debugging tools pre-installed:
-
-- **pdbpp**: Enhanced Python debugger with syntax highlighting, tab completion, and sticky mode
-- **memray**: Memory profiler for tracking allocations and finding memory leaks
-
-```bash
-# Pull the debug image
-docker pull ghcr.io/joinmarket-ng/joinmarket-ng/directory-server:main-debug
-
-# Run with debug image
-docker run -it --rm \
-  -e LOG_LEVEL=DEBUG \
-  ghcr.io/joinmarket-ng/joinmarket-ng/directory-server:main-debug
-
-# Profile memory usage with memray
-docker run -it --rm \
-  -v $(pwd)/memray-output:/app/memray-output \
-  ghcr.io/joinmarket-ng/joinmarket-ng/directory-server:main-debug \
-  memray run -o /app/memray-output/profile.bin -m directory_server.main
-
-# Attach debugger (requires adding breakpoint() in code)
-docker run -it --rm \
-  ghcr.io/joinmarket-ng/joinmarket-ng/directory-server:main-debug
-```
-
-#### Live Profiling (Attach)
-
-To attach memray to a running container, the `SYS_PTRACE` capability is required.
-
-1. Add capability in `docker-compose.yml`:
-```yaml
-services:
-  directory_server:
-    image: ghcr.io/joinmarket-ng/joinmarket-ng/directory-server:main-debug
-    cap_add:
-      - SYS_PTRACE
-```
-
-2. Attach to the process:
-```bash
-docker exec -it jm_directory_server bash
-# Inside container
-python -m memray attach 1 --verbose
-```
-
-> **Tip**: If it does not work, trying `gdb -p 1` first can provide more details.
-
-To build the debug image locally:
-```bash
-# Build debug target
-docker build --target debug -t directory-server:debug -f directory_server/Dockerfile .
-
-# Build production target (default)
-docker build --target production -t directory-server:latest -f directory_server/Dockerfile .
-```
-
-#### Directory Structure After Setup
-
-```
-directory_server/
-└── tor/
-    ├── conf/
-    │   └── torrc                    # Tor config (755, uid 1000)
-    ├── data/                        # Hidden service keys (700, uid 1000)
-    │   ├── hostname                 # Your .onion address (auto-generated)
-    │   ├── hs_ed25519_public_key    # Public key (auto-generated)
-    │   ├── hs_ed25519_secret_key    # Private key (auto-generated)
-    │   └── authorized_clients/      # For client auth (optional)
-    └── run/                         # Tor runtime files (755, uid 1000)
-```
-
-#### Vanity Onion Address (Optional)
-
-To create a vanity onion address with a custom prefix:
-
-```bash
-# 1. Generate vanity address (can take hours/days depending on prefix length)
-docker run --rm -it --network none -v $PWD:/keys \
-  ghcr.io/cathugger/mkp224o:master -d /keys prefix
-
-# 2. Move generated keys to tor data directory
-# Note: mkp224o creates a directory named "prefix<randomchars>.onion"
-mv prefix*.onion/hs_ed25519_public_key prefix*.onion/hs_ed25519_secret_key prefix*.onion/hostname tor/data/
-
-# 3. Set correct ownership (uid 1000 required by tor container)
-chown -R 1000:1000 tor/data/
-
-# 4. Restart tor to use the new keys
-docker compose restart tor
-
-# 5. Verify your new vanity address
 cat tor/data/hostname
 ```
 
-**Note**: Longer prefixes take exponentially longer to generate. A 5-character prefix may take hours, 6+ characters may take days. The vanity generator will create `hs_ed25519_public_key` and `hs_ed25519_secret_key` files which replace the auto-generated ones.
+The compose stack provides network isolation and routes external access through Tor.
 
-#### Network Architecture & Security
-
-The Docker Compose setup provides maximum security through network isolation:
-
-- **directory_server**: Runs on isolated internal network (`joinmarket_directory_internal`) with **no external internet access**
-  - Cannot make outbound connections to the internet
-  - Cannot be reached directly from the internet
-  - Only accessible through the Tor hidden service
-- **tor**: Acts as a secure gateway
-  - Connected to both internal network (`joinmarket_directory_internal`) and external network (`joinmarket_directory_external`)
-  - Forwards hidden service traffic to directory_server on port 5222
-  - Provides .onion address for privacy
-
-This architecture ensures:
-- The directory server cannot leak information or be exploited to make external connections
-- All connections are anonymized through Tor
-- Attack surface is minimized through network isolation
-- Even if the directory server is compromised, it cannot access the internet directly
+For advanced operations (permission setup, vanity onion, debug images, memray attach), use the detailed runbook in `directory_server/README.md`.
 
 ## Health Check & Monitoring
 
@@ -303,6 +162,11 @@ Check container health status:
 docker ps  # Shows (healthy) or (unhealthy)
 docker inspect joinmarket_directory_server | grep -A 10 Health
 ```
+
+## Protocol and Security Context
+
+- Message envelope types and handshake flow: [Technical Protocol Notes](technical/protocol.md#transport-layer)
+- Directory role in peer discovery and routing: [Technical Protocol Notes](technical/protocol.md#direct-vs-relay-connections)
 
 ## Command Reference
 

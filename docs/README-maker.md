@@ -10,498 +10,104 @@ Install JoinMarket-NG with the maker component:
 curl -sSL https://raw.githubusercontent.com/joinmarket-ng/joinmarket-ng/main/install.sh | bash -s -- --maker
 ```
 
-See [Installation](install.md) for complete installation instructions including:
-
-- Backend setup (Bitcoin Core or Neutrino)
-- Tor configuration
-- Manual installation for developers
+See [Installation](install.md) for backend setup, Tor configuration, and manual install.
 
 ## Prerequisites
 
-**Tor is REQUIRED for production use.** Makers need Tor for privacy and to advertise .onion addresses for direct peer connections.
-
-See [Installation - Tor Notes](install.md#tor-notes) for installation and configuration instructions.
-
-The maker bot tries to auto-detect Tor configuration. For manual setup, see [Environment Variables](#environment-variables).
+- Tor is required for production maker operation.
+- For Tor SOCKS/control defaults, see [Tor Notes](install.md#tor-notes).
 
 ## Quick Start
 
-### 1. Create a Wallet
-
-Generate a new encrypted wallet file:
+### 1) Create or import a wallet
 
 ```bash
 jm-wallet generate --output ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-**IMPORTANT**: Write down the displayed mnemonic - it's your only backup!
-
-Or import an existing mnemonic (e.g., migrating from reference implementation):
-
-```bash
+# or import existing mnemonic
 jm-wallet import --output ~/.joinmarket-ng/wallets/default.mnemonic
 ```
 
-See [jmwallet](README-jmwallet.md) for wallet management details.
+Store the mnemonic offline. See [Wallet guide](README-jmwallet.md).
 
-### 2. Check Balance & Get Deposit Address
+### 2) Configure backend
 
-```bash
-# View balance and addresses
-jm-wallet info --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic --backend neutrino
+Set `~/.joinmarket-ng/config.toml` and choose one backend:
 
-# Or use jm-maker to get a specific address
-jm-maker generate-address --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
-```
+- `descriptor_wallet` (recommended, own Bitcoin Core)
+- `neutrino` (lightweight alternative)
 
-### 3. Fund Your Wallet
+Backend configuration examples are in [Installation](install.md#configure-backend).
 
-Send bitcoin to displayed addresses. For best results, spread funds across multiple mixdepths (0-4).
-
-**Minimum**: ~100,000 sats per mixdepth to create offers.
-
-### 4. Start Earning Fees
-
-#### Option A: Bitcoin Core Full Node (Recommended)
-
-For maximum trustlessness, privacy, and compatibility with all takers. Configure your Bitcoin Core credentials in the config file:
-
-```bash
-nano ~/.joinmarket-ng/config.toml
-```
-
-```toml
-[bitcoin]
-backend_type = "descriptor_wallet"
-rpc_url = "http://127.0.0.1:8332"
-rpc_user = "your_rpc_user"
-rpc_password = "your_rpc_password"
-```
-
-Start maker bot:
+### 3) Start maker
 
 ```bash
 jm-maker start --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
 ```
 
-#### Option B: Neutrino Backend
+The bot syncs wallet state, builds offers, and waits for takers.
 
-Lightweight alternative if you cannot run a full node. Note that Neutrino makers require takers that support `neutrino_compat` mode (all joinmarket-ng takers do, but reference implementation takers do not).
-
-Start Neutrino server:
+### 4) Optional: tune fees
 
 ```bash
-docker run -d \
-  --name neutrino \
-  -p 8334:8334 \
-  -v neutrino-data:/data/neutrino \
-  -e NETWORK=mainnet \
-  -e LOG_LEVEL=info \
-  ghcr.io/m0wer/neutrino-api
-```
-
-**Note**: Pre-built binaries available at [m0wer/neutrino-api releases](https://github.com/m0wer/neutrino-api/releases).
-
-Configure in `~/.joinmarket-ng/config.toml`:
-
-```toml
-[bitcoin]
-backend_type = "neutrino"
-neutrino_url = "http://127.0.0.1:8334"
-```
-
-Start maker bot:
-
-```bash
-jm-maker start --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-The bot will:
-
-- Sync your wallet
-- Create offers based on available balance
-- Create an ephemeral Tor .onion address (if Tor control available)
-- Connect to directory servers and wait for takers
-
-> **⚠️ Production Warning:** Without Tor control access, maker falls back to `NOT-SERVING-ONION` mode (all traffic via directory). Check logs for Tor warnings.
-
-## Configuration
-
-All settings can be configured in `~/.joinmarket-ng/config.toml`. CLI arguments and environment variables override the config file.
-
-### Default Fee Settings
-
-The defaults are sensible for most users:
-
-- **Fee model**: Relative fees (0.1%)
-- **Minimum size**: 100,000 sats
-
-To customize fees, add to your config file:
-
-```toml
-[maker]
-cj_fee_relative = 0.001   # 0.1% fee
-min_size = 100000         # Minimum CoinJoin size in sats
-```
-
-### Offer Types and Fees
-
-JoinMarket supports two fee models. The maker bot **automatically detects** which model to use based on which fee parameter you provide:
-
-#### Relative Fees (Default)
-
-Charge a percentage of the CoinJoin amount:
-
-- **Auto-selected when**: You provide `--cj-fee-relative` (or neither fee parameter)
-- **Offer type**: `sw0reloffer`
-- **Default**: 0.1% (0.001)
-- **Example**: 0.2% of 1 BTC = 200,000 sats
-- **Pros**: Scales with transaction size, competitive for large amounts
-- **Cons**: May earn less on small transactions
-
-#### Absolute Fees
-
-Charge a fixed satoshi amount regardless of CoinJoin size:
-
-- **Auto-selected when**: You provide `--cj-fee-absolute`
-- **Offer type**: `sw0absoffer`
-- **Default**: Not used (relative is default)
-- **Example**: Fixed 1000 sats per CoinJoin
-- **Pros**: Predictable earnings, better for small transactions
-- **Cons**: May be uncompetitive for large amounts
-
-**Important**: Only provide ONE fee parameter. If you provide both, the maker will exit with an error.
-
-### Custom Fee Settings
-
-```bash
-# Relative fee (0.2%) - auto-selects sw0reloffer
+# Relative fee (0.2%)
 jm-maker start \
   --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --backend-type neutrino \
   --cj-fee-relative 0.002 \
   --min-size 200000
-
-# Absolute fee (1000 sats) - auto-selects sw0absoffer
-jm-maker start \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --backend-type neutrino \
-  --cj-fee-absolute 1000 \
-  --min-size 200000
 ```
 
-### Fidelity Bonds (Advanced)
+Use exactly one fee model: `--cj-fee-relative` or `--cj-fee-absolute`.
 
-Increase offer visibility by locking bitcoin for a period. See wallet CLI:
+## Fidelity Bonds
 
-```bash
-# Generate bond address (saves to registry for auto-discovery)
-jm-wallet generate-bond-address \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --locktime 1735689600
+Makers automatically discover bonds from the local registry at startup.
 
-# List existing bonds (also updates registry with UTXO info)
-jm-wallet list-bonds --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
+- User workflow (generate/list/recover bonds): [Wallet guide](README-jmwallet.md)
+- Protocol details and cold-wallet certificate flow: [Technical Privacy Notes](technical/privacy.md#fidelity-bonds)
 
-# Discover bonds by scanning specific locktimes (updates registry)
-jm-wallet list-bonds --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --locktime 1735689600
+## Migration from JoinMarket Reference
 
-# View registry entries
-jm-wallet registry-list
-
-# Sync registry with blockchain (check funding status)
-jm-wallet registry-sync --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-**Auto-discovery**: Bonds created with `generate-bond-address` are saved to the bond registry (`~/.joinmarket-ng/fidelity_bonds.json`). The maker bot **automatically discovers** these bonds at startup - no need to specify locktimes manually.
-
-If you need to manually specify locktimes (e.g., for bonds created outside this tool):
-
-```bash
-jm-maker start \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --fidelity-bond-locktimes 1735689600
-```
-
-## Migrating from JoinMarket Reference Implementation
-
-If you have an existing maker on the reference implementation (JoinMarket-Org/joinmarket-clientserver), migration is simple - **all you need is your mnemonic**.
-
-### Quick Migration
-
-1. **Import your mnemonic** with the interactive import command:
+Migration is mnemonic-based:
 
 ```bash
 jm-wallet import --output ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-This provides word-by-word entry with Tab completion and auto-complete when only one BIP39 word matches your prefix. The mnemonic is validated and optionally encrypted.
-
-Alternatively, pass the mnemonic via environment variable:
-
-```bash
-MNEMONIC="your twelve or twenty-four word mnemonic phrase here ..." \
-  jm-wallet import --output ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-2. **Start the maker** - fidelity bonds are auto-discovered:
-
-```bash
 jm-maker start --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
 ```
 
-That's it! The maker will:
-
-- Derive all addresses from your mnemonic (same BIP84 paths as reference implementation)
-- **Automatically discover any existing fidelity bonds** by scanning the blockchain
-- Start serving offers with your existing balance
-
-### Fidelity Bond Recovery
-
-JoinMarket-NG can scan all 960 possible fidelity bond timelocks (Jan 2020 - Dec 2099) to find your existing bonds. This is useful when migrating from another wallet or recovering from backup.
-
-**Full bond recovery** (scans all timelocks, may take time on mainnet):
-
-```bash
-jm-wallet recover-bonds --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-**Quick discovery** (if you know the locktime):
-
-```bash
-jm-wallet list-bonds --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --locktime 1735689600
-```
-
-Both commands update the bond registry (`fidelity_bonds.json`) with discovered bonds and their UTXO information.
-
-**BIP39 Passphrase**: If your wallet uses a BIP39 passphrase (13th/25th word), you must provide it via interactive prompt or environment variable:
-
-```bash
-# Via interactive prompt
-jm-wallet recover-bonds --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --prompt-bip39-passphrase
-
-# Via environment variable
-BIP39_PASSPHRASE="your passphrase" jm-wallet recover-bonds \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-Note: The BIP39 passphrase is intentionally NOT read from `config.toml` for security reasons.
+For full bond recovery during migration, run `jm-wallet recover-bonds --mnemonic-file ...`.
 
 ## Docker Deployment
 
-A production-ready `docker-compose.yml` is provided in this directory with:
+This component ships with a production-oriented `docker-compose.yml`.
 
-- **Bitcoin Core backend** for maximum trustlessness and compatibility
-- **Tor** with control port for ephemeral .onion address creation
-- **Logging limits** to prevent disk exhaustion from log flooding
-- **Resource limits** for CPU and memory
-- **Health checks** for service dependencies
+- Setup and Tor requirements: see local compose comments and [Tor Notes](install.md#tor-notes)
+- Backend tradeoffs and compatibility notes: [Technical Wallet Notes](technical/wallet.md#backend-systems)
 
-> **Note**: Bitcoin Core is strongly recommended for makers. Neutrino-based makers require
-> takers that send extended UTXO metadata (`neutrino_compat`), which limits compatibility
-> to joinmarket-ng takers (reference implementation takers do not support this feature).
-
-### Quick Start
-
-1. **Create Tor configuration directory:**
-
-```bash
-mkdir -p tor/conf tor/run
-```
-
-2. **Create `tor/conf/torrc`:**
-
-```torc
-# Minimal Tor configuration for JoinMarket maker
-SocksPort 0.0.0.0:9050
-ControlPort 0.0.0.0:9051
-CookieAuthentication 1
-CookieAuthFile /var/lib/tor/control_auth_cookie
-DataDirectory /var/lib/tor
-Log notice stdout
-```
-
-3. **Ensure your wallet is ready:**
-
-```bash
-mkdir -p ~/.joinmarket-ng/wallets
-# Create or copy your mnemonic file to ~/.joinmarket-ng/wallets/default.mnemonic
-```
-
-4. **Update RPC credentials** in `docker-compose.yml` (change `rpcuser`/`rpcpassword`).
-
-5. **Start the maker:**
+Typical run:
 
 ```bash
 docker-compose up -d
-```
-
-> **Note**: Initial Bitcoin Core sync can take several hours to days depending on hardware.
-
-### Using Neutrino Instead of Bitcoin Core
-
-If you cannot run a full node, Neutrino is available as a lightweight alternative.
-Be aware this limits compatibility with takers.
-
-Replace the `bitcoind` service with `neutrino` and update maker environment:
-
-```yaml
-environment:
-  - BACKEND_TYPE=neutrino
-  - BITCOIN__NEUTRINO_URL=http://neutrino:8334
-
-# Replace bitcoind service with:
-neutrino:
-  image: ghcr.io/m0wer/neutrino-api
-  environment:
-    - NETWORK=mainnet
-  volumes:
-    - neutrino-data:/data/neutrino
-```
-
-### Customizing Fees
-
-Edit the environment section in `docker-compose.yml`:
-
-```yaml
-environment:
-  # Relative fee (0.1% - default)
-  - MAKER__CJ_FEE_RELATIVE=0.001
-  # OR absolute fee (uncomment one, not both)
-  # - MAKER__CJ_FEE_ABSOLUTE=1000
-  - MAKER__MIN_SIZE=100000
-```
-
-### Viewing Logs
-
-```bash
 docker-compose logs -f maker
 ```
 
-## Environment Variables
+## Configuration Notes
 
-### Required
+Configuration merges as: `config.toml` < environment variables < CLI flags.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WALLET__MNEMONIC_FILE` | - | Path to encrypted mnemonic file (recommended) |
-| `WALLET__MNEMONIC` | - | Direct mnemonic phrase (not recommended for production) |
+For full option lists and exact defaults, use the auto-generated command help below (`jm-maker start --help`).
 
-### Tor Configuration
+## Security and Operations
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TOR__SOCKS_HOST` | `127.0.0.1` | Tor SOCKS proxy host |
-| `TOR__SOCKS_PORT` | `9050` | Tor SOCKS proxy port |
-| `TOR__CONTROL_ENABLED` | Auto-detect | Enable Tor control port (auto-detected in Docker) |
-| `TOR__CONTROL_HOST` | `127.0.0.1` | Tor control host |
-| `TOR__CONTROL_PORT` | `9051` | Tor control port |
-| `TOR__COOKIE_PATH` | Auto-detect | Path to Tor cookie auth file |
+- Maker transaction signing includes strict verification before signature release.
+- Directory communication goes over Tor; production should avoid clearnet fallback behavior.
+- Keep mnemonic files encrypted and backed up; never share mnemonic or wallet files.
 
-### Backend Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BITCOIN__BACKEND_TYPE` | `descriptor_wallet` | Backend type: `descriptor_wallet`, `scantxoutset`, or `neutrino` |
-| `BITCOIN__RPC_URL` | `http://localhost:8332` | Bitcoin Core RPC URL (descriptor_wallet and scantxoutset) |
-| `BITCOIN__RPC_USER` | - | Bitcoin Core RPC username (descriptor_wallet and scantxoutset) |
-| `BITCOIN__RPC_PASSWORD` | - | Bitcoin Core RPC password (descriptor_wallet and scantxoutset) |
-| `BITCOIN__NEUTRINO_URL` | `http://localhost:8334` | Neutrino REST API URL (neutrino only) |
-
-### Network Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NETWORK__NETWORK` | `mainnet` | Protocol network: `mainnet`, `testnet`, `signet`, `regtest` |
-| `NETWORK__BITCOIN_NETWORK` | `$NETWORK__NETWORK` | Bitcoin network for address generation (if different from protocol network) |
-| `NETWORK__DIRECTORY_SERVERS` | (network defaults) | JSON array of directory servers (e.g., `["host1:port1", "host2:port2"]`) |
-
-### Fee Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAKER__MIN_SIZE` | `100000` | Minimum CoinJoin size in sats |
-| `MAKER__CJ_FEE_RELATIVE` | `0.001` | Relative fee (0.001 = 0.1%) - auto-selects `sw0reloffer` type |
-| `MAKER__CJ_FEE_ABSOLUTE` | - | Absolute fee in sats - auto-selects `sw0absoffer` type if set |
-| `MAKER__TX_FEE_CONTRIBUTION` | `0` | Transaction fee contribution in sats |
-
-> **Important:** Only set ONE of `MAKER__CJ_FEE_RELATIVE` or `MAKER__CJ_FEE_ABSOLUTE`. The offer type is automatically selected based on which you provide.
-
-### Advanced Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAKER__FIDELITY_BOND_LOCKTIMES` | Auto-discover | JSON array of Unix timestamps for fidelity bond locktimes (e.g., `["1893456000", "1924992000"]`) |
-| `MAKER__MERGE_ALGORITHM` | `default` | UTXO selection: `default`, `gradual`, `greedy`, `random` |
-| `NETWORK__ONION_SERVING_HOST` | `127.0.0.1` | Bind address for incoming connections (set to `0.0.0.0` in Docker) |
-| `NETWORK__ONION_SERVING_PORT` | `5222` | Port for incoming .onion connections |
-| `NETWORK__TOR_TARGET_HOST` | `127.0.0.1` | Target hostname for Tor hidden service (set to service name in Docker Compose) |
-| `WALLET__JOINMARKET_DATA_DIR` | `~/.joinmarket-ng` | Data directory for history and blacklist |
-
-## CLI Reference
+Common checks:
 
 ```bash
-# Start maker bot
-jm-maker start [OPTIONS]
-
-# Generate receive address
-jm-maker generate-address [OPTIONS]
-
-# See all options
+jm-wallet info --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
 jm-maker start --help
 ```
-
-### Key Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--mnemonic-file` | - | Path to encrypted wallet file |
-| `--backend-type` | descriptor_wallet | Backend: descriptor_wallet, scantxoutset, or neutrino |
-| `--cj-fee-relative` | 0.001 | Relative fee (0.001 = 0.1%) - auto-selects sw0reloffer |
-| `--cj-fee-absolute` | - | Absolute fee in sats - auto-selects sw0absoffer |
-| `--min-size` | 100000 | Minimum CoinJoin size in sats |
-| `--tor-control-host` | Auto-detect | Tor control port host |
-| `--tor-control-port` | 9051 | Tor control port |
-| `--tor-cookie-path` | Auto-detect | Path to Tor cookie auth file |
-| `--disable-tor-control` | - | Disable ephemeral hidden service creation (NOT recommended) |
-
-Use env vars for RPC credentials (see jmwallet README).
-
-## Security
-
-- Wallet files are encrypted - keep your password safe
-- Bot verifies all transactions before signing
-- All directory connections go through Tor
-- Never expose your mnemonic or share wallet files
-- File permissions automatically set to 600
-
-### Spam Protection
-
-The maker includes automatic rate limiting with exponential backoff to prevent orderbook spam attacks:
-
-- **Normal**: 1 response per 10 seconds
-- **After 10 violations**: Backoff to 60 seconds (moderate)
-- **After 50 violations**: Backoff to 300 seconds (severe)
-- **After 100 violations**: Peer banned for 1 hour
-
-Thresholds are configurable via environment variables if needed (see config.py).
-
-## Troubleshooting
-
-**"No offers created"**
-- Check balance: `jm-wallet info --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic`
-- Need at least 100,000 sats per mixdepth by default
-
-**"Failed to connect to directory server"**
-- Ensure Tor is running
-- Check network connectivity
-
-**"Transaction verification failed"**
-- Safety feature - invalid transaction from taker
-- Your funds are safe, no action needed
 
 ## Command Reference
 

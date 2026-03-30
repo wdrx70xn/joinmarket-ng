@@ -1,243 +1,64 @@
 # JoinMarket Wallet Library (jmwallet)
 
-Modern HD wallet for JoinMarket with support for Bitcoin Core nodes and lightweight Neutrino SPV.
+Modern HD wallet for JoinMarket with support for Bitcoin Core and Neutrino backends.
 
 ## Installation
 
-See [Installation](install.md) for complete installation instructions including:
-
-- Automated installation with `install.sh`
-- Virtual environment setup
-- Backend setup (Bitcoin Core or Neutrino)
-
-**Quick install** (if you already have the repo):
-
-```bash
-cd joinmarket-ng
-source jmvenv/bin/activate  # If you used install.sh
-# OR create venv: python3 -m venv jmvenv && source jmvenv/bin/activate
-cd jmwallet
-pip install -e ../jmcore .
-```
+Use the [Installation guide](install.md) for setup, backend configuration, and Tor notes.
 
 ## Quick Start
 
-### 1. Create or Import a Wallet
-
-**Option A: Generate a new wallet** with password protection:
+### 1) Create or import a wallet
 
 ```bash
-# Generate with defaults (saves to ~/.joinmarket-ng/wallets/default.mnemonic with password)
+# Create a new encrypted wallet (default path)
 jm-wallet generate
 
-# Or specify a custom name and/or location
-jm-wallet generate --output ~/.joinmarket-ng/wallets/my-wallet.mnemonic
-
-# Generate without saving (display only)
-jm-wallet generate --no-save --no-prompt-password
-```
-
-**IMPORTANT**: The mnemonic is displayed once during generation. Write it down and store it securely offline - it's your only backup if you lose the encrypted file!
-
-**Option B: Import an existing mnemonic** (e.g., migrating from reference implementation):
-
-```bash
-# Interactive word-by-word input with Tab completion (saves to ~/.joinmarket-ng/wallets/default.mnemonic with password)
+# Import an existing mnemonic interactively
 jm-wallet import
-
-# Or pass mnemonic via environment variable (for scripting)
-MNEMONIC="your twelve or twenty-four word mnemonic phrase ..." jm-wallet import
-
-# Import a 12-word mnemonic
-jm-wallet import --words 12
 ```
 
-The import command features:
+The mnemonic is shown once during generation. Store it offline; it is your wallet backup.
 
-- Tab completion (where readline is available)
-- Auto-completion when only one BIP39 word matches your prefix
-- Suggestions when multiple words match
-- Mnemonic checksum validation
-
-**Note**: By default, the wallet is saved and password-protected. Use `--no-save` to skip saving or `--no-prompt-password` to skip password protection (not recommended for production).
-
-### 2. Choose Your Backend
-
-JoinMarket NG supports three blockchain backends with different trade-offs:
-
-#### Option A: Descriptor Wallet (Recommended - Fast & Efficient)
-
-**Best for**: Running a maker bot or frequent operations with your own Bitcoin Core node.
-
-Uses Bitcoin Core's descriptor wallet feature to persistently track your addresses. After one-time setup, syncs are nearly instant using `listunspent` instead of scanning the entire UTXO set.
-
-**Performance**: ~1 second per sync (vs ~90 seconds with scantxoutset)
-
-**Requirements**: Bitcoin Core v24+ with your own node
-
-**Security Note**: ⚠️ **Never use with a third-party node!** Your wallet addresses are stored in Bitcoin Core's wallet files. Funds are safe, but your addresses and balances are visible to whoever controls the node.
-
-Create an environment file:
+### 2) Check balances and addresses
 
 ```bash
-cat > ~/.joinmarket-ng/bitcoin.env << EOF
-export BITCOIN__RPC_URL=http://127.0.0.1:8332
-export BITCOIN__RPC_USER=your_rpc_user
-export BITCOIN__RPC_PASSWORD=your_rpc_password
-EOF
-chmod 600 ~/.joinmarket-ng/bitcoin.env
+jm-wallet info
 ```
 
-Check wallet balance (first run will import descriptors):
+JoinMarket uses 5 mixdepths. Keep mixdepths isolated and avoid merging across mixdepths outside CoinJoin.
+
+### 3) Send funds
 
 ```bash
-source ~/.joinmarket-ng/bitcoin.env
-jm-wallet info \
-  --mnemonic-file ~/.joinmarket-ng/wallets/my-wallet.mnemonic \
-  --backend descriptor_wallet
-
-# Or if using default wallet:
-jm-wallet info --backend descriptor_wallet
+# Sweep amount=0, otherwise set sats with --amount
+jm-wallet send <destination_address> --amount 100000
 ```
 
-The first run imports your wallet descriptors into Bitcoin Core (one-time ~5 second operation). Subsequent syncs are nearly instant.
+Use `--select-utxos` on `jm-wallet send` for manual coin control.
 
-#### Option B: Neutrino (Lightweight SPV)
+## Backends
 
-**Best for**: Limited storage or fast initial sync.
+Configure backend in `~/.joinmarket-ng/config.toml` (details in [Installation](install.md#configure-backend)).
 
-Lightweight SPV backend using BIP157/158 compact block filters.
+- `descriptor_wallet` (recommended): fast repeated sync with your own Bitcoin Core node.
+- `scantxoutset`: no Core wallet import, slower scans.
+- `neutrino`: lightweight setup with compact filters.
 
-**Storage**: ~500 MB (vs ~900 GB for full node)
+Security note: only use `descriptor_wallet` with a node you control.
 
-**Privacy**: High (downloads filters, not addresses)
+For backend internals and tradeoffs, see [Technical Wallet Notes](technical/wallet.md#backend-systems).
 
-Start Neutrino server with Docker:
+## Fidelity Bonds
 
-```bash
-docker run -d \
-  --name neutrino \
-  -p 8334:8334 \
-  -v neutrino-data:/data/neutrino \
-  -e NETWORK=mainnet \
-  -e LOG_LEVEL=info \
-  ghcr.io/m0wer/neutrino-api
-```
+Wallet commands support generating, listing, recovering, certifying, and spending fidelity bonds.
 
-**Note**: Pre-built binaries are also available in the [m0wer/neutrino-api](https://github.com/m0wer/neutrino-api/releases) releases.
+- Concepts and wire-level details: [Technical Privacy Notes](technical/privacy.md#fidelity-bonds)
+- Cold-wallet workflow and hardware-wallet caveats: [Cold Wallet Setup](technical/privacy.md#cold-wallet-setup)
 
-Check wallet balance:
+## Command Help
 
-```bash
-jm-wallet info \
-  --mnemonic-file ~/.joinmarket-ng/wallets/my-wallet.mnemonic \
-  --backend neutrino
-
-# Or if using default wallet:
-jm-wallet info --backend neutrino
-```
-
-#### Backend Comparison
-
-| Feature | Descriptor Wallet | Full Node (Legacy) | Neutrino |
-|---------|-------------------|-------------------|----------|
-| **Sync Speed** | ~1s | ~90s | ~5s |
-| **Storage** | ~900 GB | ~900 GB | ~500 MB |
-| **Setup** | One-time import | None | External server |
-| **Privacy** | High (own node) | High (own node) | High (filters) |
-| **Mempool** | ✅ Yes | ✅ Yes | ❌ No |
-
-### 3. View Your Addresses
-
-The wallet info command displays your balance across 5 mixdepths:
-
-```
-Total Balance: 10,500,000 sats (0.10500000 BTC)
-
-Balance by mixdepth:
-  Mixdepth 0:       5,000,000 sats  |  bc1q...
-  Mixdepth 1:       3,000,000 sats  |  bc1q...
-  Mixdepth 2:       2,500,000 sats  |  bc1q...
-  Mixdepth 3:               0 sats  |  bc1q...
-  Mixdepth 4:               0 sats  |  bc1q...
-```
-
-**Privacy Note**: Never merge coins across mixdepths outside of CoinJoin!
-
-## CLI Commands
-
-### Generate Wallet
-
-```bash
-# Generate and save encrypted wallet to default location (recommended)
-jm-wallet generate
-
-# Generate and save to custom name and/or location
-jm-wallet generate --output ~/my-wallet.mnemonic
-
-# Just display (not saved - for testing only)
-jm-wallet generate --no-save --no-prompt-password
-
-# 12-word mnemonic instead of 24
-jm-wallet generate --words 12
-```
-
-**Note**:
-
-- Default name and location: `~/.joinmarket-ng/wallets/default.mnemonic`
-- By default, the wallet is saved and password-protected
-- Use `--no-save` to skip saving, `--no-prompt-password` to skip encryption (not recommended)
-
-### Import Existing Mnemonic
-
-```bash
-# Interactive input with Tab completion and auto-complete
-jm-wallet import
-
-# Import to specific file
-jm-wallet import --output ~/my-wallet.mnemonic
-
-# Pass mnemonic via environment variable (for scripting)
-MNEMONIC="word1 word2 ..." jm-wallet import --no-prompt-password
-
-# Import 12-word mnemonic
-jm-wallet import --words 12
-
-# Force overwrite existing file
-jm-wallet import --force
-```
-
-### View Balance
-
-```bash
-# Using default wallet
-jm-wallet info --backend neutrino
-
-# Using specific wallet file
-jm-wallet info --mnemonic-file ~/my-wallet.mnemonic --backend neutrino
-
-# Bitcoin Core (with environment file)
-source ~/.joinmarket-ng/bitcoin.env
-jm-wallet info --backend descriptor_wallet
-```
-
-### List Fidelity Bonds
-
-```bash
-# Using default wallet
-jm-wallet list-bonds
-
-# Using specific wallet file
-jm-wallet list-bonds --mnemonic-file ~/my-wallet.mnemonic
-```
-
-## Cold Wallet Fidelity Bonds
-
-For maximum security, fidelity bonds can use a certificate chain that keeps the bond UTXO private key completely offline in a hardware wallet. See the [cold storage fidelity bond workflow](technical/privacy.md#fidelity-bonds) in the technical documentation for the full step-by-step guide.
-
-### All Commands
-
-For detailed help on any command, see the auto-generated help sections below.
+The full CLI reference below is auto-generated from command `--help` output.
 
 <!-- AUTO-GENERATED HELP START: jm-wallet -->
 
