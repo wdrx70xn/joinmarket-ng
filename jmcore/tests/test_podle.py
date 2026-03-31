@@ -549,3 +549,198 @@ class TestFullFlow:
             )
 
             assert is_valid, f"High index {idx} verification failed: {error}"
+
+
+class TestVerifyPoDLEEdgeCases:
+    """Edge cases for PoDLE verification."""
+
+    def test_verify_invalid_p2_length(self) -> None:
+        """Test P2 length validation."""
+        is_valid, error = verify_podle(
+            p=b"\x02" + bytes(32),
+            p2=b"short",  # Invalid P2 length
+            sig=bytes(32),
+            e=bytes(32),
+            commitment=bytes(32),
+        )
+        assert not is_valid
+        assert "Invalid P2 length" in error
+
+    def test_verify_invalid_sig_length(self) -> None:
+        """Test sig length validation."""
+        is_valid, error = verify_podle(
+            p=b"\x02" + bytes(32),
+            p2=b"\x03" + bytes(32),
+            sig=b"short",  # Invalid sig length
+            e=bytes(32),
+            commitment=bytes(32),
+        )
+        assert not is_valid
+        assert "Invalid sig length" in error
+
+    def test_verify_invalid_e_length(self) -> None:
+        """Test e length validation."""
+        is_valid, error = verify_podle(
+            p=b"\x02" + bytes(32),
+            p2=b"\x03" + bytes(32),
+            sig=bytes(32),
+            e=b"short",  # Invalid e length
+            commitment=bytes(32),
+        )
+        assert not is_valid
+        assert "Invalid e length" in error
+
+    def test_verify_invalid_commitment_length(self) -> None:
+        """Test commitment length validation."""
+        is_valid, error = verify_podle(
+            p=b"\x02" + bytes(32),
+            p2=b"\x03" + bytes(32),
+            sig=bytes(32),
+            e=bytes(32),
+            commitment=b"short",  # Invalid commitment length
+        )
+        assert not is_valid
+        assert "Invalid commitment length" in error
+
+    def test_verify_sig_out_of_range(self) -> None:
+        """Test that signature values >= N are rejected."""
+        private_key = bytes([5] * 32)
+        utxo_str = "d" * 64 + ":3"
+        commitment = generate_podle(private_key, utxo_str, index=0)
+
+        # Set sig to SECP256K1_N (out of range)
+        bad_sig = SECP256K1_N.to_bytes(32, "big")
+
+        is_valid, error = verify_podle(
+            p=commitment.p,
+            p2=commitment.p2,
+            sig=bad_sig,
+            e=commitment.e,
+            commitment=commitment.commitment,
+            index_range=range(10),
+        )
+        assert not is_valid
+        assert "out of range" in error
+
+    def test_verify_fails_for_all_indices(self) -> None:
+        """Test verification fails when proof index is outside checked range."""
+        private_key = bytes([5] * 32)
+        utxo_str = "d" * 64 + ":3"
+        # Generate with index 5
+        commitment = generate_podle(private_key, utxo_str, index=5)
+
+        # Verify with range that doesn't include index 5
+        is_valid, error = verify_podle(
+            p=commitment.p,
+            p2=commitment.p2,
+            sig=commitment.sig,
+            e=commitment.e,
+            commitment=commitment.commitment,
+            index_range=range(0, 3),  # Only check 0, 1, 2
+        )
+        assert not is_valid
+        assert "failed for all indices" in error
+
+    def test_verify_invalid_point(self) -> None:
+        """Test verification with invalid EC point data."""
+        # Use bytes that look right (33 bytes, 0x02 prefix) but aren't a valid point
+        # This should cause an exception in PublicKey() constructor
+        bad_p = b"\x02" + b"\xff" * 32  # likely not on curve
+
+        # We need p2 to match commitment: commitment = sha256(p2)
+        # Use a valid p2 with matching commitment
+        private_key = bytes([5] * 32)
+        commitment = generate_podle(private_key, "a" * 64 + ":0", index=0)
+
+        is_valid, error = verify_podle(
+            p=bad_p,
+            p2=commitment.p2,
+            sig=commitment.sig,
+            e=commitment.e,
+            commitment=commitment.commitment,
+            index_range=range(10),
+        )
+        # Should either fail verification or catch the exception
+        assert not is_valid
+
+
+class TestScalarMultGEdgeCases:
+    """Edge cases for scalar operations."""
+
+    def test_scalar_mult_g_zero_raises(self) -> None:
+        """Zero scalar raises PoDLEError."""
+        with pytest.raises(PoDLEError, match="Scalar cannot be zero"):
+            scalar_mult_g(0)
+
+    def test_point_mult_zero_raises(self) -> None:
+        """Zero scalar in point_mult raises PoDLEError."""
+        j = get_nums_point(0)
+        with pytest.raises(PoDLEError, match="Scalar cannot be zero"):
+            point_mult(0, j)
+
+    def test_scalar_mult_g_with_n(self) -> None:
+        """Scalar = N should be reduced to 0 mod N and raise."""
+        with pytest.raises(PoDLEError, match="Scalar cannot be zero"):
+            scalar_mult_g(SECP256K1_N)
+
+
+class TestParsePodleRevelationExtended:
+    """Tests for extended UTXO format in revelation parsing."""
+
+    def test_parse_extended_utxo_format(self) -> None:
+        """Test parsing revelation with extended UTXO format (4 parts)."""
+        revelation = {
+            "P": "02" + "aa" * 32,
+            "P2": "03" + "bb" * 32,
+            "sig": "cc" * 32,
+            "e": "dd" * 32,
+            "utxo": "ee" * 32 + ":0:0014deadbeef:750000",
+        }
+
+        parsed = parse_podle_revelation(revelation)
+        assert parsed is not None
+        assert parsed["txid"] == "ee" * 32
+        assert parsed["vout"] == 0
+        assert parsed["scriptpubkey"] == "0014deadbeef"
+        assert parsed["blockheight"] == 750000
+
+    def test_parse_three_part_utxo_fails(self) -> None:
+        """Three-part UTXO format is invalid."""
+        revelation = {
+            "P": "02" + "aa" * 32,
+            "P2": "03" + "bb" * 32,
+            "sig": "cc" * 32,
+            "e": "dd" * 32,
+            "utxo": "ee" * 32 + ":0:extra",
+        }
+
+        parsed = parse_podle_revelation(revelation)
+        assert parsed is None
+
+    def test_parse_invalid_hex_returns_none(self) -> None:
+        """Invalid hex in fields returns None."""
+        revelation = {
+            "P": "not_valid_hex",
+            "P2": "03" + "bb" * 32,
+            "sig": "cc" * 32,
+            "e": "dd" * 32,
+            "utxo": "ee" * 32 + ":0",
+        }
+
+        parsed = parse_podle_revelation(revelation)
+        assert parsed is None
+
+
+class TestDeserializeRevelationEdgeCases:
+    """Edge cases for deserialize_revelation."""
+
+    def test_empty_string(self) -> None:
+        """Empty string returns None."""
+        parsed = deserialize_revelation("")
+        assert parsed is None
+
+    def test_too_many_parts(self) -> None:
+        """Too many pipe-separated parts returns None."""
+        wire = "a|b|c|d|e|f"
+        parsed = deserialize_revelation(wire)
+        assert parsed is None

@@ -134,3 +134,44 @@ class TestJMTokenAuthority:
         token_authority.verify_refresh(pair2.refresh_token)
         with pytest.raises(jwt.InvalidTokenError):
             token_authority.verify_refresh(pair1.refresh_token)
+
+    def test_verify_access_scope_mismatch_raises(self, token_authority: JMTokenAuthority) -> None:
+        """verify_access rejects a token whose scope doesn't match current wallet."""
+        # Issue a token for wallet A
+        pair = token_authority.issue("wallet_a.jmdat")
+        # Change the wallet (scope changes) without resetting keys
+        token_authority._wallet_name = "wallet_b.jmdat"
+        # The access token from wallet_a should now have wrong scope
+        with pytest.raises(jwt.InvalidTokenError, match="Scope mismatch"):
+            token_authority.verify_access(pair.token)
+
+    def test_verify_access_returns_early_when_no_scope(
+        self, token_authority: JMTokenAuthority
+    ) -> None:
+        """verify_access returns payload without scope check when scope is empty."""
+        # Token authority with no wallet name -> scope is "walletrpc"
+        # Issue a token manually with matching scope
+        payload = {"exp": time.time() + 1800, "scope": "walletrpc"}
+        token = jwt.encode(payload, token_authority._access_key, algorithm="HS256")
+        # With no wallet set, scope is "walletrpc" which should match
+        result = token_authority.verify_access(token)
+        assert "scope" in result
+
+    def test_verify_refresh_scope_mismatch_raises(self, token_authority: JMTokenAuthority) -> None:
+        """verify_refresh rejects a token whose scope doesn't match current wallet."""
+        # Issue refresh token for wallet A
+        token_authority.issue("wallet_a.jmdat")
+        refresh_key_a = token_authority._refresh_key
+
+        # Manually change wallet name without rotating refresh key
+        # so we can test scope mismatch specifically
+        token_authority._wallet_name = "wallet_b.jmdat"
+        # Create a token with wallet_a scope but signed with current refresh key
+        scope_a = "walletrpc " + base64.b64encode(b"wallet_a.jmdat").decode()
+        forged_token = jwt.encode(
+            {"exp": time.time() + 14400, "scope": scope_a},
+            refresh_key_a,
+            algorithm="HS256",
+        )
+        with pytest.raises(jwt.InvalidTokenError, match="Scope mismatch"):
+            token_authority.verify_refresh(forged_token)

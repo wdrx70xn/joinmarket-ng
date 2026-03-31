@@ -146,3 +146,81 @@ class TestDaemonState:
         # Broadcasting should not raise; the full queue is silently dropped
         daemon_state.broadcast_ws({"test": True})
         assert queue not in daemon_state._ws_clients
+
+    @pytest.mark.asyncio
+    async def test_lock_wallet_stops_running_taker(
+        self, daemon_state: DaemonState, mock_wallet_service: MagicMock
+    ) -> None:
+        """Locking the wallet while a taker is running must stop the taker."""
+        daemon_state.wallet_service = mock_wallet_service
+        daemon_state.wallet_name = "w.jmdat"
+        daemon_state.activate_coinjoin_state(CoinjoinState.TAKER_RUNNING)
+
+        mock_taker = MagicMock()
+        mock_taker.stop = AsyncMock()
+        daemon_state._taker_ref = mock_taker
+
+        async def _noop() -> None:
+            await asyncio.sleep(10)
+
+        task = asyncio.create_task(_noop())
+        daemon_state._taker_task = task
+
+        await daemon_state.lock_wallet()
+
+        mock_taker.stop.assert_awaited_once()
+        assert task.cancelled()
+        assert daemon_state._taker_ref is None
+        assert daemon_state._taker_task is None
+        assert daemon_state.coinjoin_state == CoinjoinState.NOT_RUNNING
+
+    @pytest.mark.asyncio
+    async def test_lock_wallet_stops_wallet_sync_task(
+        self, daemon_state: DaemonState, mock_wallet_service: MagicMock
+    ) -> None:
+        """Locking the wallet cancels any background wallet sync task."""
+        daemon_state.wallet_service = mock_wallet_service
+        daemon_state.wallet_name = "w.jmdat"
+
+        async def _sync() -> None:
+            await asyncio.sleep(10)
+
+        sync_task = asyncio.create_task(_sync())
+        daemon_state._wallet_sync_task = sync_task
+
+        await daemon_state.lock_wallet()
+
+        assert sync_task.cancelled()
+        assert daemon_state._wallet_sync_task is None
+
+    @pytest.mark.asyncio
+    async def test_lock_wallet_maker_stop_raises(
+        self, daemon_state: DaemonState, mock_wallet_service: MagicMock
+    ) -> None:
+        """Locking wallet handles exceptions from maker.stop() gracefully."""
+        daemon_state.wallet_service = mock_wallet_service
+        daemon_state.wallet_name = "w.jmdat"
+
+        mock_maker = MagicMock()
+        mock_maker.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
+        daemon_state._maker_ref = mock_maker
+
+        # Should not raise
+        await daemon_state.lock_wallet()
+        assert daemon_state.wallet_service is None
+
+    @pytest.mark.asyncio
+    async def test_lock_wallet_taker_stop_raises(
+        self, daemon_state: DaemonState, mock_wallet_service: MagicMock
+    ) -> None:
+        """Locking wallet handles exceptions from taker.stop() gracefully."""
+        daemon_state.wallet_service = mock_wallet_service
+        daemon_state.wallet_name = "w.jmdat"
+
+        mock_taker = MagicMock()
+        mock_taker.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
+        daemon_state._taker_ref = mock_taker
+
+        # Should not raise
+        await daemon_state.lock_wallet()
+        assert daemon_state.wallet_service is None

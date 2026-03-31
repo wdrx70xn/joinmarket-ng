@@ -14,6 +14,7 @@ from jmcore.protocol import (
     FeatureSet,
     MessageType,
     ProtocolMessage,
+    RequiredFeatures,
     UTXOMetadata,
     create_handshake_request,
     create_handshake_response,
@@ -572,3 +573,200 @@ class TestPeerlistEntryFeatures:
         entry = create_peerlist_entry("J5TestNick", "test.onion:5222", features=FeatureSet())
         assert ";F:" not in entry
         assert entry == "J5TestNick;test.onion:5222"
+
+
+# ==============================================================================
+# RequiredFeatures Tests
+# ==============================================================================
+
+
+class TestRequiredFeatures:
+    """Tests for RequiredFeatures class."""
+
+    def test_none_has_no_requirements(self):
+        """RequiredFeatures.none() has no requirements."""
+        rf = RequiredFeatures.none()
+        assert not rf
+        assert len(rf.required) == 0
+
+    def test_for_neutrino_taker(self):
+        """RequiredFeatures.for_neutrino_taker() requires neutrino_compat."""
+        rf = RequiredFeatures.for_neutrino_taker()
+        assert rf
+        assert FEATURE_NEUTRINO_COMPAT in rf.required
+
+    def test_is_compatible_with_matching_features(self):
+        """Peer with required features is compatible."""
+        rf = RequiredFeatures.for_neutrino_taker()
+        fs = FeatureSet.from_list([FEATURE_NEUTRINO_COMPAT, FEATURE_PUSH_ENCRYPTED])
+        ok, msg = rf.is_compatible(fs)
+        assert ok
+        assert msg == ""
+
+    def test_is_compatible_with_missing_features(self):
+        """Peer missing required features is incompatible."""
+        rf = RequiredFeatures.for_neutrino_taker()
+        fs = FeatureSet.from_list([FEATURE_PUSH_ENCRYPTED])
+        ok, msg = rf.is_compatible(fs)
+        assert not ok
+        assert "Missing required features" in msg
+
+    def test_is_compatible_with_empty_peer_features(self):
+        """Peer with no features is incompatible when requirements exist."""
+        rf = RequiredFeatures.for_neutrino_taker()
+        fs = FeatureSet()
+        ok, msg = rf.is_compatible(fs)
+        assert not ok
+
+    def test_no_requirements_always_compatible(self):
+        """No requirements means any peer is compatible."""
+        rf = RequiredFeatures.none()
+        fs = FeatureSet()
+        ok, msg = rf.is_compatible(fs)
+        assert ok
+        assert msg == ""
+
+    def test_bool_reflects_required_set(self):
+        """__bool__ returns True when there are requirements."""
+        assert bool(RequiredFeatures.for_neutrino_taker())
+        assert not bool(RequiredFeatures.none())
+
+
+# ==============================================================================
+# ProtocolMessage to_bytes/from_bytes Tests
+# ==============================================================================
+
+
+class TestProtocolMessageBytes:
+    """Tests for ProtocolMessage.to_bytes and from_bytes."""
+
+    def test_to_bytes_returns_utf8(self):
+        """to_bytes returns UTF-8 encoded JSON."""
+        msg = ProtocolMessage(type=MessageType.PRIVMSG, payload={"nick": "alice"})
+        data = msg.to_bytes()
+        assert isinstance(data, bytes)
+        assert b"685" in data  # PRIVMSG value
+        assert b"alice" in data
+
+    def test_from_bytes_roundtrip(self):
+        """Round-trip through to_bytes/from_bytes preserves message."""
+        original = ProtocolMessage(type=MessageType.PEERLIST, payload={"peers": ["a", "b"]})
+        data = original.to_bytes()
+        restored = ProtocolMessage.from_bytes(data)
+        assert restored.type == MessageType.PEERLIST
+        assert restored.payload == {"peers": ["a", "b"]}
+
+    def test_from_bytes_all_message_types(self):
+        """Verify roundtrip for all MessageType variants."""
+        for mt in MessageType:
+            msg = ProtocolMessage(type=mt, payload={"t": mt.name})
+            restored = ProtocolMessage.from_bytes(msg.to_bytes())
+            assert restored.type == mt
+            assert restored.payload["t"] == mt.name
+
+
+# ==============================================================================
+# FeatureSet.validate_dependencies and supports Tests
+# ==============================================================================
+
+
+class TestFeatureSetEdgeCases:
+    """Additional FeatureSet edge case tests for coverage."""
+
+    def test_validate_dependencies_all_satisfied(self):
+        """All current features have no deps, so validation always passes."""
+        fs = FeatureSet.from_list(
+            [FEATURE_NEUTRINO_COMPAT, FEATURE_PUSH_ENCRYPTED, FEATURE_PEERLIST_FEATURES]
+        )
+        ok, msg = fs.validate_dependencies()
+        assert ok
+        assert msg == ""
+
+    def test_validate_dependencies_empty(self):
+        """Empty feature set has no dependency issues."""
+        fs = FeatureSet()
+        ok, msg = fs.validate_dependencies()
+        assert ok
+        assert msg == ""
+
+    def test_supports_generic(self):
+        """FeatureSet.supports() checks for arbitrary feature strings."""
+        fs = FeatureSet.from_list([FEATURE_NEUTRINO_COMPAT])
+        assert fs.supports(FEATURE_NEUTRINO_COMPAT)
+        assert not fs.supports(FEATURE_PUSH_ENCRYPTED)
+        assert not fs.supports("nonexistent_feature")
+
+    def test_supports_peerlist_features(self):
+        """FeatureSet.supports_peerlist_features() returns correct value."""
+        fs_with = FeatureSet.from_list([FEATURE_PEERLIST_FEATURES])
+        assert fs_with.supports_peerlist_features()
+
+        fs_without = FeatureSet.from_list([FEATURE_NEUTRINO_COMPAT])
+        assert not fs_without.supports_peerlist_features()
+
+    def test_iter_and_contains(self):
+        """Test __iter__ and __contains__ dunder methods."""
+        fs = FeatureSet.from_list([FEATURE_NEUTRINO_COMPAT, FEATURE_PUSH_ENCRYPTED])
+        features_list = list(fs)
+        assert len(features_list) == 2
+        assert FEATURE_NEUTRINO_COMPAT in features_list
+        assert FEATURE_PUSH_ENCRYPTED in features_list
+
+
+# ==============================================================================
+# parse_jm_message Edge Cases
+# ==============================================================================
+
+
+class TestParseJmMessageEdgeCases:
+    """Edge case tests for parse_jm_message."""
+
+    def test_returns_none_for_empty_string(self):
+        """Empty string returns None."""
+        assert parse_jm_message("") is None
+
+    def test_returns_none_for_no_separator(self):
+        """String without ! separator returns None."""
+        assert parse_jm_message("no_separator_here") is None
+
+    def test_returns_none_for_single_separator(self):
+        """String with only one ! returns None (need at least 3 parts)."""
+        assert parse_jm_message("alice!bob") is None
+
+    def test_handles_multiple_separators_in_command(self):
+        """Multiple ! in the command part are preserved."""
+        result = parse_jm_message("alice!bob!cmd!with!bangs")
+        assert result is not None
+        from_nick, to_nick, rest = result
+        assert from_nick == "alice"
+        assert to_nick == "bob"
+        assert rest == "cmd!with!bangs"
+
+
+# ==============================================================================
+# parse_peer_location Edge Cases
+# ==============================================================================
+
+
+class TestParsePeerLocationEdgeCases:
+    """Edge case tests for parse_peer_location."""
+
+    def test_port_zero_raises(self):
+        """Port 0 is invalid."""
+        with pytest.raises(ValueError, match="Invalid location"):
+            parse_peer_location("test.onion:0")
+
+    def test_negative_port_raises(self):
+        """Negative port is invalid."""
+        with pytest.raises(ValueError, match="Invalid location"):
+            parse_peer_location("test.onion:-1")
+
+    def test_non_numeric_port_raises(self):
+        """Non-numeric port raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid location"):
+            parse_peer_location("test.onion:abc")
+
+    def test_no_colon_raises(self):
+        """Location without colon raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid location"):
+            parse_peer_location("test.onion")

@@ -6,7 +6,9 @@ import hashlib
 
 from jmcore.btc_script import (
     BondAddressInfo,
+    _decode_scriptnum,
     derive_bond_address,
+    disassemble_script,
     mk_freeze_script,
     redeem_script_to_p2wsh_script,
 )
@@ -181,3 +183,113 @@ def test_derive_bond_address_empty_pubkey():
         raise AssertionError("Should have raised ValueError")
     except ValueError as e:
         assert "Invalid utxo_pub length" in str(e)
+
+
+# ---- disassemble_script tests ----
+
+
+class TestDisassembleScript:
+    """Tests for disassemble_script function."""
+
+    def test_disassemble_freeze_script(self):
+        """Test disassembling a timelocked freeze script."""
+        pubkey = "02a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+        locktime = 1956528000
+
+        script = mk_freeze_script(pubkey, locktime)
+        disasm = disassemble_script(script)
+
+        # Should contain the locktime as a number, OP_CHECKLOCKTIMEVERIFY, OP_DROP,
+        # the pubkey as hex, and OP_CHECKSIG
+        assert "OP_CHECKLOCKTIMEVERIFY" in disasm
+        assert "OP_DROP" in disasm
+        assert "OP_CHECKSIG" in disasm
+
+    def test_disassemble_p2wsh_script(self):
+        """Test disassembling a P2WSH scriptPubKey."""
+        pubkey = "02a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+        redeem_script = mk_freeze_script(pubkey, 1956528000)
+        p2wsh = redeem_script_to_p2wsh_script(redeem_script)
+
+        disasm = disassemble_script(p2wsh)
+        # P2WSH: 0 <32-byte-hash> (OP_0 is output as integer 0)
+        assert disasm.startswith("0 <")
+
+    def test_disassemble_empty_script(self):
+        """Test disassembling an empty script."""
+        disasm = disassemble_script(b"")
+        assert disasm == ""
+
+    def test_disassemble_simple_opcodes(self):
+        """Test disassembling script with only opcodes."""
+        from bitcointx.core.script import OP_CHECKSIG, OP_DROP, CScript
+
+        script = CScript([OP_DROP, OP_CHECKSIG])
+        disasm = disassemble_script(bytes(script))
+        assert "OP_DROP" in disasm
+        assert "OP_CHECKSIG" in disasm
+
+    def test_disassemble_data_push_long(self):
+        """Test disassembling script with long data pushes (>5 bytes shown as hex)."""
+        from bitcointx.core.script import CScript
+
+        data = b"\xaa" * 20  # 20-byte data push (like a pubkey hash)
+        script = CScript([data])
+        disasm = disassemble_script(bytes(script))
+        # Long data push should be shown as <hex>
+        assert "<" in disasm
+        assert "aa" in disasm.lower()
+
+    def test_disassemble_data_push_short_number(self):
+        """Test disassembling script with short data push decoded as number."""
+        from bitcointx.core.script import CScript
+
+        # Locktime 500000 encoded as script number (small enough to decode)
+        locktime = 500000
+        script = CScript([locktime])
+        disasm = disassemble_script(bytes(script))
+        assert "500000" in disasm
+
+
+class TestDecodeScriptnum:
+    """Tests for _decode_scriptnum helper."""
+
+    def test_empty_bytes(self):
+        """Empty bytes decodes to 0."""
+        assert _decode_scriptnum(b"") == 0
+
+    def test_single_byte_positive(self):
+        """Single positive byte."""
+        assert _decode_scriptnum(b"\x05") == 5
+        assert _decode_scriptnum(b"\x7f") == 127
+
+    def test_single_byte_negative(self):
+        """Single byte with sign bit set (negative)."""
+        # 0x85 = 1000_0101: sign bit set, value = -(0x05) = -5
+        assert _decode_scriptnum(b"\x85") == -5
+
+    def test_two_bytes_positive(self):
+        """Two-byte positive number (little-endian)."""
+        # 0x0100 = 256 in little-endian
+        assert _decode_scriptnum(b"\x00\x01") == 256
+
+    def test_two_bytes_negative(self):
+        """Two-byte negative number."""
+        # 0x0081 in little-endian: last byte has sign bit set
+        # value = 0x0081, sign bit at position (2-1)*8 = bit 8
+        # result = int.from_bytes(b"\x00\x81", "little") = 0x8100
+        # masked = -(0x8100 & ~(0x80 << 8)) = -(0x8100 & ~0x8000) = -(0x0100) = -256
+        assert _decode_scriptnum(b"\x00\x81") == -256
+
+    def test_zero_value(self):
+        """Zero encoded as single byte."""
+        assert _decode_scriptnum(b"\x00") == 0
+
+    def test_locktime_value(self):
+        """Typical locktime value decoding."""
+        # 500000 = 0x07A120 in little-endian: b"\x20\xa1\x07"
+        import struct
+
+        encoded = struct.pack("<I", 500000)[:3]  # 3 bytes is enough
+        result = _decode_scriptnum(encoded)
+        assert result == 500000

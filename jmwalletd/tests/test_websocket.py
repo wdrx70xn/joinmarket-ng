@@ -94,3 +94,32 @@ class TestWebSocketPaths:
         with client.websocket_connect("/ws") as ws:
             ws.send_text(token)
             ws.send_text(token)
+
+
+class TestWebSocketHeartbeat:
+    """Tests for heartbeat re-authentication."""
+
+    def test_invalid_heartbeat_closes_connection(self, ws_client: tuple[TestClient, str]) -> None:
+        """Invalid heartbeat token after successful auth closes the connection."""
+        client, token = ws_client
+        with pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/v1/ws") as ws:
+            ws.send_text(token)  # valid auth
+            ws.send_text("invalid_heartbeat_token")  # invalid heartbeat
+            ws.receive_text()  # should trigger disconnect
+
+
+class TestWebSocketCleanup:
+    """Tests for WebSocket client registration/cleanup."""
+
+    def test_client_unregistered_on_disconnect(self, ws_client: tuple[TestClient, str]) -> None:
+        """WebSocket client queue is unregistered after disconnect."""
+        client, token = ws_client
+        state = get_daemon_state()
+
+        with client.websocket_connect("/api/v1/ws") as ws:
+            ws.send_text(token)
+            _wait_for_ws_client(state)
+            assert len(state._ws_clients) == 1
+
+        # After the context manager exits, client should be unregistered
+        assert len(state._ws_clients) == 0

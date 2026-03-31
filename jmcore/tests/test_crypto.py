@@ -11,13 +11,17 @@ from coincurve import PrivateKey
 
 from jmcore.crypto import (
     KeyPair,
+    NickIdentity,
     base58_encode,
+    base58check_encode,
+    bitcoin_message_hash,
     bitcoin_message_hash_bytes,
     ecdsa_sign,
     ecdsa_verify,
     generate_jm_nick,
     get_ascii_cert_msg,
     get_cert_msg,
+    mnemonic_to_seed,
     strip_signature_padding,
     verify_bitcoin_message_signature,
     verify_fidelity_bond_proof,
@@ -539,3 +543,306 @@ def test_verify_fidelity_bond_proof_invalid_nick_sig():
     is_valid, data, error = verify_fidelity_bond_proof(proof_b64, maker_nick, taker_nick)
     assert not is_valid
     assert "der header not found" in error.lower()
+
+
+# ==============================================================================
+# NickIdentity tests
+# ==============================================================================
+
+
+class TestNickIdentity:
+    """Tests for NickIdentity class."""
+
+    def test_nick_format(self):
+        """Test that NickIdentity generates a valid J5 nick."""
+        identity = NickIdentity(version=5)
+        assert identity.nick.startswith("J5")
+        assert len(identity.nick) == 16  # J + version digit + 14 chars
+
+    def test_deterministic_from_privkey(self):
+        """Test that same private key gives same nick."""
+        privkey = hashlib.sha256(b"test_seed").digest()
+        id1 = NickIdentity(version=5, private_key_bytes=privkey)
+        id2 = NickIdentity(version=5, private_key_bytes=privkey)
+        assert id1.nick == id2.nick
+        assert id1.public_key_hex == id2.public_key_hex
+
+    def test_public_key_hex_format(self):
+        """Test public key hex is 66 chars (33 bytes compressed)."""
+        identity = NickIdentity()
+        assert len(identity.public_key_hex) == 66
+        assert identity.public_key_hex[:2] in ("02", "03")
+
+    def test_sign_message(self):
+        """Test message signing produces valid format."""
+        identity = NickIdentity()
+        signed = identity.sign_message("test_message")
+        parts = signed.split(" ")
+        assert len(parts) == 3
+        assert parts[0] == "test_message"
+        assert parts[1] == identity.public_key_hex
+        # Third part is base64-encoded signature
+        base64.b64decode(parts[2])
+
+    def test_sign_message_with_hostid(self):
+        """Test message signing with hostid appended."""
+        identity = NickIdentity()
+        signed = identity.sign_message("hello", hostid="server123")
+        parts = signed.split(" ")
+        assert parts[0] == "hello"
+
+    def test_sign_message_verifiable(self):
+        """Test that signed messages can be verified."""
+        identity = NickIdentity()
+        signed = identity.sign_message("verify_me")
+        parts = signed.split(" ")
+        pubkey_bytes = bytes.fromhex(parts[1])
+        assert ecdsa_verify("verify_me", parts[2], pubkey_bytes)
+
+    def test_different_privkeys_different_nicks(self):
+        """Test different private keys generate different nicks."""
+        id1 = NickIdentity(private_key_bytes=hashlib.sha256(b"key1").digest())
+        id2 = NickIdentity(private_key_bytes=hashlib.sha256(b"key2").digest())
+        assert id1.nick != id2.nick
+
+
+# ==============================================================================
+# bitcoin_message_hash varint branch tests
+# ==============================================================================
+
+
+class TestBitcoinMessageHashVarint:
+    """Test varint encoding branches in bitcoin_message_hash."""
+
+    def test_short_message(self):
+        """Message < 253 bytes uses 1-byte varint."""
+        h = bitcoin_message_hash("hello")
+        assert len(h) == 32
+
+    def test_medium_message(self):
+        """Message 253-65535 bytes uses 3-byte varint (0xfd prefix)."""
+        msg = "a" * 300
+        h = bitcoin_message_hash(msg)
+        assert len(h) == 32
+
+    def test_large_message(self):
+        """Message 65536+ bytes uses 5-byte varint (0xfe prefix)."""
+        msg = "b" * 70000
+        h = bitcoin_message_hash(msg)
+        assert len(h) == 32
+
+
+class TestBitcoinMessageHashBytesVarint:
+    """Test varint encoding branches in bitcoin_message_hash_bytes."""
+
+    def test_short_message(self):
+        """Message < 253 bytes uses 1-byte varint."""
+        h = bitcoin_message_hash_bytes(b"hello")
+        assert len(h) == 32
+
+    def test_medium_message(self):
+        """Message 253-65535 bytes uses 3-byte varint (0xfd prefix)."""
+        msg = b"a" * 300
+        h = bitcoin_message_hash_bytes(msg)
+        assert len(h) == 32
+
+    def test_large_message(self):
+        """Message 65536+ bytes uses 5-byte varint (0xfe prefix)."""
+        msg = b"b" * 70000
+        h = bitcoin_message_hash_bytes(msg)
+        assert len(h) == 32
+
+    def test_consistency(self):
+        """bitcoin_message_hash and bitcoin_message_hash_bytes should agree for ASCII."""
+        msg_str = "test consistency"
+        h1 = bitcoin_message_hash(msg_str)
+        h2 = bitcoin_message_hash_bytes(msg_str.encode("utf-8"))
+        assert h1 == h2
+
+
+# ==============================================================================
+# Additional edge case tests
+# ==============================================================================
+
+
+class TestBase58CheckEncode:
+    """Tests for base58check_encode."""
+
+    def test_basic(self):
+        """Test base58check encoding produces non-empty result."""
+        result = base58check_encode(b"\x00" + b"\xaa" * 20)
+        assert len(result) > 0
+
+    def test_deterministic(self):
+        """Same input always gives same output."""
+        data = b"\x05" + b"\xbb" * 20
+        assert base58check_encode(data) == base58check_encode(data)
+
+
+class TestMnemonicToSeed:
+    """Tests for mnemonic_to_seed (BIP39)."""
+
+    def test_produces_64_bytes(self):
+        """BIP39 seed is always 64 bytes."""
+        mnemonic = "abandon " * 11 + "about"
+        seed = mnemonic_to_seed(mnemonic)
+        assert len(seed) == 64
+
+    def test_with_passphrase(self):
+        """Different passphrase produces different seed."""
+        mnemonic = "abandon " * 11 + "about"
+        seed1 = mnemonic_to_seed(mnemonic, passphrase="")
+        seed2 = mnemonic_to_seed(mnemonic, passphrase="my_passphrase")
+        assert seed1 != seed2
+
+    def test_deterministic(self):
+        """Same mnemonic + passphrase always produces same seed."""
+        mnemonic = "abandon " * 11 + "about"
+        seed1 = mnemonic_to_seed(mnemonic, passphrase="test")
+        seed2 = mnemonic_to_seed(mnemonic, passphrase="test")
+        assert seed1 == seed2
+
+
+class TestStripSignaturePaddingEdgeCases:
+    """Additional edge cases for strip_signature_padding."""
+
+    def test_no_der_header_strips_trailing_zeros(self):
+        """Signature without 0x30 DER header: strip trailing zeros."""
+        sig = b"\x01\x02\x03\x00\x00\x00"
+        result = strip_signature_padding(sig)
+        assert result == b"\x01\x02\x03"
+
+    def test_empty_signature(self):
+        """Empty signature returns empty bytes."""
+        result = strip_signature_padding(b"")
+        assert result == b""
+
+    def test_only_padding(self):
+        """Signature that's only zeros returns empty after stripping."""
+        result = strip_signature_padding(b"\x00\x00\x00")
+        assert result == b""
+
+
+class TestVerifyRawEcdsaEdgeCases:
+    """Additional edge cases for verify_raw_ecdsa."""
+
+    def test_empty_signature(self):
+        """Empty signature returns False."""
+        pub_key = PrivateKey().public_key.format(compressed=True)
+        msg_hash = hashlib.sha256(b"test").digest()
+        assert not verify_raw_ecdsa(msg_hash, b"", pub_key)
+
+    def test_invalid_pubkey(self):
+        """Invalid public key returns False."""
+        msg_hash = hashlib.sha256(b"test").digest()
+        assert not verify_raw_ecdsa(msg_hash, b"\x30" + b"\x00" * 70, b"\x00" * 33)
+
+    def test_all_zero_signature_stripped(self):
+        """All-zero signature is stripped to empty and returns False."""
+        pub_key = PrivateKey().public_key.format(compressed=True)
+        msg_hash = hashlib.sha256(b"test").digest()
+        assert not verify_raw_ecdsa(msg_hash, b"\x00" * 72, pub_key)
+
+
+class TestVerifyBitcoinMessageSignatureEdgeCases:
+    """Edge cases for verify_bitcoin_message_signature."""
+
+    def test_invalid_pubkey(self):
+        """Invalid public key returns False (exception caught)."""
+        assert not verify_bitcoin_message_signature(b"msg", b"\x30\x00", b"\x00" * 33)
+
+    def test_empty_message(self):
+        """Empty message with valid sig structure returns False for wrong key."""
+        priv_key = PrivateKey()
+        pub_key = priv_key.public_key.format(compressed=True)
+        wrong_pub = PrivateKey().public_key.format(compressed=True)
+        msg = b""
+        msg_hash = bitcoin_message_hash_bytes(msg)
+        sig = priv_key.sign(msg_hash, hasher=None)
+        assert verify_bitcoin_message_signature(msg, sig, pub_key)
+        assert not verify_bitcoin_message_signature(msg, sig, wrong_pub)
+
+
+class TestVerifyFidelityBondProofEdgeCases:
+    """Additional edge cases for verify_fidelity_bond_proof."""
+
+    def test_invalid_cert_sig_no_der_header(self):
+        """Test that proof with no DER header in cert sig fails."""
+        utxo_priv_key = PrivateKey()
+        utxo_pub_key = utxo_priv_key.public_key.format(compressed=True)
+
+        cert_priv_key = PrivateKey()
+        cert_pub_key = cert_priv_key.public_key.format(compressed=True)
+
+        maker_nick = "J5maker"
+        taker_nick = "J5taker"
+        cert_expiry_encoded = 52
+
+        # Create valid nick signature
+        nick_msg = (taker_nick + "|" + maker_nick).encode("ascii")
+        nick_msg_hash = _bitcoin_message_hash(nick_msg)
+        nick_sig = cert_priv_key.sign(nick_msg_hash, hasher=None)
+        nick_sig_padded = nick_sig.rjust(72, b"\xff")
+
+        # Create cert sig without 0x30 header (all 'Z' bytes)
+        cert_sig_padded = b"Z" * 72
+
+        proof_data = struct.pack(
+            "<72s72s33sH33s32sII",
+            nick_sig_padded,
+            cert_sig_padded,
+            cert_pub_key,
+            cert_expiry_encoded,
+            utxo_pub_key,
+            b"a" * 32,
+            0,
+            800000,
+        )
+
+        proof_b64 = base64.b64encode(proof_data).decode()
+        is_valid, data, error = verify_fidelity_bond_proof(proof_b64, maker_nick, taker_nick)
+        assert not is_valid
+        assert "certificate signature" in error.lower() or "der header" in error.lower()
+
+    def test_valid_proof_with_ascii_cert_format(self):
+        """Test bond proof verification with ASCII certificate format."""
+        utxo_priv_key = PrivateKey()
+        utxo_pub_key = utxo_priv_key.public_key.format(compressed=True)
+
+        cert_priv_key = PrivateKey()
+        cert_pub_key = cert_priv_key.public_key.format(compressed=True)
+
+        maker_nick = "J5makerascii"
+        taker_nick = "J5takerascii"
+        cert_expiry_encoded = 10
+
+        # Create certificate signature using ASCII format
+        ascii_cert_msg = get_ascii_cert_msg(cert_pub_key, cert_expiry_encoded)
+        cert_msg_hash = _bitcoin_message_hash(ascii_cert_msg)
+        cert_sig = utxo_priv_key.sign(cert_msg_hash, hasher=None)
+
+        # Create nick signature
+        nick_msg = (taker_nick + "|" + maker_nick).encode("ascii")
+        nick_msg_hash = _bitcoin_message_hash(nick_msg)
+        nick_sig = cert_priv_key.sign(nick_msg_hash, hasher=None)
+
+        nick_sig_padded = nick_sig.rjust(72, b"\xff")
+        cert_sig_padded = cert_sig.rjust(72, b"\xff")
+
+        proof_data = struct.pack(
+            "<72s72s33sH33s32sII",
+            nick_sig_padded,
+            cert_sig_padded,
+            cert_pub_key,
+            cert_expiry_encoded,
+            utxo_pub_key,
+            b"b" * 32,
+            1,
+            900000,
+        )
+
+        proof_b64 = base64.b64encode(proof_data).decode()
+        is_valid, data, error = verify_fidelity_bond_proof(proof_b64, maker_nick, taker_nick)
+        assert is_valid, f"ASCII cert format verification failed: {error}"
+        assert data is not None
+        assert data["cert_expiry"] == cert_expiry_encoded * 2016
