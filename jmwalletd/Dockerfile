@@ -10,7 +10,7 @@ ARG NODE_SLIM_DIGEST=sha256:06e5c9f86bfa0aaa7163cf37a5eaa8805f16b9acb48e3f85645b
 
 # JAM frontend: pinned commit hash for reproducible builds
 # Update with: ./scripts/update-base-images.sh
-ARG JAM_COMMIT=6fdedffe09bfc3c838467430754b3c7de69063e8
+ARG JAM_COMMIT=d3f7e499c14dd1960d3fc728f80b1fa62a1474bd
 
 # Pin build tools for reproducible builds
 # setuptools version is stamped into WHEEL metadata (Generator: setuptools (x.y.z))
