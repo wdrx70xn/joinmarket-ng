@@ -1,0 +1,17 @@
+[run]
+omit =
+    */tests/*
+    */test_*
+    conftest.py
+    tests/*
+
+[report]
+omit =
+    */tests/*
+    */test_*
+    conftest.py
+    tests/*
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
