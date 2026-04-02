@@ -100,6 +100,7 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
         path_key = (mixdepth, change, index)
         cached = self._path_cache.get(path_key)
         if cached is not None:
+            self.address_cache[cached] = path_key
             return cached
 
         path = f"{self.root_path}/{mixdepth}'/{change}/{index}"
