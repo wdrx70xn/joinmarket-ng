@@ -50,6 +50,14 @@ curl -sSL https://raw.githubusercontent.com/joinmarket-ng/joinmarket-ng/main/ins
 
 Edit `~/.joinmarket-ng/config.toml`.
 
+If this is a manual/source install and the file does not exist yet:
+
+```bash
+mkdir -p ~/.joinmarket-ng/wallets
+chmod 700 ~/.joinmarket-ng ~/.joinmarket-ng/wallets
+curl -fsSL https://raw.githubusercontent.com/joinmarket-ng/joinmarket-ng/main/config.toml.template -o ~/.joinmarket-ng/config.toml
+```
+
 ### Bitcoin Core (`descriptor_wallet`, recommended)
 
 ```toml
@@ -70,6 +78,13 @@ neutrino_url = "http://127.0.0.1:8334"
 
 Neutrino server example:
 
+On Linux, add your user to the Docker group once (skip if Docker already works without `sudo`):
+
+```bash
+sudo usermod -aG docker "$USER"
+newgrp docker
+```
+
 ```bash
 docker run -d \
   --name neutrino \
@@ -79,6 +94,8 @@ docker run -d \
   -e NETWORK=mainnet \
   ghcr.io/m0wer/neutrino-api
 ```
+
+On low-power hardware, initial Neutrino sync can take significantly longer (for example, Raspberry Pi 4: ~20 minutes sync plus long prefetch).
 
 ## First Run
 
@@ -135,7 +152,15 @@ python -m pip install -e ./taker
 
 - Taker and orderbook watcher require Tor SOCKS (`127.0.0.1:9050`)
 - Maker additionally uses Tor control (`127.0.0.1:9051`) for ephemeral onion services
+- If you edit Tor config, restart Tor (`sudo systemctl restart tor` on Linux, `brew services restart tor` on macOS)
 - Directory server usually runs as a Tor hidden service in Docker (see [Directory Server](README-directory-server.md))
+
+On Debian/Ubuntu maker setups, Tor cookie auth often requires `debian-tor` group access:
+
+```bash
+sudo usermod -aG debian-tor "$USER"
+newgrp debian-tor
+```
 
 ## Troubleshooting
 
