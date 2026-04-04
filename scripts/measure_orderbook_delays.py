@@ -76,7 +76,7 @@ async def measure_response_delays(
 
             pubmsg = {
                 "type": MessageType.PUBMSG.value,
-                "line": f"{nick}!PUBLIC!!orderbook",
+                "line": f"{nick}!PUBLIC!orderbook",
             }
 
             start_time = time.perf_counter()

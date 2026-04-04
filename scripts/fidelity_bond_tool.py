@@ -121,7 +121,7 @@ async def fetch_bond_proof(
         # Send !orderbook request
         orderbook_msg = {
             "type": MessageType.PUBMSG.value,
-            "line": f"{our_nick}!PUBLIC!!orderbook",
+            "line": f"{our_nick}!PUBLIC!orderbook",
         }
         await conn.send(json.dumps(orderbook_msg).encode())
         print(f"Sent !orderbook request, waiting for responses from {maker_nick}...")

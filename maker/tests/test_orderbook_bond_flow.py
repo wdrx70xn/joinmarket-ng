@@ -37,7 +37,7 @@ async def test_orderbook_watcher_receives_bonds(tmp_path) -> None:
     assert "!tbond" not in public_announcement, "Public announcement should NOT contain bond"
 
     # 2. Orderbook request
-    orderbook_request = f"J5TakerNick123{COMMAND_PREFIX}PUBLIC{COMMAND_PREFIX}!orderbook"
+    orderbook_request = f"J5TakerNick123{COMMAND_PREFIX}PUBLIC{COMMAND_PREFIX}orderbook"
     assert "orderbook" in orderbook_request
 
     # 3. PRIVMSG response WITH bond

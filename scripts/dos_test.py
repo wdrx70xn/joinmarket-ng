@@ -323,7 +323,7 @@ async def flood_single_connection(
                 # Send !orderbook
                 orderbook_msg = {
                     "type": MessageType.PUBMSG.value,
-                    "line": f"{our_nick}!PUBLIC!!orderbook",
+                    "line": f"{our_nick}!PUBLIC!orderbook",
                 }
                 await conn.send(json.dumps(orderbook_msg).encode())
                 stats.requests_sent += 1

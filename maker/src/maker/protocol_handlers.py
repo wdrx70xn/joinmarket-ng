@@ -103,18 +103,16 @@ class ProtocolHandlersMixin:
                 first_arg = cmd_parts[1].split()[0] if len(cmd_parts) > 1 else ""
                 fingerprint = MessageDeduplicator.make_fingerprint(from_nick, command, first_arg)
             elif msg_type == MessageType.PUBMSG.value:
-                # Parse the public message to check if it's !orderbook
-                # Format: nick!PUBLIC!command or nick!PUBLIC!!command
+                # Parse the public message to check if it's an orderbook request
+                # Wire format: nick!PUBLIC!orderbook (COMMAND_PREFIX is the field separator)
                 parts = line.split(COMMAND_PREFIX)
-                # Check both parts[2] and parts[3] since format can be either:
-                # nick!PUBLIC!orderbook or nick!PUBLIC!!orderbook
+                # Rejoin parts after nick and target to get the command, then strip
+                # any leading "!" for robustness (handles legacy double-bang format)
+                rest = COMMAND_PREFIX.join(parts[2:]) if len(parts) >= 3 else ""
                 is_orderbook_request = (
                     len(parts) >= 3
                     and parts[1] == "PUBLIC"
-                    and (
-                        parts[2].strip().lstrip("!") == "orderbook"
-                        or (len(parts) >= 4 and parts[3].strip().lstrip("!") == "orderbook")
-                    )
+                    and rest.strip().lstrip("!") == "orderbook"
                 )
 
                 logger.debug(f"PUBMSG parts={parts}, is_orderbook={is_orderbook_request}")

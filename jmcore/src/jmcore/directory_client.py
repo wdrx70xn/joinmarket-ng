@@ -774,7 +774,7 @@ class DirectoryClient:
 
         pubmsg = {
             "type": MessageType.PUBMSG.value,
-            "line": f"{self.nick}!PUBLIC!!orderbook",
+            "line": f"{self.nick}!PUBLIC!orderbook",
         }
         await self.connection.send(json.dumps(pubmsg).encode("utf-8"))
         logger.debug("Sent !orderbook broadcast to PUBLIC")
@@ -1038,7 +1038,7 @@ class DirectoryClient:
             try:
                 pubmsg = {
                     "type": MessageType.PUBMSG.value,
-                    "line": f"{self.nick}!PUBLIC!!orderbook",
+                    "line": f"{self.nick}!PUBLIC!orderbook",
                 }
                 await self.connection.send(json.dumps(pubmsg).encode("utf-8"))
                 logger.info("Sent !orderbook request to get current offers")
@@ -1127,7 +1127,7 @@ class DirectoryClient:
                                         try:
                                             pubmsg = {
                                                 "type": MessageType.PUBMSG.value,
-                                                "line": f"{self.nick}!PUBLIC!!orderbook",
+                                                "line": f"{self.nick}!PUBLIC!orderbook",
                                             }
                                             await self.connection.send(
                                                 json.dumps(pubmsg).encode("utf-8")

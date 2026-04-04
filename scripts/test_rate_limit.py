@@ -78,7 +78,7 @@ async def test_rate_limiting(
             # Send !orderbook
             orderbook_msg = {
                 "type": MessageType.PUBMSG.value,
-                "line": f"{our_nick}!PUBLIC!!orderbook",
+                "line": f"{our_nick}!PUBLIC!orderbook",
             }
 
             try:
