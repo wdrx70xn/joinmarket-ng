@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-04-04
+
+### Fixed
+
+- Fix memory leak in MakerBot by bounding rate-limited log timestamps ([66cd3d59](../../commit/66cd3d59e5af27a10eb33f555d73199aa491134d))
+- Fix allow_mixdepth_zero_merge config not being read from settings file ([912a6c49](../../commit/912a6c4955db7d8c45f31e34b7f0bd78bebe9fc8))
+
 ## [0.23.0] - 2026-04-04
 
 ### Added
@@ -1120,7 +1127,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.23.0...HEAD
+[Unreleased]: ../../compare/0.23.1...HEAD
+[0.23.1]: ../../compare/0.23.0...0.23.1
 [0.23.0]: ../../compare/0.22.0...0.23.0
 [0.22.0]: ../../compare/0.21.0...0.22.0
 [0.21.0]: ../../compare/0.20.0...0.21.0
