@@ -16,15 +16,14 @@ Reference: joinmarket-clientserver/src/jmclient/maker.py:verify_unsigned_tx()
 
 from __future__ import annotations
 
-import struct
 from typing import Any
 
 from jmcore.bitcoin import (
     decode_varint,
     get_hrp,
+    parse_transaction as parse_jmcore_transaction,
     scriptpubkey_to_address,
 )
-from jmcore.constants import MAX_MONEY
 from jmcore.models import NetworkType, OfferType
 from jmcore.models import calculate_cj_fee as calculate_cj_fee
 from jmwallet.wallet.models import UTXOInfo
@@ -169,68 +168,26 @@ def parse_transaction(
         }
     """
     try:
-        tx_bytes = bytes.fromhex(tx_hex)
+        parsed = parse_jmcore_transaction(tx_hex)
 
-        offset = 0
-
-        version = int.from_bytes(tx_bytes[offset : offset + 4], "little")
-        if version not in (1, 2):
+        # Keep maker-side policy checks while delegating structural parsing.
+        if parsed.version not in (1, 2):
             return None
-        offset += 4
-
-        # Mandate SegWit marker and flag (0001)
-        if tx_bytes[offset] != 0x00 or tx_bytes[offset + 1] != 0x01:
+        if not parsed.has_witness:
             return None
-        offset += 2
-
-        input_count, offset = decode_varint(tx_bytes, offset)
-        if input_count == 0:
+        if len(parsed.inputs) == 0 or len(parsed.outputs) == 0:
             return None
 
-        inputs = []
-        for _ in range(input_count):
-            txid = tx_bytes[offset : offset + 32][::-1].hex()
-            offset += 32
-            vout = int.from_bytes(tx_bytes[offset : offset + 4], "little")
-            offset += 4
-            script_len, offset = decode_varint(tx_bytes, offset)
-            offset += script_len
-            int.from_bytes(tx_bytes[offset : offset + 4], "little")  # sequence
-            offset += 4
+        network_str = network.value if isinstance(network, NetworkType) else network
+        outputs = [
+            {
+                "value": output.value,
+                "address": script_to_address(output.script, network_str),
+            }
+            for output in parsed.outputs
+        ]
 
-            inputs.append({"txid": txid, "vout": vout})
-
-        output_count, offset = decode_varint(tx_bytes, offset)
-        if output_count == 0:
-            return None
-
-        outputs = []
-        for _ in range(output_count):
-            value = struct.unpack("<q", tx_bytes[offset : offset + 8])[0]
-            if value < 0 or value > MAX_MONEY:
-                return None
-            offset += 8
-
-            script_len, offset = decode_varint(tx_bytes, offset)
-            script_pubkey = tx_bytes[offset : offset + script_len]
-            offset += script_len
-
-            # Convert to network string for scriptpubkey_to_address
-            network_str = network.value if isinstance(network, NetworkType) else network
-            address = script_to_address(script_pubkey, network_str)
-            outputs.append({"value": value, "address": address})
-
-        # Parse witness data
-        for _ in range(input_count):
-            stack_items, offset = decode_varint(tx_bytes, offset)
-            for _ in range(stack_items):
-                item_len, offset = decode_varint(tx_bytes, offset)
-                offset += item_len
-
-        # Zero-garbage check: exactly 4 bytes (nLockTime) must remain
-        if len(tx_bytes) - offset != 4:
-            return None
-
+        inputs = [{"txid": inp.txid, "vout": inp.vout} for inp in parsed.inputs]
         return {"inputs": inputs, "outputs": outputs}
 
     except Exception as e:
