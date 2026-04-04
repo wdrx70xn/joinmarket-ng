@@ -5,7 +5,7 @@ Tests for transaction verification - MOST CRITICAL security component!
 from unittest.mock import patch
 
 import pytest
-from jmcore.models import OfferType
+from jmcore.models import NetworkType, OfferType
 from jmwallet.wallet.models import UTXOInfo
 
 from maker.tx_verification import (
@@ -757,6 +757,81 @@ class TestParseTransactionOutputValueRange:
             "001475420f00000000b6240500a89d7b4c48398a6f3b0021fc0000"
         )
         result = parse_transaction(tx_hex, network="mainnet")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for transaction parser leniency (fuzzer-found crashes)
+# ---------------------------------------------------------------------------
+
+
+class TestParserLeniencyRegression:
+    """Regression tests for structural leniency bugs found via fuzzing.
+
+    These verify that malformed transaction hex inputs are properly
+    rejected (return None) rather than silently accepted.
+    """
+
+    def test_non_standard_version(self) -> None:
+        """Version 0x00B70000 must be rejected (only 1 and 2 are valid)."""
+        tx_hex = "0000b7000000"
+        result = parse_transaction(tx_hex, network=NetworkType.MAINNET)
+        assert result is None
+
+    def test_truncated_witness(self) -> None:
+        """SegWit tx where nLockTime residue is 3 bytes (not 4) must be rejected.
+
+        From fuzzer crash-1f46fc92: witness has 0 items but only 3 bytes
+        remain after, not the required 4 for nLockTime.
+        """
+        tx_hex = (
+            "01000000"  # version 1
+            "0001"  # segwit marker+flag
+            "01"  # 1 input
+            "00000000000000000000000000000000"
+            "00000100000000000000000000000000"  # txid
+            "00000000"  # vout
+            "00"  # empty scriptsig
+            "ffffffff"  # sequence
+            "01"  # 1 output
+            "40420f0000000000"  # value (1M sats)
+            "16"  # script len 22
+            "0014751e76e0a152d5b6100500a89d7b4c48398a6f3b"  # P2WPKH
+            "00"  # witness: 0 stack items
+            "fc0000"  # only 3 bytes remain (need 4 for nLockTime)
+        )
+        result = parse_transaction(tx_hex, network=NetworkType.MAINNET)
+        assert result is None
+
+    def test_zero_inputs(self) -> None:
+        """Transaction with zero inputs must be rejected."""
+        tx_hex = "01000000000000000000"
+        result = parse_transaction(tx_hex)
+        assert result is None
+
+    def test_trailing_garbage(self) -> None:
+        """Transaction with extra bytes after nLockTime must be rejected.
+
+        From fuzzer crash-5bfbca51: valid structure but 7 trailing bytes
+        remain where only 4 (nLockTime) are expected.
+        """
+        tx_hex = (
+            "01000000"  # version 1
+            "0001"  # segwit marker+flag
+            "01"  # 1 input
+            "00000000000000000000000000000000"
+            "00000060000000660000000000000000"  # txid
+            "00000000"  # vout
+            "00"  # empty scriptsig
+            "ffffffff"  # sequence
+            "01"  # 1 output
+            "40420f0000000000"  # value
+            "16"  # script len 22
+            "001475420f00000000b6100500a89d7b4c48348a6f3b"  # P2WPKH
+            "00"  # witness: 0 stack items
+            "fc4e4e4e4e0000"  # 7 bytes remain (need exactly 4 for nLockTime)
+        )
+        result = parse_transaction(tx_hex, network=NetworkType.MAINNET)
         assert result is None
 
 

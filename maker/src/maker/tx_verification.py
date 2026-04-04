@@ -174,7 +174,7 @@ def parse_transaction(
         offset = 0
 
         version = int.from_bytes(tx_bytes[offset : offset + 4], "little")
-        if version not in (1, 2, 3):
+        if version not in (1, 2):
             return None
         offset += 4
 
@@ -195,7 +195,7 @@ def parse_transaction(
             offset += 4
             script_len, offset = decode_varint(tx_bytes, offset)
             offset += script_len
-            sequence = int.from_bytes(tx_bytes[offset : offset + 4], "little")
+            int.from_bytes(tx_bytes[offset : offset + 4], "little")  # sequence
             offset += 4
 
             inputs.append({"txid": txid, "vout": vout})
