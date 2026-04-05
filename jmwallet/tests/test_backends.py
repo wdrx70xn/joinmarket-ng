@@ -900,7 +900,7 @@ class TestNeutrinoBackend:
 
         # Default value
         backend2 = NeutrinoBackend(neutrino_url="http://localhost:8334", network="signet")
-        assert backend2._scan_lookback_blocks == 52560
+        assert backend2._scan_lookback_blocks == 105120
 
         await backend.close()
         await backend2.close()
@@ -1078,6 +1078,97 @@ class TestNeutrinoBackend:
         assert "--proxy=127.0.0.1:9050" in args
         assert "--addpeer=peer1:18333" in args
         assert "--addpeer=peer2:18333" in args
+
+    def test_neutrino_config_new_params_defaults(self):
+        """Test NeutrinoConfig default values for new sync parameters."""
+        config = NeutrinoConfig()
+        assert config.clearnet_initial_sync is True
+        assert config.prefetch_filters is True
+        assert config.prefetch_lookback_blocks == 105120
+
+    def test_neutrino_config_new_params_custom(self):
+        """Test NeutrinoConfig with custom sync parameters."""
+        config = NeutrinoConfig(
+            clearnet_initial_sync=False,
+            prefetch_filters=True,
+            prefetch_lookback_blocks=50000,
+        )
+        assert config.clearnet_initial_sync is False
+        assert config.prefetch_filters is True
+        assert config.prefetch_lookback_blocks == 50000
+
+    def test_neutrino_config_to_args_clearnet_sync(self):
+        """Test that clearnet-initial-sync flag is included in args."""
+        config_on = NeutrinoConfig(clearnet_initial_sync=True, tor_socks="127.0.0.1:9050")
+        args_on = config_on.to_args()
+        assert "--clearnet-initial-sync=true" in args_on
+
+        config_off = NeutrinoConfig(clearnet_initial_sync=False, tor_socks="127.0.0.1:9050")
+        args_off = config_off.to_args()
+        assert "--clearnet-initial-sync=false" in args_off
+
+    def test_neutrino_config_to_args_prefetch_filters(self):
+        """Test that prefetch filter flags are included in args."""
+        config_on = NeutrinoConfig(prefetch_filters=True, prefetch_lookback_blocks=50000)
+        args_on = config_on.to_args()
+        assert "--prefetchfilters=true" in args_on
+        assert "--prefetchlookback=50000" in args_on
+
+        config_off = NeutrinoConfig(prefetch_filters=False)
+        args_off = config_off.to_args()
+        assert "--prefetchfilters=false" in args_off
+        # No lookback arg when prefetch is off
+        assert all("--prefetchlookback" not in a for a in args_off)
+
+    def test_neutrino_config_to_args_prefetch_no_lookback(self):
+        """Test that lookback is omitted when set to 0 (fetch all from genesis)."""
+        config = NeutrinoConfig(prefetch_filters=True, prefetch_lookback_blocks=0)
+        args = config.to_args()
+        assert "--prefetchfilters=true" in args
+        assert all("--prefetchlookback" not in a for a in args)
+
+    def test_neutrino_config_to_env_basic(self):
+        """Test to_env() generates correct Docker environment variables."""
+        config = NeutrinoConfig(
+            network="mainnet",
+            data_dir="/data/neutrino",
+            listen_port=8334,
+            tor_socks="127.0.0.1:9050",
+            peers=["node1:8333", "node2:8333"],
+        )
+        env = config.to_env()
+        assert env["NETWORK"] == "mainnet"
+        assert env["DATA_DIR"] == "/data/neutrino"
+        assert env["LISTEN_ADDR"] == "0.0.0.0:8334"
+        assert env["TOR_PROXY"] == "127.0.0.1:9050"
+        assert env["ADD_PEERS"] == "node1:8333,node2:8333"
+        assert env["CLEARNET_INITIAL_SYNC"] == "true"
+        assert env["PREFETCH_FILTERS"] == "true"
+        assert env["PREFETCH_LOOKBACK"] == "105120"
+
+    def test_neutrino_config_to_env_no_tor(self):
+        """Test to_env() omits TOR_PROXY when no Tor is configured."""
+        config = NeutrinoConfig(network="regtest")
+        env = config.to_env()
+        assert "TOR_PROXY" not in env
+        assert "ADD_PEERS" not in env
+
+    def test_neutrino_config_to_env_prefetch_with_lookback(self):
+        """Test to_env() includes PREFETCH_LOOKBACK when prefetch is enabled."""
+        config = NeutrinoConfig(prefetch_filters=True, prefetch_lookback_blocks=50000)
+        env = config.to_env()
+        assert env["PREFETCH_FILTERS"] == "true"
+        assert env["PREFETCH_LOOKBACK"] == "50000"
+
+    def test_neutrino_config_to_env_prefetch_no_lookback(self):
+        """Test to_env() omits PREFETCH_LOOKBACK when set to 0 or prefetch off."""
+        config_off = NeutrinoConfig(prefetch_filters=False)
+        env_off = config_off.to_env()
+        assert "PREFETCH_LOOKBACK" not in env_off
+
+        config_zero = NeutrinoConfig(prefetch_filters=True, prefetch_lookback_blocks=0)
+        env_zero = config_zero.to_env()
+        assert "PREFETCH_LOOKBACK" not in env_zero
 
 
 @pytest.mark.docker

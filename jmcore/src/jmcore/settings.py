@@ -172,7 +172,46 @@ class BitcoinSettings(BaseModel):
         default_factory=list,
         description=(
             "Preferred peer addresses for neutrino (host:port) while still allowing "
-            "DNS/discovery peers."
+            "DNS/discovery peers. Only takes effect when JoinMarket manages the "
+            "neutrino process (e.g., flatpak deployment). When neutrino-api runs as "
+            "a standalone service, configure peers directly via its ADD_PEERS env var "
+            "or --addpeer flag."
+        ),
+    )
+    neutrino_clearnet_initial_sync: bool = Field(
+        default=True,
+        description=(
+            "Sync block headers over clearnet before switching to Tor. "
+            "Headers are public deterministic data identical for all nodes, "
+            "so downloading them over clearnet does not reveal watched addresses. "
+            "Typically around 2x faster than doing the full initial header sync via Tor."
+        ),
+    )
+    neutrino_prefetch_filters: bool = Field(
+        default=True,
+        description=(
+            "Enable background prefetch of compact block filters. "
+            "Enabled by default because jm-wallet info scans these filters anyway, "
+            "so prefetching saves time on the initial scan. With the default "
+            "lookback of ~2 years, this takes ~3 hours on clearnet and ~3GB disk "
+            "on mainnet. Disable to fetch filters on-demand only. "
+            "When false, neutrino_prefetch_lookback_blocks is ignored."
+        ),
+    )
+    neutrino_prefetch_lookback_blocks: int = Field(
+        default=105120,
+        description=(
+            "When neutrino_prefetch_filters is true, only prefetch filters "
+            "for this many recent blocks (~2 years at 105120 blocks). "
+            "Set to 0 to prefetch all filters from genesis. Ignored when "
+            "neutrino_prefetch_filters is false."
+        ),
+    )
+    neutrino_scan_lookback_blocks: int = Field(
+        default=105120,
+        description=(
+            "Number of blocks to look back from tip for wallet rescans when "
+            "no explicit scan_start_height is set. Default ~2 years (105120 blocks)."
         ),
     )
 

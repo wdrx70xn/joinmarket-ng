@@ -76,11 +76,19 @@ async def get_backend(data_dir: Path, force_new: bool = False) -> Any:
         neutrino_url = getattr(settings.bitcoin, "neutrino_url", rpc_url)
         network = settings.network_config.network.value
 
+        # Use neutrino-specific scan lookback if configured, falling back
+        # to the wallet-level setting.
+        scan_lookback = getattr(
+            settings.bitcoin,
+            "neutrino_scan_lookback_blocks",
+            settings.wallet.scan_lookback_blocks,
+        )
+
         instance = NeutrinoBackend(
             neutrino_url=neutrino_url,
             network=network,
             scan_start_height=settings.wallet.scan_start_height,
-            scan_lookback_blocks=settings.wallet.scan_lookback_blocks,
+            scan_lookback_blocks=scan_lookback,
             add_peers=settings.get_neutrino_add_peers(),
         )
     else:

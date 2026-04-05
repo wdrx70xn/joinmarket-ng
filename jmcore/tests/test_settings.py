@@ -120,6 +120,15 @@ class TestSettingsDefaults:
         assert settings.bitcoin.rpc_user == ""
         assert settings.bitcoin.rpc_password.get_secret_value() == ""
 
+    def test_default_bitcoin_neutrino_settings(self) -> None:
+        """Test default Bitcoin neutrino-specific settings."""
+        settings = JoinMarketSettings()
+
+        assert settings.bitcoin.neutrino_clearnet_initial_sync is True
+        assert settings.bitcoin.neutrino_prefetch_filters is True
+        assert settings.bitcoin.neutrino_prefetch_lookback_blocks == 105120
+        assert settings.bitcoin.neutrino_scan_lookback_blocks == 105120
+
     def test_default_network_settings(self) -> None:
         """Test default network settings."""
         settings = JoinMarketSettings()
@@ -209,6 +218,20 @@ class TestSettingsFromEnv:
 
         assert settings.maker.offer_type == "sw0absoffer"
 
+    def test_env_override_neutrino_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that environment variables override neutrino-specific settings."""
+        monkeypatch.setenv("BITCOIN__NEUTRINO_CLEARNET_INITIAL_SYNC", "false")
+        monkeypatch.setenv("BITCOIN__NEUTRINO_PREFETCH_FILTERS", "true")
+        monkeypatch.setenv("BITCOIN__NEUTRINO_PREFETCH_LOOKBACK_BLOCKS", "50000")
+        monkeypatch.setenv("BITCOIN__NEUTRINO_SCAN_LOOKBACK_BLOCKS", "75000")
+
+        settings = JoinMarketSettings()
+
+        assert settings.bitcoin.neutrino_clearnet_initial_sync is False
+        assert settings.bitcoin.neutrino_prefetch_filters is True
+        assert settings.bitcoin.neutrino_prefetch_lookback_blocks == 50000
+        assert settings.bitcoin.neutrino_scan_lookback_blocks == 75000
+
 
 class TestSettingsFromToml:
     """Tests for loading settings from TOML config file."""
@@ -254,6 +277,28 @@ cj_fee_absolute = 1000
 
         assert settings.maker.offer_type == "sw0absoffer"
         assert settings.maker.cj_fee_absolute == 1000
+
+    def test_toml_neutrino_settings(
+        self, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that neutrino settings can be loaded from TOML config."""
+        config_path = temp_data_dir / "config.toml"
+        config_path.write_text("""
+[bitcoin]
+backend_type = "neutrino"
+neutrino_clearnet_initial_sync = false
+neutrino_prefetch_filters = true
+neutrino_prefetch_lookback_blocks = 50000
+neutrino_scan_lookback_blocks = 75000
+""")
+
+        settings = JoinMarketSettings()
+
+        assert settings.bitcoin.backend_type == "neutrino"
+        assert settings.bitcoin.neutrino_clearnet_initial_sync is False
+        assert settings.bitcoin.neutrino_prefetch_filters is True
+        assert settings.bitcoin.neutrino_prefetch_lookback_blocks == 50000
+        assert settings.bitcoin.neutrino_scan_lookback_blocks == 75000
 
     def test_env_overrides_toml(self, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that environment variables override TOML config."""

@@ -60,7 +60,7 @@ class NeutrinoBackend(BlockchainBackend):
         add_peers: list[str] | None = None,
         data_dir: str = "/data/neutrino",
         scan_start_height: int | None = None,
-        scan_lookback_blocks: int = 52560,
+        scan_lookback_blocks: int = 105120,
     ):
         """
         Initialize Neutrino backend.
@@ -75,7 +75,7 @@ class NeutrinoBackend(BlockchainBackend):
                 Critical for performance on mainnet/signet where scanning from genesis is slow.
                 If None, a smart default is computed at first sync using scan_lookback_blocks.
             scan_lookback_blocks: Number of blocks to look back from the chain tip when
-                scan_start_height is not set. Defaults to 52560 (~1 year of blocks).
+                scan_start_height is not set. Defaults to 105120 (~2 years of blocks).
                 Only used on networks where _min_valid_blockheight is 0 (signet, regtest).
         """
         self.neutrino_url = neutrino_url.rstrip("/")
@@ -1221,6 +1221,9 @@ class NeutrinoConfig:
         listen_port: int = 8334,
         peers: list[str] | None = None,
         tor_socks: str | None = None,
+        clearnet_initial_sync: bool = True,
+        prefetch_filters: bool = True,
+        prefetch_lookback_blocks: int = 105120,
     ):
         """
         Initialize neutrino configuration.
@@ -1231,12 +1234,27 @@ class NeutrinoConfig:
             listen_port: Port for REST API
             peers: List of peer addresses to connect to
             tor_socks: Tor SOCKS5 proxy address (e.g., "127.0.0.1:9050")
+            clearnet_initial_sync: Sync headers over clearnet before switching
+                to Tor. Safe because headers are public deterministic data.
+                Typically ~2x faster than Tor for initial header sync.
+                Default: True.
+            prefetch_filters: Enable background prefetch of compact block
+                filters. Enabled by default because jm-wallet info scans
+                these filters anyway, so prefetching saves time. With the
+                default lookback of ~2 years, takes ~3 hours on clearnet
+                and ~3GB disk on mainnet. Default: True.
+            prefetch_lookback_blocks: When prefetch is enabled, only prefetch
+                filters for this many recent blocks. 0 = prefetch all from
+                genesis. Default: 105120 (~2 years).
         """
         self.network = network
         self.data_dir = data_dir
         self.listen_port = listen_port
         self.peers = peers or []
         self.tor_socks = tor_socks
+        self.clearnet_initial_sync = clearnet_initial_sync
+        self.prefetch_filters = prefetch_filters
+        self.prefetch_lookback_blocks = prefetch_lookback_blocks
 
     def get_chain_params(self) -> dict[str, Any]:
         """Get chain-specific parameters."""
@@ -1287,4 +1305,39 @@ class NeutrinoConfig:
         for peer in self.peers:
             args.append(f"--addpeer={peer}")
 
+        # Clearnet initial sync: safe because headers are public data
+        if self.clearnet_initial_sync:
+            args.append("--clearnet-initial-sync=true")
+        else:
+            args.append("--clearnet-initial-sync=false")
+
+        # Filter prefetch (disabled by default to save ~15GB on mainnet)
+        if self.prefetch_filters:
+            args.append("--prefetchfilters=true")
+            if self.prefetch_lookback_blocks > 0:
+                args.append(f"--prefetchlookback={self.prefetch_lookback_blocks}")
+        else:
+            args.append("--prefetchfilters=false")
+
         return args
+
+    def to_env(self) -> dict[str, str]:
+        """Generate environment variables for neutrino daemon (Docker)."""
+        env: dict[str, str] = {
+            "NETWORK": self.network,
+            "DATA_DIR": self.data_dir,
+            "LISTEN_ADDR": f"0.0.0.0:{self.listen_port}",
+            "CLEARNET_INITIAL_SYNC": str(self.clearnet_initial_sync).lower(),
+            "PREFETCH_FILTERS": str(self.prefetch_filters).lower(),
+        }
+
+        if self.tor_socks:
+            env["TOR_PROXY"] = self.tor_socks
+
+        if self.peers:
+            env["ADD_PEERS"] = ",".join(self.peers)
+
+        if self.prefetch_filters and self.prefetch_lookback_blocks > 0:
+            env["PREFETCH_LOOKBACK"] = str(self.prefetch_lookback_blocks)
+
+        return env

@@ -1077,6 +1077,13 @@ services:
       - DATA_DIR=/data/neutrino
       - LOG_LEVEL=debug
       - ADD_PEERS=jm-bitcoin:18444
+      # Clearnet initial sync is a no-op without TOR_PROXY but kept for
+      # documentation. In production with Tor, this dramatically speeds up
+      # the initial header sync (minutes vs hours).
+      - CLEARNET_INITIAL_SYNC=true
+      # Enable filter prefetch (default). With ~2-year lookback this takes ~3GB
+      # on mainnet. jm-wallet info scans these filters anyway on first run.
+      - PREFETCH_FILTERS=true
     ports:
       - "8334:8334"
     volumes:

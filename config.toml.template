@@ -58,9 +58,36 @@
 
 # Preferred neutrino peers (host:port) that should be tried first while still
 # allowing DNS/discovery peers.
+# NOTE: Only takes effect when JoinMarket manages the neutrino process (e.g.,
+# flatpak deployment). When neutrino-api runs as a standalone service,
+# configure peers directly via its ADD_PEERS env var or --addpeer flag.
 # neutrino_add_peers = [
 #   "your-filter-peer:38333",
 # ]
+
+# Sync block headers over clearnet before switching to Tor for ongoing
+# operations. Headers are public deterministic data identical for all nodes,
+# so downloading them over clearnet does not reveal watched addresses.
+# Typically around 2x faster than doing the full initial header sync via Tor.
+# Default: true.
+# neutrino_clearnet_initial_sync = true
+
+# Enable background prefetch of compact block filters.
+# Enabled by default because jm-wallet info scans these filters anyway, so
+# prefetching saves time on the initial scan. With the default lookback of
+# ~2 years, this takes ~3 hours on clearnet and ~3GB disk on mainnet.
+# Disable to fetch filters strictly on-demand.
+# When false, neutrino_prefetch_lookback_blocks is ignored.
+# neutrino_prefetch_filters = true
+
+# When prefetch is enabled, only prefetch filters for this many recent blocks.
+# Default: 105120 (~2 years). Set to 0 to prefetch from genesis (~15GB).
+# Ignored when neutrino_prefetch_filters = false.
+# neutrino_prefetch_lookback_blocks = 105120
+
+# Number of blocks to look back from tip for neutrino wallet rescans.
+# Default: 105120 (~2 years). Only used when scan_start_height is not set.
+# neutrino_scan_lookback_blocks = 105120
 
 # ============================================================================
 # Network Settings
