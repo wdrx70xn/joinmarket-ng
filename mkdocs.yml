@@ -27,7 +27,7 @@ repo_name: GitHub
 
 # Footer copyright with link to license page
 # This appears at the bottom of every page
-copyright: <a href="license">MIT License</a> © 2025 JoinMarket contributors
+copyright: <a href="license">MIT License</a> © 2026 JoinMarket contributors
 
 # -----------------------------------------------------------------------------
 # Pages not in navigation
@@ -253,6 +253,7 @@ nav:
   # -------------------------------------------------------------------------
   - Home: index.md
   - Installation: install.md
+  - 💻 Userfriendly TUI: joinmarket-ng-tui.md
 
   # -------------------------------------------------------------------------
   # Protocol Documentation
@@ -303,7 +304,6 @@ nav:
   # -------------------------------------------------------------------------
   - Signatures: README-signatures.md
   - Scripts: README-scripts.md
-  - Raspiblitz TUI: README-raspiblitz-tui.md
 
   # -------------------------------------------------------------------------
   # API Reference
