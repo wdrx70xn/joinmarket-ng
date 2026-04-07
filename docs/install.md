@@ -187,10 +187,68 @@ docker run -d \
   -p 8334:8334 \
   -v neutrino-data:/data/neutrino \
   -e NETWORK=mainnet \
-  ghcr.io/m0wer/neutrino-api
+  -e PREFETCH_LOOKBACK=105120 \
+  -e CLEARNET_INITIAL_SYNC=true \
+  ghcr.io/m0wer/neutrino-api:latest
 ```
 
+Environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `NETWORK` | `mainnet` | Bitcoin network (`mainnet`, `testnet`, `signet`, `regtest`) |
+| `PREFETCH_LOOKBACK` | `0` (all) | Only prefetch filters for this many recent blocks. `105120` (~2 years) is recommended to avoid downloading ~15 GB of filters from genesis. |
+| `CLEARNET_INITIAL_SYNC` | `false` | Sync headers over clearnet before switching to Tor. Safe because headers are public data. Roughly 2x faster for initial sync. |
+| `TOR_PROXY` | *(none)* | SOCKS5 proxy for Tor (e.g. `127.0.0.1:9050`). Required for private P2P operation. |
+
 Or download binaries from [neutrino-api releases](https://github.com/m0wer/neutrino-api/releases).
+
+#### Pulling updates and redeploying neutrino-api
+
+When you want to upgrade the container, redeploy it with the latest image:
+
+1. **Pull the newest image tag**:
+
+   ```bash
+   docker pull ghcr.io/m0wer/neutrino-api:latest
+   ```
+
+2. **Stop and remove the running container** before starting the new one.
+   This avoids bbolt lock contention between old and new processes:
+
+   ```bash
+   docker stop neutrino
+   docker rm neutrino
+   ```
+
+3. **Start a fresh container** with the same volume and env vars:
+
+   ```bash
+   docker run -d \
+     --name neutrino \
+     --restart unless-stopped \
+     -p 8334:8334 \
+     -v neutrino-data:/data/neutrino \
+     -e NETWORK=mainnet \
+     -e PREFETCH_LOOKBACK=105120 \
+     -e CLEARNET_INITIAL_SYNC=true \
+     ghcr.io/m0wer/neutrino-api:latest
+   ```
+
+4. **Verify the new deployment**:
+
+   ```bash
+   docker logs --tail 50 neutrino
+   curl -s http://127.0.0.1:8334/v1/status | jq
+   ```
+
+The `neutrino-data` Docker volume preserves headers, filters, and rescan
+state across redeploys, so a full re-download is usually not required.
+
+**Version compatibility:** JoinMarket-NG works with neutrino-api v0.7.0+.
+v0.9.0+ is recommended for persistent rescan state (avoids redundant rescans),
+and v0.10.0+ is recommended for clearnet initial sync and prefetch lookback
+controls.
 
 ---
 
