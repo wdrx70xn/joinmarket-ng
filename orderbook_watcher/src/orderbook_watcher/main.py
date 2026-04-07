@@ -66,6 +66,8 @@ def _create_blockchain_backend(settings: object) -> BlockchainBackend | None:
 
     if backend_type == "neutrino":
         neutrino_url = bitcoin_settings.neutrino_url
+        neutrino_tls_cert = bitcoin_settings.neutrino_tls_cert
+        neutrino_auth_token = bitcoin_settings.neutrino_auth_token
 
         if not neutrino_url:
             logger.debug("Neutrino URL not configured, falling back to mempool API")
@@ -79,6 +81,8 @@ def _create_blockchain_backend(settings: object) -> BlockchainBackend | None:
             network=network,
             scan_start_height=settings.wallet.scan_start_height,  # type: ignore[attr-defined]
             add_peers=settings.get_neutrino_add_peers(),  # type: ignore[attr-defined]
+            tls_cert_path=neutrino_tls_cert,
+            auth_token=neutrino_auth_token,
         )
 
     logger.debug(f"Unknown backend type '{backend_type}', falling back to mempool API")

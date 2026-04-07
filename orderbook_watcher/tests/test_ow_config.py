@@ -52,10 +52,14 @@ class TestCreateBlockchainBackend:
         neutrino_url: str = "http://127.0.0.1:8334",
         add_peers: list[str] | None = None,
         scan_start_height: int | None = None,
+        neutrino_tls_cert: str | None = None,
+        neutrino_auth_token: str | None = None,
     ) -> MagicMock:
         settings = MagicMock()
         settings.bitcoin.backend_type = backend_type
         settings.bitcoin.neutrino_url = neutrino_url
+        settings.bitcoin.neutrino_tls_cert = neutrino_tls_cert
+        settings.bitcoin.neutrino_auth_token = neutrino_auth_token
         settings.network_config.network.value = "signet"
         settings.wallet.scan_start_height = scan_start_height
         settings.get_neutrino_add_peers.return_value = add_peers or []
@@ -75,6 +79,8 @@ class TestCreateBlockchainBackend:
             network="signet",
             scan_start_height=None,
             add_peers=peers,
+            tls_cert_path=None,
+            auth_token=None,
         )
         assert result is mock_backend
 
@@ -91,4 +97,28 @@ class TestCreateBlockchainBackend:
             network="signet",
             scan_start_height=None,
             add_peers=[],
+            tls_cert_path=None,
+            auth_token=None,
+        )
+
+    def test_neutrino_backend_passes_tls_and_auth(self) -> None:
+        """_create_blockchain_backend() passes neutrino TLS and auth settings."""
+        test_tls_cert = "/home/tester/neutrino/tls.cert"
+        test_auth_value = "opaque-auth-value"
+        settings = self._make_settings(
+            neutrino_tls_cert=test_tls_cert,
+            neutrino_auth_token=test_auth_value,
+        )
+
+        mock_backend = MagicMock()
+        with patch("orderbook_watcher.main.NeutrinoBackend", return_value=mock_backend) as mock_cls:
+            _create_blockchain_backend(settings)
+
+        mock_cls.assert_called_once_with(
+            neutrino_url="http://127.0.0.1:8334",
+            network="signet",
+            scan_start_height=None,
+            add_peers=[],
+            tls_cert_path=test_tls_cert,
+            auth_token=test_auth_value,
         )
