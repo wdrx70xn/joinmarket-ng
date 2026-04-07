@@ -22,8 +22,13 @@ from jmcore.settings import reset_settings
 
 
 @pytest.fixture(autouse=True)
-def reset_settings_fixture() -> Generator[None, None, None]:
-    """Reset settings before and after each test."""
+def reset_settings_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Generator[None, None, None]:
+    """Reset settings and isolate tests from user config files."""
+    monkeypatch.setenv("JOINMARKET_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("JOINMARKET_CONFIG_FILE", raising=False)
     reset_settings()
     yield
     reset_settings()
