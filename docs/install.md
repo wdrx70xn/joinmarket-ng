@@ -202,6 +202,11 @@ Environment variables:
 | `TOR_PROXY` | *(none)* | SOCKS5 proxy for Tor (e.g. `127.0.0.1:9050`). Required for private P2P operation. |
 | `NO_AUTH` | `false` | Disable TLS and API token authentication (development/regtest only). |
 
+In this repository's `docker-compose.yml` (CI/regtest profiles), `NO_AUTH` is
+set to `true` by default for neutrino so integration tests can use HTTP
+(`http://jm-neutrino:8334`). Override with `NEUTRINO_NO_AUTH=false` if you
+want to exercise TLS+token auth in compose-based runs.
+
 #### Neutrino API Security (TLS + Auth Token)
 
 neutrino-api automatically generates a self-signed TLS certificate and a
