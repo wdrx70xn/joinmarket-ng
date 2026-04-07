@@ -773,10 +773,32 @@ class TestParserLeniencyRegression:
     """
 
     def test_non_standard_version(self) -> None:
-        """Version 0x00B70000 must be rejected (only 1 and 2 are valid)."""
+        """Version 0x00B70000 must be rejected (only 1, 2, 3 are valid)."""
         tx_hex = "0000b7000000"
         result = parse_transaction(tx_hex, network=NetworkType.MAINNET)
         assert result is None
+
+    def test_accepts_v3_truc_version(self) -> None:
+        """Version 3 SegWit transactions (TRUC policy) should be accepted."""
+        tx_hex = (
+            "03000000"  # version 3
+            "0001"  # segwit marker+flag
+            "01"  # 1 input
+            "0000000000000000000000000000000000000000000000000000000000000001"  # txid
+            "00000000"  # vout
+            "00"  # scriptsig len
+            "ffffffff"  # sequence
+            "01"  # 1 output
+            "00e1f50500000000"  # value
+            "16"  # script len
+            "0014751e76e8199196d454941c45d1b3a323f1433bd6"  # P2WPKH
+            "00"  # witness stack size (empty)
+            "00000000"  # locktime
+        )
+        result = parse_transaction(tx_hex, network=NetworkType.MAINNET)
+        assert result is not None
+        assert len(result["inputs"]) == 1
+        assert len(result["outputs"]) == 1
 
     def test_truncated_witness(self) -> None:
         """SegWit tx where nLockTime residue is 3 bytes (not 4) must be rejected.

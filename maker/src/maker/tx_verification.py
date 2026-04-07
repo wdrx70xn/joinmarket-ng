@@ -21,8 +21,10 @@ from typing import Any
 from jmcore.bitcoin import (
     decode_varint,
     get_hrp,
-    parse_transaction as parse_jmcore_transaction,
     scriptpubkey_to_address,
+)
+from jmcore.bitcoin import (
+    parse_transaction as parse_jmcore_transaction,
 )
 from jmcore.models import NetworkType, OfferType
 from jmcore.models import calculate_cj_fee as calculate_cj_fee
@@ -171,9 +173,8 @@ def parse_transaction(
         parsed = parse_jmcore_transaction(tx_hex)
 
         # Keep maker-side policy checks while delegating structural parsing.
-        if parsed.version not in (1, 2):
-            return None
-        if not parsed.has_witness:
+        # Permit v3 for TRUC policy compatibility (BIP-431, draft).
+        if parsed.version not in (1, 2, 3):
             return None
         if len(parsed.inputs) == 0 or len(parsed.outputs) == 0:
             return None
