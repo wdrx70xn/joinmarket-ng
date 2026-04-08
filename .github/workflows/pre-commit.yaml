@@ -23,6 +23,7 @@ jobs:
           python-version: '3.14'
 
       - name: Validate commit messages
+        if: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
         run: |
           resolve_fallback_range() {
             local base_ref="${1:-main}"
