@@ -287,12 +287,14 @@ async def test_external_wallet_bond_proof_verification(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_external_wallet_vs_self_signed_proof(tmp_path: Path):
+async def test_external_wallet_vs_hot_wallet_proof(tmp_path: Path):
     """
-    Test that external wallet (certificate) proofs are structurally different
-    from self-signed proofs, but both verify correctly.
+    Test that external wallet (cold storage) proofs and hot wallet proofs
+    both verify correctly and both use delegated certificates.
 
-    This ensures the certificate chain is actually being used.
+    Hot wallet bonds use ephemeral random cert keypairs (matching the
+    reference implementation), while cold storage bonds use pre-signed
+    certificates from an offline key.
     """
     from jmcore.crypto import verify_fidelity_bond_proof
     from maker.fidelity import FidelityBondInfo as MakerBondInfo
@@ -303,7 +305,7 @@ async def test_external_wallet_vs_self_signed_proof(tmp_path: Path):
     current_block_height = 800000
     locktime = int(time.time()) + 365 * 24 * 60 * 60
 
-    # Create a self-signed bond (traditional hot wallet mode)
+    # Create a hot wallet bond (uses ephemeral random cert keypair)
     self_signed_privkey = PrivateKey()
     self_signed_pubkey = self_signed_privkey.public_key.format(compressed=True)
 
@@ -377,10 +379,10 @@ async def test_external_wallet_vs_self_signed_proof(tmp_path: Path):
     assert is_valid_ss, "Self-signed proof should verify"
     assert is_valid_ext, "External wallet proof should verify"
 
-    # The key difference: self-signed has utxo_pub == cert_pub
-    # External wallet has utxo_pub != cert_pub
-    assert data_ss["utxo_pub"] == data_ss["cert_pub"], (
-        "Self-signed: utxo_pub == cert_pub"
+    # Both modes use delegated certificates (utxo_pub != cert_pub)
+    # Hot wallet uses ephemeral random cert key, cold wallet uses pre-signed cert
+    assert data_ss["utxo_pub"] != data_ss["cert_pub"], (
+        "Hot wallet: utxo_pub != cert_pub (delegated)"
     )
     assert data_ext["utxo_pub"] != data_ext["cert_pub"], (
         "External: utxo_pub != cert_pub"
@@ -389,7 +391,8 @@ async def test_external_wallet_vs_self_signed_proof(tmp_path: Path):
     assert data_ext["cert_pub"] == hot_pubkey.hex()
 
     logger.info("Comparison test passed!")
-    logger.info(f"  Self-signed: utxo_pub == cert_pub = {data_ss['utxo_pub'][:16]}...")
+    logger.info(f"  Hot wallet: utxo_pub = {data_ss['utxo_pub'][:16]}...")
+    logger.info(f"  Hot wallet: cert_pub = {data_ss['cert_pub'][:16]}...")
     logger.info(f"  External: utxo_pub = {data_ext['utxo_pub'][:16]}...")
     logger.info(f"  External: cert_pub = {data_ext['cert_pub'][:16]}...")
 

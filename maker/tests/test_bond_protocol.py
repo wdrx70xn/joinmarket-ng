@@ -63,9 +63,9 @@ def test_bond_proof_format_matches_reference():
         f"Cert expiry should be {expected_cert_expiry}, got {cert_expiry}"
     )
 
-    # Verify pubkeys match
-    assert cert_pub == pubkey, "Cert pubkey should match bond pubkey"
-    assert utxo_pub == pubkey, "UTXO pubkey should match bond pubkey (self-signed)"
+    # Verify pubkeys: cert_pub is random (delegated), utxo_pub matches bond pubkey
+    assert cert_pub != pubkey, "Cert pubkey should be a random ephemeral key"
+    assert utxo_pub == pubkey, "UTXO pubkey should match bond pubkey"
 
     # Verify UTXO data - TXID in display format (big-endian)
     assert txid_bytes == bytes.fromhex(bond.txid), "TXID should match (display format)"

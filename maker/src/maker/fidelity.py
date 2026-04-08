@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import struct
 
 from coincurve import PrivateKey
@@ -274,7 +275,7 @@ def create_fidelity_bond_proof(
     The proof structure (252 bytes total):
     - 72 bytes: Nick signature (signs "taker_nick|maker_nick" with Bitcoin message format)
     - 72 bytes: Certificate signature (signs cert message with Bitcoin message format)
-    - 33 bytes: Certificate public key (same as utxo_pub for self-signed, separate key otherwise)
+    - 33 bytes: Certificate public key (ephemeral random key for hot wallet, pre-signed for cold)
     - 2 bytes: Certificate expiry (retarget period number when cert becomes invalid)
     - 33 bytes: UTXO public key (the key that can spend the bond UTXO)
     - 32 bytes: TXID (little-endian)
@@ -290,7 +291,8 @@ def create_fidelity_bond_proof(
     Both signatures use Bitcoin message signing format (double SHA256 with prefix).
 
     This function supports two modes:
-    1. **Self-signed mode** (hot wallet): bond.private_key is available, signs everything
+    1. **Hot wallet mode**: bond.private_key is available, generates ephemeral cert keypair
+       (matching the reference implementation's delegated certificate approach)
     2. **Certificate mode** (cold wallet): bond.cert_* fields are set, uses pre-signed cert
 
     Args:
@@ -341,12 +343,18 @@ def create_fidelity_bond_proof(
             cert_sig_padded = _pad_signature(cert_sig, 72)
 
         else:
-            # HOT WALLET MODE (SELF-SIGNED): traditional single-key mode
+            # HOT WALLET MODE: delegated certificate with random cert keypair
+            # Matches the reference implementation (yieldgenerator.py) which always
+            # generates a random cert keypair, even for hot wallets. The UTXO key
+            # signs the certificate (delegation), and the random cert key signs
+            # nick messages.
             if not bond.private_key:
-                logger.error("Bond missing private key (required for self-signed mode)")
+                logger.error("Bond missing private key (required for hot wallet mode)")
                 return None
 
-            cert_pub = bond.pubkey
+            # Generate ephemeral cert keypair (reference: yieldgenerator.py line 162)
+            cert_priv = PrivateKey(os.urandom(32))
+            cert_pub = cert_priv.public_key.format(compressed=True)
             utxo_pub = bond.pubkey
 
             # Calculate certificate expiry as retarget period number
@@ -358,16 +366,16 @@ def create_fidelity_bond_proof(
             ) + CERT_MAX_VALIDITY_TIME
 
             logger.debug(
-                f"Using self-signed mode for bond proof (cert_expiry={cert_expiry_encoded})"
+                f"Using delegated cert mode for bond proof (cert_expiry={cert_expiry_encoded})"
             )
 
-            # 1. Nick signature: proves the maker controls the certificate key
+            # 1. Nick signature: signed with the cert key (proves maker holds delegated key)
             # Signs "(taker_nick|maker_nick)" using Bitcoin message format
             nick_msg = (taker_nick + "|" + maker_nick).encode("ascii")
-            nick_sig = _sign_message_bitcoin(bond.private_key, nick_msg)
+            nick_sig = _sign_message_bitcoin(cert_priv, nick_msg)
             nick_sig_padded = _pad_signature(nick_sig, 72)
 
-            # 2. Certificate signature: self-signed certificate
+            # 2. Certificate signature: UTXO key signs the cert (delegation to cert_pub)
             # Signs "fidelity-bond-cert|<cert_pub>|<cert_expiry_encoded>"
             cert_msg = (
                 b"fidelity-bond-cert|" + cert_pub + b"|" + str(cert_expiry_encoded).encode("ascii")

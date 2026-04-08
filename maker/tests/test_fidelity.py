@@ -227,9 +227,9 @@ class TestCreateFidelityBondProof:
         assert len(utxo_pub) == 33
         assert len(txid) == 32
 
-        # For self-signed, cert_pub == utxo_pub
-        assert cert_pub == utxo_pub
-        assert cert_pub == test_pubkey
+        # With delegated cert (random cert keypair), cert_pub != utxo_pub
+        assert cert_pub != utxo_pub
+        assert utxo_pub == test_pubkey
 
         # Verify UTXO details
         assert txid == bytes.fromhex("cd" * 32)
@@ -325,12 +325,13 @@ class TestCreateFidelityBondProof:
         assert proof2 is not None
         assert proof1 != proof2
 
-        # But same static fields (txid, vout, locktime, pubkeys)
+        # But same UTXO details (utxo_pub, txid, vout, locktime)
+        # cert_pub differs because each proof uses a fresh random cert keypair
         decoded1 = base64.b64decode(proof1)
         decoded2 = base64.b64decode(proof2)
 
-        # UTXO details at the end should match
-        assert decoded1[180:] == decoded2[180:]
+        # UTXO details (utxo_pub + txid + vout + locktime) start at offset 179
+        assert decoded1[179:] == decoded2[179:]
 
     def test_proof_verifiable_by_jmcore(self, test_private_key, test_pubkey):
         """
