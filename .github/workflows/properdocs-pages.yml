@@ -1,4 +1,4 @@
-name: Build and deploy MkDocs documentation
+name: Build and deploy ProperDocs documentation
 
 on:
   push:
@@ -38,7 +38,7 @@ jobs:
 
       - name: Build documentation
         run: |
-          properdocs build -f mkdocs.yml
+          properdocs build -q -f properdocs.yml
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4

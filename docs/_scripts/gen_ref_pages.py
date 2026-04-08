@@ -6,7 +6,7 @@ It scans all Python source directories and generates:
   - Index pages per package with a table linking to each module
   - A SUMMARY.md for the literate-nav plugin to build navigation
 
-The generated files are virtual (written to mkdocs' in-memory filesystem)
+The generated files are virtual (written to ProperDocs' in-memory filesystem)
 and never committed to git. The docs/api/ directory is gitignored.
 """
 

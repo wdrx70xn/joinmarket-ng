@@ -71,7 +71,7 @@ class HideDataclassInit(griffe.Extension):
 
 ### Configuration
 
-The extension is registered in `mkdocs.yml`:
+The extension is registered in `properdocs.yml`:
 
 ```yaml
 plugins:
@@ -131,7 +131,7 @@ The `__init__` will be **preserved** because it has a docstring.
 
 ### How to Test After Updates
 
-1. Run `properdocs serve -f mkdocs.yml` locally
+1. Run `properdocs serve -q -f properdocs.yml` locally
 2. Navigate to any dataclass documentation page
 3. Verify `__init__` is not shown for simple dataclasses
 4. Verify `__init__` IS shown for classes with custom `__init__` methods
@@ -147,7 +147,7 @@ def on_class(self, *, cls: griffe.Class, **kwargs) -> None:
         # ... rest of code
 ```
 
-Then run `properdocs serve -f mkdocs.yml` and check the console output.
+Then run `properdocs serve -q -f properdocs.yml` and check the console output.
 
 ---
 
@@ -157,7 +157,7 @@ If this extension causes issues or becomes unnecessary, it can be removed in thr
 
 ### Option 1: Disable in Configuration (Quick)
 
-Comment out or remove the extension in `mkdocs.yml`:
+Comment out or remove the extension in `properdocs.yml`:
 
 ```yaml
 plugins:
@@ -177,7 +177,7 @@ plugins:
 rm docs/_extensions/hide_dataclass_init.py
 ```
 
-And remove the extension registration from `mkdocs.yml`.
+And remove the extension registration from `properdocs.yml`.
 
 ### Option 3: Revert the Commit
 
