@@ -303,38 +303,48 @@ class DirectoryServer:
     async def _cleanup_peer(
         self, connection: TCPConnection, conn_id: str, peer_key: str | None
     ) -> None:
-        if peer_key:
-            peer_info = self.peer_registry.get_by_key(peer_key)
-
-            if peer_info:
-                logger.info(f"Peer {peer_info.nick} disconnected")
-                # Fire-and-forget notification for peer disconnect
-                total_peers = (
-                    self.peer_registry.count() - 1
-                )  # Minus 1 since we're about to unregister
-                asyncio.create_task(
-                    get_notifier().notify_peer_disconnected(peer_info.nick, total_peers)
-                )
-                await self.message_router.broadcast_peer_disconnect(
-                    peer_info.location_string, peer_info.network
-                )
-                self.peer_registry.unregister(peer_key)
-
-            if peer_key in self.peer_key_to_conn_id:
-                del self.peer_key_to_conn_id[peer_key]
-
-            # Clean up offer tracking
-            self.message_router.remove_peer_offers(peer_key)
-
-        # Clean up rate limiter state (keyed by conn_id, not peer_key)
-        self.rate_limiter.remove_peer(conn_id)
-
-        self.connections.remove(conn_id)
+        # When called from a cancelled task (e.g. during server.stop()),
+        # pending cancellation causes every await to raise CancelledError,
+        # preventing connection.close() from completing and leaking
+        # StreamWriter objects.  Suppress pending cancellation so cleanup
+        # awaits can finish; the task will end naturally after this returns.
+        task = asyncio.current_task()
+        if task is not None:
+            while task.cancelling() > 0:
+                task.uncancel()
 
         try:
-            await connection.close()
-        except Exception as e:
-            logger.trace(f"Error closing connection: {e}")
+            if peer_key:
+                peer_info = self.peer_registry.get_by_key(peer_key)
+
+                if peer_info:
+                    logger.info(f"Peer {peer_info.nick} disconnected")
+                    # Fire-and-forget notification for peer disconnect
+                    total_peers = (
+                        self.peer_registry.count() - 1
+                    )  # Minus 1 since we're about to unregister
+                    asyncio.create_task(
+                        get_notifier().notify_peer_disconnected(peer_info.nick, total_peers)
+                    )
+                    await self.message_router.broadcast_peer_disconnect(
+                        peer_info.location_string, peer_info.network
+                    )
+                    self.peer_registry.unregister(peer_key)
+
+                if peer_key in self.peer_key_to_conn_id:
+                    del self.peer_key_to_conn_id[peer_key]
+
+                # Clean up offer tracking
+                self.message_router.remove_peer_offers(peer_key)
+
+            # Clean up rate limiter state (keyed by conn_id, not peer_key)
+            self.rate_limiter.remove_peer(conn_id)
+        finally:
+            self.connections.remove(conn_id)
+            try:
+                await connection.close()
+            except Exception as e:
+                logger.trace(f"Error closing connection: {e}")
 
     async def _send_to_peer(self, peer_location: str, data: bytes) -> None:
         peer_key = peer_location
