@@ -73,6 +73,7 @@ except OSError:
 
 NETWORK="mainnet"
 USE_GUI=true
+LOG_LEVEL="INFO"
 
 parse_args() {
     while [ $# -gt 0 ]; do
@@ -84,6 +85,18 @@ parse_args() {
                     mainnet|signet|regtest) ;;
                     *)
                         echo "ERROR: unknown network '${NETWORK}'. Use mainnet, signet, or regtest."
+                        exit 1
+                        ;;
+                esac
+                ;;
+            --log-level)
+                shift
+                LOG_LEVEL="${1:-INFO}"
+                LOG_LEVEL=$(printf '%s' "${LOG_LEVEL}" | tr '[:lower:]' '[:upper:]')
+                case "${LOG_LEVEL}" in
+                    TRACE|DEBUG|INFO|WARNING|ERROR|CRITICAL) ;;
+                    *)
+                        echo "ERROR: unknown log level '${LOG_LEVEL}'. Use TRACE, DEBUG, INFO, WARNING, ERROR, or CRITICAL."
                         exit 1
                         ;;
                 esac
@@ -119,6 +132,7 @@ Usage:
 
 Options:
   --network <net>   Bitcoin network: mainnet (default), signet, regtest
+  --log-level <lvl> Logging level: TRACE, DEBUG, INFO (default), WARNING, ERROR, CRITICAL
   --no-gui          Start services without the GUI (opens browser instead)
   -h, --help        Show this help message
 
@@ -131,7 +145,7 @@ CLI commands (pass-through to installed tools):
   jam-ng cli jmwalletd [args...]              Start the wallet daemon
 
 Environment variables set for CLI commands:
-  JOINMARKET_DATA_DIR, TOR__SOCKS_PORT, TOR__CONTROL_PORT, etc.
+  JOINMARKET_DATA_DIR, TOR__SOCKS_PORT, TOR__CONTROL_PORT, LOGGING__LEVEL, etc.
   are read from the running instance's pidfile directory.
 
 Examples:
@@ -154,6 +168,7 @@ exec_cli() {
     export JOINMARKET_DATA_DIR="${NET_DATA_DIR}"
     export NETWORK_CONFIG__NETWORK="${NETWORK}"
     export NETWORK_CONFIG__BITCOIN_NETWORK="${NETWORK}"
+    export LOGGING__LEVEL="${LOG_LEVEL}"
 
     # Read port info from the running instance
     local envfile="${PIDFILE_DIR}/env"
@@ -359,6 +374,7 @@ export TOR__SOCKS_PORT="${TOR_SOCKS_PORT}"
 export TOR__CONTROL_HOST="127.0.0.1"
 export TOR__CONTROL_PORT="${TOR_CONTROL_PORT}"
 export TOR__COOKIE_PATH="${TOR_DATA_DIR}/control_auth_cookie"
+export LOGGING__LEVEL="${LOG_LEVEL}"
 export BITCOIN__BACKEND_TYPE="${BITCOIN__BACKEND_TYPE:-neutrino}"
 export BITCOIN__NEUTRINO_URL="https://127.0.0.1:${NEUTRINO_PORT}"
 export BITCOIN__NEUTRINO_TLS_CERT="${NEUTRINO_DATA_DIR}/tls.cert"
@@ -472,6 +488,7 @@ start_obwatcher() {
     JOINMARKET_CONFIG_FILE="${CONFIG_FILE}" \
     NETWORK_CONFIG__NETWORK="${NETWORK}" \
     NETWORK_CONFIG__BITCOIN_NETWORK="${NETWORK}" \
+    LOGGING__LEVEL="${LOG_LEVEL}" \
     TOR__SOCKS_HOST="127.0.0.1" \
     TOR__SOCKS_PORT="${TOR_SOCKS_PORT}" \
     TOR__CONTROL_HOST="127.0.0.1" \
@@ -495,6 +512,7 @@ start_jmwalletd() {
     export TOR__CONTROL_HOST="127.0.0.1"
     export TOR__CONTROL_PORT="${TOR_CONTROL_PORT}"
     export TOR__COOKIE_PATH="${TOR_DATA_DIR}/control_auth_cookie"
+    export LOGGING__LEVEL="${LOG_LEVEL}"
     export OBWATCH_URL="http://127.0.0.1:${OBWATCHER_PORT}"
     export NETWORK_CONFIG__NETWORK="${NETWORK}"
     export NETWORK_CONFIG__BITCOIN_NETWORK="${NETWORK}"
@@ -597,6 +615,7 @@ main() {
     export JOINMARKET_CONFIG_FILE="${CONFIG_FILE}"
     export NETWORK_CONFIG__NETWORK="${NETWORK}"
     export NETWORK_CONFIG__BITCOIN_NETWORK="${NETWORK}"
+    export LOGGING__LEVEL="${LOG_LEVEL}"
     export TOR__SOCKS_HOST="127.0.0.1"
     export TOR__SOCKS_PORT="${TOR_SOCKS_PORT}"
     export TOR__CONTROL_HOST="127.0.0.1"

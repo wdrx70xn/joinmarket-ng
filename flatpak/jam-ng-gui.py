@@ -207,7 +207,7 @@ textview {{
     background-color: {BG_LOG};
     color: {FG};
     font-family: "JetBrains Mono", "Fira Code", "Source Code Pro", monospace;
-    font-size: 10px;
+    font-size: 12px;
 }}
 
 textview text {{
