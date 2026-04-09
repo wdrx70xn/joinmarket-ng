@@ -1744,6 +1744,12 @@ class TestNeutrinoBackendAuth:
                 tls_cert_path=str(cert_file),
             )
             mock_ctx.assert_called_once_with(cafile=str(cert_file))
+            # Hostname verification is disabled for pinned certs (TOFU model):
+            # the neutrino-api self-signed cert only has SANs for
+            # localhost/127.0.0.1/::1, but we may connect via Docker service
+            # names like jm-neutrino.
+            assert mock_ssl_ctx.check_hostname is False
+            assert mock_ssl_ctx.verify_mode == ssl.CERT_REQUIRED
             await backend.close()
 
     @pytest.mark.asyncio
@@ -1779,6 +1785,8 @@ class TestNeutrinoBackendAuth:
                 auth_token="combined_token",
             )
             mock_ctx.assert_called_once()
+            assert mock_ssl_ctx.check_hostname is False
+            assert mock_ssl_ctx.verify_mode == ssl.CERT_REQUIRED
             auth = backend.client.headers.get("authorization")
             assert auth == "Bearer combined_token"
             await backend.close()

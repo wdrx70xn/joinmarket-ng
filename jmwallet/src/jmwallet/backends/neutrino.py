@@ -187,6 +187,14 @@ class NeutrinoBackend(BlockchainBackend):
                 )
             else:
                 ctx = ssl.create_default_context(cafile=str(cert_path))
+                # The neutrino-api self-signed certificate only contains
+                # SANs for localhost/127.0.0.1/::1.  When connecting via a
+                # Docker service name (e.g. jm-neutrino) the hostname won't
+                # match.  Since we pin the exact certificate file (TOFU
+                # model, like SSH), hostname verification is redundant --
+                # the certificate itself is the identity.
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_REQUIRED
                 kwargs["verify"] = ctx
                 logger.debug(f"Neutrino HTTPS pinned to certificate {cert_path}")
 
