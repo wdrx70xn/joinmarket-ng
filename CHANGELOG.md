@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-04-09
+
 ### Changed
 
 - Neutrino TLS migration guidance added: if upgrading from HTTP, switch `neutrino_url` to `https://` and set `neutrino_tls_cert` plus `neutrino_auth_token_file` (or `neutrino_auth_token`). Manual install docs now include where to copy `tls.cert` and `auth_token` from neutrino-api.
+
+### Added
+
+- Add directory heartbeat probes and idle peer eviction using PING/PONG with legacy maker fallback ([2a33f7f7](../../commit/2a33f7f7c1f465359f9d4cb11b04ad05e83619cb))
+
+### Fixed
+
+- Propagate neutrino TLS/auth settings across all CLI backend codepaths and reduce duplicate pinning logs ([e5d5ca1a](../../commit/e5d5ca1aa2aa676c22b2fa4075278c5f06768c94))
+- Fix TLS hostname mismatch when connecting to neutrino via Docker service names ([31740b71](../../commit/31740b71a5176ee6da32752680b47adbd073707c))
 
 ## [0.24.0] - 2026-04-08
 
@@ -1163,7 +1174,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.24.0...HEAD
+[Unreleased]: ../../compare/0.25.0...HEAD
+[0.25.0]: ../../compare/0.24.0...0.25.0
 [0.24.0]: ../../compare/0.23.1...0.24.0
 [0.23.1]: ../../compare/0.23.0...0.23.1
 [0.23.0]: ../../compare/0.22.0...0.23.0
