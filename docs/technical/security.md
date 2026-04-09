@@ -34,6 +34,8 @@ Primary goals:
 
 - neutrino is convenient, but full-node backends remain the strongest default for verification and compatibility
 - run neutrino infrastructure you trust and route traffic with Tor where possible
+- neutrino-api supports TLS with certificate pinning and bearer-token authentication, enabled by default; see [Neutrino TLS](neutrino-tls.md) for setup details
+- the TLS certificate is self-signed and pinned on first use (TOFU model), so only the specific neutrino-api instance that generated it is trusted
 
 ## Operational Advice
 

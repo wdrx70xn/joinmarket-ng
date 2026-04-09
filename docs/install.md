@@ -73,10 +73,25 @@ rpc_password = "your_rpc_password"
 ```toml
 [bitcoin]
 backend_type = "neutrino"
-neutrino_url = "http://127.0.0.1:8334"
+neutrino_url = "https://127.0.0.1:8334"
+neutrino_tls_cert = "~/.joinmarket-ng/neutrino/tls.cert"
+neutrino_auth_token_file = "~/.joinmarket-ng/neutrino/auth_token"
 ```
 
-Neutrino server example:
+JoinMarket NG does not generate this cert/token itself today. You need to
+copy them from your neutrino-api instance once, then keep them in:
+
+- `~/.joinmarket-ng/neutrino/tls.cert`
+- `~/.joinmarket-ng/neutrino/auth_token`
+
+Create the directory:
+
+```bash
+mkdir -p ~/.joinmarket-ng/neutrino
+chmod 700 ~/.joinmarket-ng/neutrino
+```
+
+Neutrino server example (Docker):
 
 On Linux, add your user to the Docker group once (skip if Docker already works without `sudo`):
 
@@ -94,6 +109,21 @@ docker run -d \
   -e NETWORK=mainnet \
   ghcr.io/m0wer/neutrino-api
 ```
+
+Copy credentials from neutrino-api into JoinMarket NG config directory:
+
+```bash
+docker cp neutrino:/data/neutrino/tls.cert ~/.joinmarket-ng/neutrino/tls.cert
+docker cp neutrino:/data/neutrino/auth_token ~/.joinmarket-ng/neutrino/auth_token
+chmod 600 ~/.joinmarket-ng/neutrino/tls.cert ~/.joinmarket-ng/neutrino/auth_token
+```
+
+If you previously used `http://` neutrino:
+
+1. Switch `neutrino_url` to `https://...`
+2. Add `neutrino_tls_cert`
+3. Add `neutrino_auth_token_file` (or `neutrino_auth_token`)
+4. Restart JoinMarket NG
 
 On low-power hardware, initial Neutrino sync can take significantly longer (for example, Raspberry Pi 4: ~20 minutes sync plus long prefetch).
 

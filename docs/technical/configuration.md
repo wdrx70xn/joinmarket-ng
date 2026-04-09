@@ -69,6 +69,17 @@ socks_port = 9050
 - `scantxoutset`
 - `neutrino`
 
+## Neutrino TLS Settings
+
+When using the `neutrino` backend with TLS enabled (default), set:
+
+- `neutrino_tls_cert` -- path to the neutrino-api TLS certificate (PEM)
+- `neutrino_auth_token` -- API bearer token string
+- `neutrino_auth_token_file` -- path to a file containing the token (alternative to `neutrino_auth_token`)
+
+The `neutrino_url` must use `https://` when TLS is enabled.
+See [Neutrino TLS](neutrino-tls.md) and [Installation](../install.md) for the practical migration/setup steps.
+
 ## Directory Server Heartbeat Settings
 
 The `[directory_server]` section supports heartbeat liveness controls:

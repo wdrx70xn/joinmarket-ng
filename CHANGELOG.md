@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Neutrino TLS migration guidance added: if upgrading from HTTP, switch `neutrino_url` to `https://` and set `neutrino_tls_cert` plus `neutrino_auth_token_file` (or `neutrino_auth_token`). Manual install docs now include where to copy `tls.cert` and `auth_token` from neutrino-api.
+
 ## [0.24.0] - 2026-04-08
 
 ### Added
