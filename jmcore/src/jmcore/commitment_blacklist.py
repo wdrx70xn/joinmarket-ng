@@ -47,7 +47,14 @@ class CommitmentBlacklist:
         self._load_from_disk()
 
     def _load_from_disk(self) -> None:
-        """Load blacklist from disk into memory."""
+        """Load blacklist from disk into memory.
+
+        Commitments are normalized to lowercase on load to ensure consistent
+        case-insensitive matching. This is important because hex-encoded
+        commitments are case-insensitive by nature ('ABCD' == 'abcd'), and
+        files written by the reference implementation may contain mixed-case
+        entries.
+        """
         if not self.blacklist_path.exists():
             logger.debug(f"No existing blacklist at {self.blacklist_path}")
             return
@@ -55,7 +62,7 @@ class CommitmentBlacklist:
         try:
             with open(self.blacklist_path, encoding="ascii") as f:
                 for line in f:
-                    commitment = line.strip()
+                    commitment = line.strip().lower()
                     if commitment:
                         self._commitments.add(commitment)
             logger.info(f"Loaded {len(self._commitments)} commitments from blacklist")

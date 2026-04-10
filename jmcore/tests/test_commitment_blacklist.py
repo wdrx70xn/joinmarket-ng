@@ -161,6 +161,51 @@ class TestCommitmentBlacklist:
         assert "valid_commitment" in blacklist
         assert "another_valid" in blacklist
 
+    def test_load_mixed_case_from_disk(self, tmp_path: Path) -> None:
+        """Test that commitments loaded from disk are normalized to lowercase.
+
+        The reference implementation stores commitments without case
+        normalization. When loading such a file, NG must lowercase entries
+        so that is_blacklisted() (which also lowercases the query) can
+        find them. Without this, a mixed-case commitment written by the
+        reference impl could bypass the blacklist after a reload.
+        """
+        blacklist_path = tmp_path / "commitmentlist"
+
+        # Simulate a file written by the reference implementation with
+        # mixed-case hex commitments
+        mixed_case = "ABCDEF1234567890" + "0" * 48
+        blacklist_path.write_text(mixed_case + "\n")
+
+        blacklist = CommitmentBlacklist(blacklist_path)
+
+        # Must find it regardless of query case
+        assert blacklist.is_blacklisted(mixed_case) is True
+        assert blacklist.is_blacklisted(mixed_case.lower()) is True
+        assert blacklist.is_blacklisted(mixed_case.upper()) is True
+
+        # check_and_add must also detect it as already present
+        assert blacklist.check_and_add(mixed_case) is False
+
+    def test_case_insensitive_persistence_roundtrip(self, tmp_path: Path) -> None:
+        """Test that case normalization survives a save-then-load cycle.
+
+        Commitments added with any casing should be found after the
+        blacklist is reloaded from disk.
+        """
+        blacklist_path = tmp_path / "commitmentlist"
+
+        bl1 = CommitmentBlacklist(blacklist_path)
+        upper_commitment = "AABBCCDD" + "0" * 56
+        bl1.add(upper_commitment)
+
+        # Reload from disk
+        bl2 = CommitmentBlacklist(blacklist_path)
+
+        assert bl2.is_blacklisted(upper_commitment) is True
+        assert bl2.is_blacklisted(upper_commitment.lower()) is True
+        assert bl2.is_blacklisted("AaBbCcDd" + "0" * 56) is True
+
 
 class TestGlobalBlacklist:
     """Tests for global blacklist functions."""
