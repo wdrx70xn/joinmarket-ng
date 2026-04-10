@@ -8,7 +8,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = REPO_ROOT / "scripts" / "menu.joinmarket-ng.sh"
+SCRIPT_PATH = REPO_ROOT / "jmcore" / "src" / "jmcore" / "data" / "menu.joinmarket-ng.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,15 @@ def test_tui_find_menu_script_finds_repo_script() -> None:
     found = _find_menu_script()
     assert found is not None
     assert found.name == "menu.joinmarket-ng.sh"
+
+
+def test_tui_package_data_contains_menu_script() -> None:
+    """The menu script must be discoverable via importlib.resources."""
+    from importlib import resources
+
+    ref = resources.files("jmcore").joinpath("data/menu.joinmarket-ng.sh")
+    p = Path(str(ref))
+    assert p.is_file(), f"Package data not found at {p}"
 
 
 def test_tui_main_exits_without_whiptail() -> None:

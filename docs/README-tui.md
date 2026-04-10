@@ -6,19 +6,15 @@ The same script works on both **Raspiblitz** (uses the bonus script for privileg
 
 ## Install
 
-**Raspiblitz** installs the script automatically as `/home/joinmarketng/menu.sh`.
-
-For standalone setups, use the `jm-ng` entry point installed with jmcore:
+The `jm-ng` command is included with the **jmcore** package. After
+installing jmcore (e.g. `pip install jmcore`), the `jm-ng` entry point
+is available directly:
 
 ```bash
 jm-ng
 ```
 
-Or run the script directly from a checkout:
-
-```bash
-bash scripts/menu.joinmarket-ng.sh
-```
+**Raspiblitz** installs the script automatically as `/home/joinmarketng/menu.sh`.
 
 ### Prerequisites
 

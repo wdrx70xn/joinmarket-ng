@@ -1,15 +1,17 @@
 """JoinMarket-NG TUI menu launcher.
 
-Thin entry point that locates and execs ``scripts/menu.joinmarket-ng.sh``.
+Thin entry point that locates and execs ``menu.joinmarket-ng.sh``.
 It is registered as the ``jm-ng`` console script via *jmcore*'s
-``pyproject.toml``, so after ``pip install -e jmcore`` (or a full install)
-users can simply run ``jm-ng`` from the terminal.
+``pyproject.toml``, so after ``pip install jmcore`` users can simply
+run ``jm-ng`` from the terminal.
 
 The launcher resolves the shell script in this order:
 
-1. Relative to the repo root (editable / development installs).
-2. ``$HOME/.joinmarket-ng/menu.sh`` (standalone manual installs).
-3. ``$JM_NG_MENU`` environment variable override.
+1. ``$JM_NG_MENU`` environment variable override.
+2. Package data shipped inside the *jmcore* wheel
+   (``jmcore/data/menu.joinmarket-ng.sh``).
+3. Relative to the repo root (editable / development installs).
+4. ``$HOME/.joinmarket-ng/menu.sh`` (standalone manual installs).
 
 If ``whiptail`` is not found on ``$PATH`` the launcher exits with a
 helpful message.
@@ -20,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from importlib import resources
 from pathlib import Path
 
 
@@ -32,14 +35,27 @@ def _find_menu_script() -> Path | None:
         if p.is_file():
             return p
 
-    # 2. Relative to repository root (development / editable installs)
+    # 2. Package data (works for non-editable pip installs / wheels)
+    try:
+        ref = resources.files("jmcore").joinpath("data/menu.joinmarket-ng.sh")
+        # resources.files() returns a Traversable.  For files inside a
+        # wheel / installed package this is a real filesystem path; for
+        # zip-imported packages it may need extraction via as_file().
+        # We try the fast path first (real path).
+        p = Path(str(ref))
+        if p.is_file():
+            return p
+    except (TypeError, FileNotFoundError, ModuleNotFoundError):
+        pass
+
+    # 3. Relative to repository root (development / editable installs)
     #    This file lives at jmcore/src/jmcore/tui.py  ->  repo root is ../../../../
     repo_root = Path(__file__).resolve().parent.parent.parent.parent
     candidate = repo_root / "scripts" / "menu.joinmarket-ng.sh"
     if candidate.is_file():
         return candidate
 
-    # 3. Standard standalone install location
+    # 4. Standard standalone install location
     home_script = Path.home() / ".joinmarket-ng" / "menu.sh"
     if home_script.is_file():
         return home_script
@@ -65,6 +81,7 @@ def main() -> None:
         print(
             "Error: Could not locate the TUI menu script.\n"
             "Expected locations:\n"
+            "  - jmcore package data (pip install jmcore)\n"
             "  - <repo>/scripts/menu.joinmarket-ng.sh  (development)\n"
             "  - ~/.joinmarket-ng/menu.sh               (standalone install)\n"
             "\n"
