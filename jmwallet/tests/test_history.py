@@ -14,7 +14,7 @@ import pytest
 from jmwallet.backends.base import Transaction
 from jmwallet.history import (
     TransactionHistoryEntry,
-    _count_utxos,
+    _parse_utxos,
     append_history_entry,
     cleanup_stale_pending_transactions,
     create_maker_history_entry,
@@ -224,28 +224,32 @@ class TestAppendAndReadHistory:
         assert entries == []
 
 
-class TestCountUtxos:
-    """Tests for _count_utxos helper."""
+class TestParseUtxos:
+    """Tests for _parse_utxos helper."""
 
     def test_empty_string(self) -> None:
-        """Test counting UTXOs from empty string."""
-        assert _count_utxos("") == 0
+        """Test parsing UTXOs from empty string."""
+        assert _parse_utxos("") == set()
 
     def test_whitespace_only(self) -> None:
-        """Test counting UTXOs from whitespace-only string."""
-        assert _count_utxos("  ") == 0
+        """Test parsing UTXOs from whitespace-only string."""
+        assert _parse_utxos("  ") == set()
 
     def test_single_utxo(self) -> None:
-        """Test counting a single UTXO."""
-        assert _count_utxos("aabb0011:0") == 1
+        """Test parsing a single UTXO."""
+        assert _parse_utxos("aabb0011:0") == {"aabb0011:0"}
 
     def test_multiple_utxos(self) -> None:
-        """Test counting multiple UTXOs."""
-        assert _count_utxos("aabb0011:0,ccdd2233:1,eeff4455:2") == 3
+        """Test parsing multiple UTXOs."""
+        assert _parse_utxos("aabb0011:0,ccdd2233:1,eeff4455:2") == {
+            "aabb0011:0",
+            "ccdd2233:1",
+            "eeff4455:2",
+        }
 
     def test_two_utxos(self) -> None:
-        """Test counting two UTXOs."""
-        assert _count_utxos("aabb0011:0,ccdd2233:1") == 2
+        """Test parsing two UTXOs."""
+        assert _parse_utxos("aabb0011:0,ccdd2233:1") == {"aabb0011:0", "ccdd2233:1"}
 
 
 class TestHistoryStats:
@@ -540,6 +544,45 @@ class TestHistoryStatsForPeriod:
 
         stats = get_history_stats_for_period(24, data_dir=temp_data_dir)
         assert stats["utxos_disclosed"] == 4  # 3 + 1 + 0
+
+    def test_utxos_disclosed_deduplicates_across_entries(self, temp_data_dir: Path) -> None:
+        """Test that utxos_disclosed deduplicates the same UTXO across entries.
+
+        If the same UTXO is disclosed in multiple CoinJoin attempts, it should
+        only be counted once.  Users care about how many distinct UTXOs external
+        observers know about, not how many disclosure events occurred.
+        """
+        now = datetime.now()
+        recent_ts = (now - timedelta(hours=1)).isoformat()
+
+        # First attempt: discloses aa:0 and bb:1
+        entry1 = TransactionHistoryEntry(
+            timestamp=recent_ts,
+            role="maker",
+            txid="entry1_tx1" * 7,
+            cj_amount=500_000,
+            success=False,
+            completed_at=recent_ts,
+            failure_reason="Taker disappeared",
+            utxos_used="aa:0,bb:1",
+        )
+        append_history_entry(entry1, temp_data_dir)
+
+        # Second attempt: discloses aa:0 again (same UTXO) and cc:2 (new)
+        entry2 = TransactionHistoryEntry(
+            timestamp=recent_ts,
+            role="maker",
+            txid="entry2_tx1" * 7,
+            cj_amount=500_000,
+            success=True,
+            utxos_used="aa:0,cc:2",
+        )
+        append_history_entry(entry2, temp_data_dir)
+
+        stats = get_history_stats_for_period(24, data_dir=temp_data_dir)
+        # aa:0 appears in both entries but should only be counted once
+        # Unique set: {aa:0, bb:1, cc:2} = 3
+        assert stats["utxos_disclosed"] == 3
 
     """Tests for helper functions."""
 

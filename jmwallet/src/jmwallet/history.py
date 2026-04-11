@@ -244,18 +244,18 @@ def read_history(
     return entries
 
 
-def _count_utxos(utxos_used: str) -> int:
-    """Count the number of UTXOs from a comma-separated utxos_used string.
+def _parse_utxos(utxos_used: str) -> set[str]:
+    """Parse a comma-separated utxos_used string into a set of UTXO identifiers.
 
     Args:
         utxos_used: Comma-separated string of "txid:vout" pairs
 
     Returns:
-        Number of UTXOs (0 if empty)
+        Set of UTXO identifier strings (empty set if input is empty)
     """
     if not utxos_used or not utxos_used.strip():
-        return 0
-    return len(utxos_used.split(","))
+        return set()
+    return set(utxos_used.split(","))
 
 
 def _compute_stats(entries: list[TransactionHistoryEntry]) -> dict[str, int | float]:
@@ -277,7 +277,9 @@ def _compute_stats(entries: list[TransactionHistoryEntry]) -> dict[str, int | fl
         - total_fees_earned: Total fees earned as maker
         - total_fees_paid: Total fees paid as taker
         - success_rate: Percentage of successful CoinJoins
-        - utxos_disclosed: Number of UTXOs disclosed to takers (via !ioauth)
+        - utxos_disclosed: Number of unique UTXOs disclosed to takers (via !ioauth).
+              Deduplicated across entries so the same UTXO disclosed in multiple
+              CoinJoin attempts is only counted once.
     """
     if not entries:
         return {
@@ -299,6 +301,13 @@ def _compute_stats(entries: list[TransactionHistoryEntry]) -> dict[str, int | fl
     successful = [e for e in entries if e.success]
     failed = [e for e in entries if not e.success and e.completed_at]
 
+    # Collect all unique UTXOs disclosed across all entries.  The same UTXO may
+    # appear in multiple CoinJoin attempts; users care about how many distinct
+    # UTXOs external observers know about, not how many disclosure events occurred.
+    all_disclosed: set[str] = set()
+    for e in entries:
+        all_disclosed |= _parse_utxos(e.utxos_used)
+
     return {
         "total_coinjoins": len(entries),
         "maker_coinjoins": len(maker_entries),
@@ -310,7 +319,7 @@ def _compute_stats(entries: list[TransactionHistoryEntry]) -> dict[str, int | fl
         "total_fees_earned": sum(e.fee_received for e in maker_entries),
         "total_fees_paid": sum(e.total_maker_fees_paid + e.mining_fee_paid for e in taker_entries),
         "success_rate": len(successful) / len(entries) * 100 if entries else 0.0,
-        "utxos_disclosed": sum(_count_utxos(e.utxos_used) for e in entries),
+        "utxos_disclosed": len(all_disclosed),
     }
 
 

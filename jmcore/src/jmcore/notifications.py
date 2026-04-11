@@ -606,7 +606,7 @@ class Notifier:
             total_earnings: Total fees earned in sats
             total_volume: Total CoinJoin volume in sats (all requests)
             successful_volume: CoinJoin volume in sats (successful only)
-            utxos_disclosed: Number of UTXOs disclosed to takers
+            utxos_disclosed: Number of unique UTXOs disclosed to takers
             version: Current version string (e.g., "0.15.0"), shown if provided
             update_available: Latest version string if an update is available, None otherwise
             total_balance: Total wallet balance in sats (only included when
