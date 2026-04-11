@@ -86,10 +86,44 @@ Then run marker-specific tests as needed (`-m reference`, `-m reference_maker`).
 
 Reproducible release verification and signing workflows:
 
-- verify: `scripts/verify-release.sh`
+- build locally: `scripts/build-release.sh`
 - sign: `scripts/sign-release.sh`
+- verify: `scripts/verify-release.sh`
 
 See [Signatures](../README-signatures.md) for repository signature layout.
+
+### Local-First Workflow (Recommended for Release Managers)
+
+Build, sign, and then let CI verify independently. No waiting for CI.
+
+```bash
+# 1. Bump version (creates commit + tag locally)
+python scripts/bump_version.py patch --no-push
+
+# 2. Build images locally and generate manifest
+./scripts/build-release.sh
+
+# 3. Sign the locally-built manifest
+./scripts/sign-release.sh --manifest release-manifest-<version>.txt --key <fingerprint>
+
+# 4. Push to trigger CI
+git push && git push --tags
+```
+
+CI will build the same images independently and verify its layer digests
+match your signed local manifest. The release is confirmed reproducible
+when CI passes.
+
+### CI-First Workflow (For Additional Signers)
+
+Wait for CI to complete, then reproduce and sign.
+
+```bash
+# After CI release is complete:
+./scripts/sign-release.sh <version> --key <fingerprint>
+```
+
+This downloads the manifest, rebuilds locally, and signs if digests match.
 
 ## Verify a Release
 
@@ -106,5 +140,9 @@ historical accuracy.
 ## Sign a Release
 
 ```bash
+# Sign a CI-built release (downloads manifest, reproduces, signs)
 ./scripts/sign-release.sh <version> --key <gpg-key-id>
+
+# Sign a locally-built manifest (from build-release.sh)
+./scripts/sign-release.sh <version> --manifest release-manifest-<version>.txt --key <gpg-key-id>
 ```

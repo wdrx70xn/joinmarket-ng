@@ -46,14 +46,21 @@ Arguments:
 
 Options:
   --key KEY       GPG key fingerprint to use for signing (required for auto-detect)
+  --manifest FILE Use a local manifest file instead of downloading from GitHub.
+                  When used with build-release.sh output, reproduction is skipped
+                  by default since the manifest was just built locally.
   --reproduce     Build locally and verify digests match before signing (recommended)
   --no-reproduce  Skip local build verification (not recommended)
   --no-push       Don't automatically commit and push the signature (default: push)
   --help          Show this help message
 
-All signers should use --reproduce to independently verify that builds are reproducible
-before signing. Multiple signatures only add value if each signer verifies independently.
-By default, --reproduce is enabled unless --no-reproduce is specified.
+When signing a CI-built release (default, no --manifest):
+  All signers should use --reproduce to independently verify that builds are
+  reproducible before signing. By default, --reproduce is enabled.
+
+When signing a locally-built manifest (--manifest):
+  The manifest was just generated from a local build, so reproduction is skipped
+  by default. Use --reproduce to force a rebuild and verify.
 
 The reproduce check compares layer digests (content-addressable, format-independent)
 rather than manifest digests, ensuring reliable comparison regardless of build environment.
@@ -62,7 +69,20 @@ produce different layer digests than native builds).
 
 Reproduction uses Dockerfiles from the release commit to ensure strict historical accuracy.
 
+Workflows:
+
+  Local-first (recommended for release managers):
+    1. bump_version.py patch --no-push
+    2. build-release.sh
+    3. sign-release.sh <version> --manifest release-manifest-<version>.txt --key <fp>
+    4. git push && git push --tags   (CI verifies digests match)
+
+  CI-first (for additional signers):
+    1. Wait for CI release to complete
+    2. sign-release.sh <version> --key <fp>   (downloads manifest, reproduces, signs)
+
 Examples:
+  $(basename "$0") 1.0.0 --manifest release-manifest-1.0.0.txt --key ABCD1234...
   $(basename "$0") 1.0.0 --key ABCD1234...              # Verify and sign
   $(basename "$0") 1.0.0 --key ABCD1234... --no-reproduce  # Sign without verify (not recommended)
   $(basename "$0") --key ABCD1234...                    # Auto-detect latest unsigned
@@ -86,13 +106,18 @@ detect_arch() {
 # Parse arguments
 VERSION=""
 GPG_KEY=""
-REPRODUCE=true  # Default to true - all signers should verify
+REPRODUCE=""  # Will be set based on --manifest if not explicitly specified
 AUTO_PUSH=true
+LOCAL_MANIFEST=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --key)
             GPG_KEY="$2"
+            shift 2
+            ;;
+        --manifest)
+            LOCAL_MANIFEST="$2"
             shift 2
             ;;
         --reproduce)
@@ -121,6 +146,15 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Set reproduce default based on whether a local manifest is provided
+if [[ -z "$REPRODUCE" ]]; then
+    if [[ -n "$LOCAL_MANIFEST" ]]; then
+        REPRODUCE=false  # Local manifest = just built locally, skip re-build
+    else
+        REPRODUCE=true   # CI manifest = reproduce to verify
+    fi
+fi
 
 # Check for jq (required for all operations now)
 if ! command -v jq &> /dev/null; then
@@ -193,35 +227,46 @@ log_info "Using GPG key: $FULL_FINGERPRINT"
 # Step 0.5: Auto-detect latest unsigned release if version not specified
 # =============================================================================
 if [[ -z "$VERSION" ]]; then
-    log_info "No version specified, auto-detecting latest unsigned release..."
-
-    if ! command -v gh &> /dev/null; then
-        log_error "GitHub CLI (gh) is required for auto-detection. Please install it or specify a version."
-        exit 1
-    fi
-
-    # Get all releases sorted by date (newest first)
-    RELEASES=$(gh release list --repo "$REPO" --limit 20 | awk '{print $1}')
-
-    if [[ -z "$RELEASES" ]]; then
-        log_error "No releases found in repository"
-        exit 1
-    fi
-
-    # Find the first release without a signature from this key
-    for release in $RELEASES; do
-        # Check if signature file exists for this release
-        SIG_PATH="$PROJECT_ROOT/signatures/$release/${FULL_FINGERPRINT}.sig"
-        if [[ ! -f "$SIG_PATH" ]]; then
-            VERSION="$release"
-            log_info "Found unsigned release: $VERSION"
-            break
+    if [[ -n "$LOCAL_MANIFEST" ]]; then
+        # Extract version from local manifest filename (release-manifest-X.Y.Z.txt)
+        VERSION=$(basename "$LOCAL_MANIFEST" .txt | sed 's/^release-manifest-//')
+        if [[ -z "$VERSION" || "$VERSION" == "$(basename "$LOCAL_MANIFEST" .txt)" ]]; then
+            log_error "Could not extract version from manifest filename: $LOCAL_MANIFEST"
+            log_error "Expected format: release-manifest-X.Y.Z.txt"
+            exit 1
         fi
-    done
+        log_info "Extracted version from manifest filename: $VERSION"
+    else
+        log_info "No version specified, auto-detecting latest unsigned release..."
 
-    if [[ -z "$VERSION" ]]; then
-        log_info "All recent releases are already signed with your key!"
-        exit 0
+        if ! command -v gh &> /dev/null; then
+            log_error "GitHub CLI (gh) is required for auto-detection. Please install it or specify a version."
+            exit 1
+        fi
+
+        # Get all releases sorted by date (newest first)
+        RELEASES=$(gh release list --repo "$REPO" --limit 20 | awk '{print $1}')
+
+        if [[ -z "$RELEASES" ]]; then
+            log_error "No releases found in repository"
+            exit 1
+        fi
+
+        # Find the first release without a signature from this key
+        for release in $RELEASES; do
+            # Check if signature file exists for this release
+            SIG_PATH="$PROJECT_ROOT/signatures/$release/${FULL_FINGERPRINT}.sig"
+            if [[ ! -f "$SIG_PATH" ]]; then
+                VERSION="$release"
+                log_info "Found unsigned release: $VERSION"
+                break
+            fi
+        done
+
+        if [[ -z "$VERSION" ]]; then
+            log_info "All recent releases are already signed with your key!"
+            exit 0
+        fi
     fi
 fi
 
@@ -232,26 +277,38 @@ trap "rm -rf $WORK_DIR" EXIT
 log_info "Signing JoinMarket NG release $VERSION"
 
 # =============================================================================
-# Step 1: Download release manifest
+# Step 1: Get release manifest (local or download)
 # =============================================================================
-log_info "Downloading release manifest..."
-
-MANIFEST_URL="https://github.com/${REPO}/releases/download/${VERSION}/release-manifest-${VERSION}.txt"
 MANIFEST_FILE="$WORK_DIR/release-manifest-${VERSION}.txt"
 
-if command -v curl &> /dev/null; then
-    curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" || {
-        log_error "Failed to download release manifest from $MANIFEST_URL"
+if [[ -n "$LOCAL_MANIFEST" ]]; then
+    # Use local manifest from build-release.sh
+    if [[ ! -f "$LOCAL_MANIFEST" ]]; then
+        log_error "Local manifest file not found: $LOCAL_MANIFEST"
         exit 1
-    }
-elif command -v wget &> /dev/null; then
-    wget -q "$MANIFEST_URL" -O "$MANIFEST_FILE" || {
-        log_error "Failed to download release manifest from $MANIFEST_URL"
-        exit 1
-    }
+    fi
+    log_info "Using local manifest: $LOCAL_MANIFEST"
+    cp "$LOCAL_MANIFEST" "$MANIFEST_FILE"
 else
-    log_error "Neither curl nor wget found. Please install one of them."
-    exit 1
+    # Download from GitHub Releases
+    log_info "Downloading release manifest..."
+
+    MANIFEST_URL="https://github.com/${REPO}/releases/download/${VERSION}/release-manifest-${VERSION}.txt"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_FILE" || {
+            log_error "Failed to download release manifest from $MANIFEST_URL"
+            exit 1
+        }
+    elif command -v wget &> /dev/null; then
+        wget -q "$MANIFEST_URL" -O "$MANIFEST_FILE" || {
+            log_error "Failed to download release manifest from $MANIFEST_URL"
+            exit 1
+        }
+    else
+        log_error "Neither curl nor wget found. Please install one of them."
+        exit 1
+    fi
 fi
 
 log_info "Downloaded release manifest:"
@@ -479,6 +536,15 @@ log_info "Signing Complete!"
 echo "=============================================="
 echo ""
 echo "Signature file: $SIG_FILE"
+
+# If using a local manifest, copy it alongside the signature for CI verification
+LOCAL_MANIFEST_COPY=""
+if [[ -n "$LOCAL_MANIFEST" ]]; then
+    LOCAL_MANIFEST_COPY="$SIG_DIR/${FULL_FINGERPRINT}-manifest.txt"
+    cp "$MANIFEST_FILE" "$LOCAL_MANIFEST_COPY"
+    log_info "Local manifest saved: $LOCAL_MANIFEST_COPY"
+    echo "  (CI will verify its layer digests match this manifest)"
+fi
 echo ""
 
 # Check if key is in trusted-keys.txt
@@ -495,22 +561,46 @@ fi
 # Step 5: Auto commit and push (unless --no-push)
 # =============================================================================
 if [[ "$AUTO_PUSH" == true ]]; then
-    log_info "Committing and pushing signature..."
+    log_info "Committing signature..."
 
     cd "$PROJECT_ROOT"
     git add "$SIG_FILE"
+    if [[ -n "$LOCAL_MANIFEST_COPY" ]]; then
+        git add "$LOCAL_MANIFEST_COPY"
+    fi
     git commit -m "build: add GPG signature for release $VERSION"
-    git push
 
-    log_info "Signature committed and pushed successfully!"
+    if [[ -n "$LOCAL_MANIFEST" ]]; then
+        log_info "Signature committed (not pushing - push tag manually to trigger CI)"
+        echo ""
+        echo "Next steps:"
+        echo "  git push && git push --tags"
+        echo ""
+        echo "CI will build images independently and verify layer digests match"
+        echo "your local manifest."
+    else
+        git push
+        log_info "Signature committed and pushed successfully!"
+    fi
 else
     echo "Next steps:"
     echo "1. Review the signature file"
     echo "2. Commit and push your signature:"
-    echo "   git add $SIG_FILE"
+    if [[ -n "$LOCAL_MANIFEST_COPY" ]]; then
+        echo "   git add $SIG_FILE $LOCAL_MANIFEST_COPY"
+    else
+        echo "   git add $SIG_FILE"
+    fi
     echo "   git commit -m 'build: add GPG signature for release $VERSION'"
     echo "   git push"
     echo ""
-    echo "3. Or create a PR with your signature if you don't have write access"
-    echo ""
+    if [[ -n "$LOCAL_MANIFEST" ]]; then
+        echo "3. Push the tag to trigger CI:"
+        echo "   git push --tags"
+        echo ""
+        echo "CI will verify its layer digests match your local manifest."
+    else
+        echo "3. Or create a PR with your signature if you don't have write access"
+        echo ""
+    fi
 fi

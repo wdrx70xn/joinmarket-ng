@@ -231,11 +231,39 @@ else
             log_info "Verifying signature from $fingerprint..."
 
             if gpg --verify "$sig_file" "$MANIFEST_FILE" 2>/dev/null; then
-                log_info "Valid signature from $fingerprint"
+                # Signature matches the CI manifest directly
+                log_info "Valid signature from $fingerprint (verified against CI manifest)"
                 VALID_SIGS=$((VALID_SIGS + 1))
                 SIGNERS+=("$fingerprint")
             else
-                log_warn "Invalid signature from $fingerprint"
+                # Check if signer used local-first workflow (signed a local manifest)
+                local_manifest="$SIG_DIR/${fingerprint}-manifest.txt"
+                if [[ -f "$local_manifest" ]] && gpg --verify "$sig_file" "$local_manifest" 2>/dev/null; then
+                    log_info "Valid signature from $fingerprint (verified against local manifest)"
+
+                    # Cross-check: verify local manifest layer digests match CI manifest
+                    local_match=true
+                    while IFS= read -r section; do
+                        local_layers=$(sed -n "/^### ${section}\$/,/^###/{/^sha256:/p}" "$local_manifest" | sort)
+                        ci_layers=$(sed -n "/^### ${section}\$/,/^###/{/^sha256:/p}" "$MANIFEST_FILE" | sort)
+
+                        if [[ -n "$local_layers" && -n "$ci_layers" && "$local_layers" != "$ci_layers" ]]; then
+                            log_error "  Layer digest mismatch for $section!"
+                            local_match=false
+                        fi
+                    done < <(grep '^### ' "$local_manifest" | sed 's/^### //')
+
+                    if $local_match; then
+                        log_info "  Local manifest layer digests match CI manifest"
+                        VALID_SIGS=$((VALID_SIGS + 1))
+                        SIGNERS+=("$fingerprint")
+                    else
+                        log_error "  Local manifest layer digests do NOT match CI manifest!"
+                        log_error "  The signer's local build produced different results than CI."
+                    fi
+                else
+                    log_warn "Invalid signature from $fingerprint"
+                fi
             fi
         done
     else

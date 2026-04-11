@@ -17,12 +17,13 @@ Utility scripts for JoinMarket NG development and operations.
 - **regtest-miner-jam.sh** - Run Bitcoin Core regtest miner for JAM compatibility testing
 - **regtest-miner.sh** - Run Bitcoin Core regtest miner
 - **run_all_tests.sh** - Execute complete test suite including Docker-based e2e tests
-- **sign-release.sh** - Sign a release tarball
+- **sign-release.sh** - Sign a release manifest (supports local-first and CI-first workflows)
 - **update_readme_help.py** - Update module READMEs and `docs/README-*.md` pages with CLI command help sections (run manually when CLI changes)
 - **update-base-images.sh** - Update Docker base image digests
 - **update-deps.sh** - Update project dependencies
 - **update-flatpak-deps.py** - Update Flatpak manifest dependency versions and checksums
-- **verify-release.sh** - Verify a signed release tarball
+- **verify-release.sh** - Verify release signatures and optionally reproduce builds
+- **build-release.sh** - Build Docker images locally and generate a release manifest for local-first signing
 
 ### Fidelity Bond Cold Storage
 

@@ -11,6 +11,7 @@ signatures/
     <fingerprint>.asc      # Full GPG public keys
   <version>/
     <fingerprint>.sig      # Detached signature of the release manifest
+    <fingerprint>-manifest.txt  # Local manifest (local-first workflow only)
 ```
 
 ## How Signing Works
@@ -24,6 +25,12 @@ signatures/
    - Verify they can reproduce the same image digests from source
    - Sign the release manifest with their GPG key
    - Submit a PR with their signature
+
+Two workflows are supported:
+
+- **Local-first**: Build locally with `build-release.sh`, sign with
+  `sign-release.sh --manifest`, push tag. CI verifies independently.
+- **CI-first**: Wait for CI, then `sign-release.sh` reproduces and signs.
 
 ## For Signers
 

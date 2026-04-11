@@ -302,3 +302,77 @@ jobs:
         run: |
           VERSION=${{ needs.create-release.outputs.version }}
           gh release upload ${VERSION} release-manifest-${VERSION}.txt --clobber
+
+      # If a signer used the local-first workflow (build-release.sh + sign-release.sh)
+      # before pushing the tag, their local manifest is committed alongside their
+      # signature. This step verifies that the signer's layer digests (for their
+      # architecture) match CI's independently-built layer digests.
+      - name: Verify against pre-signed local manifests
+        run: |
+          VERSION=${{ needs.create-release.outputs.version }}
+          SIG_DIR="signatures/${VERSION}"
+
+          # Look for local manifests committed by signers
+          shopt -s nullglob
+          local_manifests=("$SIG_DIR"/*-manifest.txt)
+          shopt -u nullglob
+
+          if [ ${#local_manifests[@]} -eq 0 ]; then
+            echo "No pre-signed local manifests found for $VERSION"
+            echo "This is normal for CI-first releases (signers will sign after CI)"
+            exit 0
+          fi
+
+          echo "Found ${#local_manifests[@]} pre-signed local manifest(s)"
+          echo "Verifying layer digests match CI builds..."
+          echo ""
+
+          ERRORS=0
+
+          for local_manifest in "${local_manifests[@]}"; do
+            signer=$(basename "$local_manifest" -manifest.txt)
+            echo "=== Checking manifest from signer: $signer ==="
+
+            # Extract layer digest sections from local manifest and compare
+            # with CI-generated manifest
+            while IFS= read -r section; do
+              # Get expected layers from local manifest for this section
+              local_layers=$(sed -n "/^### ${section}\$/,/^###/{/^sha256:/p}" "$local_manifest" | sort)
+
+              if [ -z "$local_layers" ]; then
+                continue
+              fi
+
+              # Get CI layers for the same section
+              ci_layers=$(sed -n "/^### ${section}\$/,/^###/{/^sha256:/p}" "release-manifest-${VERSION}.txt" | sort)
+
+              if [ -z "$ci_layers" ]; then
+                echo "  $section: not present in CI manifest (signer built on different arch)"
+                continue
+              fi
+
+              if [ "$local_layers" = "$ci_layers" ]; then
+                layer_count=$(echo "$local_layers" | wc -l)
+                echo "  $section: MATCH ($layer_count layers)"
+              else
+                echo "::error::$section: MISMATCH between signer and CI layer digests!"
+                echo "  Signer layers:"
+                echo "$local_layers" | sed 's/^/    /'
+                echo "  CI layers:"
+                echo "$ci_layers" | sed 's/^/    /'
+                ERRORS=$((ERRORS + 1))
+              fi
+            done < <(grep '^### ' "$local_manifest" | sed 's/^### //')
+
+            echo ""
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::Layer digest mismatches found! The release may not be reproducible."
+            echo "This means CI produced different Docker image layers than the signer."
+            echo "Investigate before distributing this release."
+            exit 1
+          fi
+
+          echo "All pre-signed layer digests match CI builds!"
+          echo "The release is independently verified as reproducible."
