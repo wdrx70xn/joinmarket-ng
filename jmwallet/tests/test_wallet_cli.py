@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -21,10 +22,11 @@ runner = CliRunner()
 def test_root_help_shows_completion_options() -> None:
     """Wallet CLI should expose Typer shell completion options."""
     result = runner.invoke(app, ["--help"], prog_name="jm-wallet")
+    output = click.unstyle(result.stdout)
 
     assert result.exit_code == 0
-    assert "--install-completion" in result.stdout
-    assert "--show-completion" in result.stdout
+    assert "--install-completion" in output
+    assert "--show-completion" in output
 
 
 def test_bip39_import_with_passphrase_zpub_and_address():

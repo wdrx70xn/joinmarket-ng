@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import click
 import pytest
 from jmcore.models import NetworkType
 from typer.testing import CliRunner
@@ -18,10 +19,11 @@ runner = CliRunner()
 def test_root_help_shows_completion_options() -> None:
     """Taker CLI should expose Typer shell completion options."""
     result = runner.invoke(app, ["--help"], prog_name="jm-taker")
+    output = click.unstyle(result.stdout)
 
     assert result.exit_code == 0
-    assert "--install-completion" in result.stdout
-    assert "--show-completion" in result.stdout
+    assert "--install-completion" in output
+    assert "--show-completion" in output
 
 
 class TestBuildTakerConfig:

@@ -80,9 +80,8 @@ async def get_orderbook(
         )
 
 
-@router.api_route("/obwatch/refreshorderbook", methods=["GET", "POST"])
-async def refresh_orderbook(
-    state: DaemonState = Depends(get_daemon_state),
+async def _refresh_orderbook_response(
+    state: DaemonState,
 ) -> JSONResponse:
     """Request the orderbook watcher to refresh its cache.
 
@@ -102,3 +101,19 @@ async def refresh_orderbook(
             return JSONResponse(content={"offers": [], "fidelitybonds": []})
     except Exception:
         return JSONResponse(content={"offers": [], "fidelitybonds": []})
+
+
+@router.get("/obwatch/refreshorderbook")
+async def refresh_orderbook_get(
+    state: DaemonState = Depends(get_daemon_state),
+) -> JSONResponse:
+    """GET compatibility endpoint for orderbook refresh."""
+    return await _refresh_orderbook_response(state)
+
+
+@router.post("/obwatch/refreshorderbook")
+async def refresh_orderbook_post(
+    state: DaemonState = Depends(get_daemon_state),
+) -> JSONResponse:
+    """POST compatibility endpoint for JAM frontend refresh calls."""
+    return await _refresh_orderbook_response(state)
