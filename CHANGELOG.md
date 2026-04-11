@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-04-11
+
+### Added
+
+- The TUI menu is now available as jm-ng console command after ([d03d3809](../../commit/d03d380956b8ac0df50a570cdd4d81c9b27746ae))
+- Reject malformed PoDLE commitments at protocol boundary ([6041ef4a](../../commit/6041ef4a3503f3025c1982681c2ab53ac741f148))
+- Make shell command autocomplete near-instant with static completion scripts and regeneration tooling ([6c507084](../../commit/6c507084698287e6a070e2f07338222189f16d2e))
+- Add local-first release workflow for faster build and sign ([a1a0ab1c](../../commit/a1a0ab1cd608b5cb658808d7b66443bf981a736b))
+
+### Fixed
+
+- Fix commitment blacklist bypass when entries are stored with mixed case ([1b176873](../../commit/1b17687309a9b1487886e116e94745fc5a7e831a))
+- Deduplicate UTXOs in summary disclosure count so repeated disclosures of the same UTXO are only counted once ([b7fd0a5a](../../commit/b7fd0a5a2efad4c3e753c588e67787e24608d891))
+- Fix release reproduction by removing Dockerfile overlay that broke pinned base-image digests ([aeec3752](../../commit/aeec3752ea89466dc3d98b2a75e7c191ec9ee2ff))
+
 ## [0.25.0] - 2026-04-09
 
 ### Changed
@@ -1174,7 +1189,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.25.0...HEAD
+[Unreleased]: ../../compare/0.26.0...HEAD
+[0.26.0]: ../../compare/0.25.0...0.26.0
 [0.25.0]: ../../compare/0.24.0...0.25.0
 [0.24.0]: ../../compare/0.23.1...0.24.0
 [0.23.1]: ../../compare/0.23.0...0.23.1
