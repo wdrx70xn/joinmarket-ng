@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-04-12
+
 ## [0.26.0] - 2026-04-11
 
 ### Added
@@ -1189,7 +1191,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.26.0...HEAD
+[Unreleased]: ../../compare/0.26.1...HEAD
+[0.26.1]: ../../compare/0.26.0...0.26.1
 [0.26.0]: ../../compare/0.25.0...0.26.0
 [0.25.0]: ../../compare/0.24.0...0.25.0
 [0.24.0]: ../../compare/0.23.1...0.24.0
