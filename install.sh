@@ -54,6 +54,42 @@ print_header() {
     echo ""
 }
 
+# Unset TLS environment variables when they incorrectly point to the
+# Neutrino peer certificate. That certificate is only for the Neutrino
+# backend connection and must not be used as a global HTTPS trust store.
+sanitize_tls_environment() {
+    local tls_vars=(
+        "SSL_CERT_FILE"
+        "REQUESTS_CA_BUNDLE"
+        "CURL_CA_BUNDLE"
+        "PIP_CERT"
+        "GIT_SSL_CAINFO"
+        "CMAKE_TLS_CAINFO"
+    )
+
+    local var_name=""
+    local raw_value=""
+    local normalized_value=""
+
+    for var_name in "${tls_vars[@]}"; do
+        raw_value="${!var_name:-}"
+        if [[ -z "$raw_value" ]]; then
+            continue
+        fi
+
+        normalized_value="$raw_value"
+        if [[ "$normalized_value" == "~/"* ]]; then
+            normalized_value="${HOME}/${normalized_value#"~/"}"
+        fi
+
+        if [[ "$normalized_value" == */neutrino/tls.cert ]]; then
+            print_warning "$var_name points to Neutrino TLS cert; unsetting for installer"
+            print_warning "Fix your shell config to avoid exporting $var_name=$raw_value"
+            unset "$var_name"
+        fi
+    done
+}
+
 # Detect OS
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -826,6 +862,9 @@ main() {
     echo ""
 
     parse_args "$@"
+
+    # Guard against accidental global CA overrides from Neutrino TLS setup.
+    sanitize_tls_environment
 
     # If stdin is not a terminal (piped from curl) and no --yes flag, auto-enable yes mode
     if [[ ! -t 0 ]] && [[ "$AUTO_YES" != "true" ]]; then
