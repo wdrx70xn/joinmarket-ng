@@ -497,14 +497,20 @@ migrate_config() {
     print_header "Migrating Configuration"
 
     local config_file="$DATA_DIR/config.toml"
+    local was_missing=false
 
     if [ ! -f "$config_file" ]; then
         print_info "No config file found; will create from template"
+        was_missing=true
     else
         print_info "Checking config for new sections and settings..."
     fi
 
-    # Delegate to Python migrate_config which handles both cases
+    # Delegate to Python migrate_config which handles both cases.
+    # Capture stderr separately so loguru logs don't mix into the change
+    # list on stdout, but errors are still reported on failure.
+    local stderr_file
+    stderr_file=$(mktemp)
     local result
     result=$(python3 -c "
 from pathlib import Path
@@ -512,14 +518,24 @@ from jmcore.settings import migrate_config
 changes = migrate_config(Path('$config_file'))
 for change in changes:
     print(change)
-" 2>&1) || {
+" 2>"$stderr_file") || {
         print_warning "Config migration failed; config file unchanged"
+        # Show the last few lines of stderr (Python traceback) for debugging
+        if [ -s "$stderr_file" ]; then
+            tail -5 "$stderr_file" >&2
+        fi
         print_warning "You can manually update your config from config.toml.template"
+        rm -f "$stderr_file"
         return 0
     }
+    rm -f "$stderr_file"
 
     if [ -z "$result" ]; then
-        print_info "Config is up to date"
+        if [[ "$was_missing" == "true" ]] && [ -f "$config_file" ]; then
+            print_success "Config file created from template at $config_file"
+        else
+            print_info "Config is up to date"
+        fi
     else
         local count=0
         while IFS= read -r change; do
