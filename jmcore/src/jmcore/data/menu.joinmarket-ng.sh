@@ -260,6 +260,36 @@ store_password() {
     fi
 }
 
+# Helper: Post-wallet-create prompts (set active wallet + store password)
+# Called after a successful wallet generate or import.
+# Usage: post_wallet_create "/path/to/wallet.mnemonic"
+post_wallet_create() {
+    local wallet_path="$1"
+
+    # Ask to set as active wallet (default: Yes)
+    if whiptail --title " Active Wallet " \
+        --yesno "Set this wallet as the active wallet in config?\n\n$(basename "$wallet_path")" \
+        10 60 3>&1 1>&2 2>&3; then
+        set_config_value "mnemonic_file" "$wallet_path" "true"
+        echo "Active wallet updated in config.toml"
+    fi
+
+    # Ask whether to store the encryption password
+    if whiptail --title " Store Password " \
+        --yesno "Store the wallet password in config.toml?\n\nThis lets all commands (including the maker) work without\nprompting. If you choose No, the maker will ask each time." \
+        12 64 --defaultno 3>&1 1>&2 2>&3; then
+        local pwd_store
+        pwd_store=$(whiptail --title " Wallet Password " \
+            --passwordbox "Enter the wallet encryption password:" \
+            10 60 3>&1 1>&2 2>&3)
+        if [ $? -eq 0 ] && [ -n "$pwd_store" ]; then
+            store_password "${pwd_store}"
+            unset pwd_store
+            echo "Password stored in config.toml."
+        fi
+    fi
+}
+
 # Helper: Start maker (environment-aware)
 maker_start() {
     if [ "$RASPIBLITZ" = "1" ]; then
@@ -497,26 +527,25 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
           # NEW - Create New Wallet
           # --------------------------------------------------------------
           NEW)
-              clear
-              echo "=== Create New Wallet ==="
-              echo ""
-              echo "This will generate a new 24-word BIP39 mnemonic."
-              echo "IMPORTANT: Write down the seed words! They are your backup."
-              echo ""
-              read -p "Enter wallet name (default: default): " WNAME
-              WNAME=${WNAME:-default}
+              WNAME=$(whiptail --title " Create New Wallet " \
+                  --inputbox "Enter wallet name:" \
+                  10 50 "default" 3>&1 1>&2 2>&3) || continue
               # Strip extension if provided, we add .mnemonic
               WNAME="${WNAME%.mnemonic}"
               # Validate: only safe characters, no path separators
               if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-                  echo "Invalid wallet name. Use only letters, numbers, dot, underscore, and hyphen."
-                  pause
+                  whiptail --title " Error " --msgbox "Invalid wallet name.\nUse only letters, numbers, dot, underscore, and hyphen." 9 55
                   continue
               fi
 
               WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
               mkdir -p "$DATA_DIR/wallets"
 
+              clear
+              echo "=== Create New Wallet ==="
+              echo ""
+              echo "This will generate a new 24-word BIP39 mnemonic."
+              echo "IMPORTANT: Write down the seed words! They are your backup."
               echo ""
               echo "Generating wallet..."
               jm-wallet generate --prompt-password -o "$WALLET_PATH"
@@ -525,26 +554,7 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
                   echo ""
                   echo "Wallet saved to: $WALLET_PATH"
-                  # Ask to set as active wallet
-                  read -p "Set as active wallet in config? (Y/n): " SET_ACTIVE
-                  SET_ACTIVE=${SET_ACTIVE:-Y}
-                  if [[ "$SET_ACTIVE" =~ ^[Yy] ]]; then
-                      set_config_value "mnemonic_file" "$WALLET_PATH" "true"
-                      echo "Active wallet updated in config.toml"
-                  fi
-                  # Ask whether to store the encryption password in config.toml
-                  echo ""
-                  echo "You can store the wallet password in config.toml so all"
-                  echo "commands (including the maker) work without prompting."
-                  echo "If you choose No, the maker will ask for the password each time."
-                  read -p "Store wallet password in config.toml? (y/N): " STORE_PWD
-                  if [[ "$STORE_PWD" =~ ^[Yy] ]]; then
-                      read -r -s -p "Enter the wallet encryption password: " PWD_STORE
-                      echo ""
-                      store_password "${PWD_STORE}"
-                      unset PWD_STORE
-                      echo "Password stored in config.toml."
-                  fi
+                  post_wallet_create "$WALLET_PATH"
               else
                   echo "Wallet creation may have failed. Check output above."
               fi
@@ -555,23 +565,18 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
           # IMP - Import Wallet
           # --------------------------------------------------------------
           IMP)
-              clear
-              echo "=== Import Wallet from Seed ==="
-              echo ""
-              echo "You will be prompted to enter your BIP39 seed words."
-              echo ""
-              read -p "Enter wallet name (default: imported): " WNAME
-              WNAME=${WNAME:-imported}
+              WNAME=$(whiptail --title " Import Wallet " \
+                  --inputbox "Enter wallet name:" \
+                  10 50 "imported" 3>&1 1>&2 2>&3) || continue
               WNAME="${WNAME%.mnemonic}"
               # Validate: only safe characters, no path separators
               if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-                  echo "Invalid wallet name. Use only letters, numbers, dot, underscore, and hyphen."
-                  pause
+                  whiptail --title " Error " --msgbox "Invalid wallet name.\nUse only letters, numbers, dot, underscore, and hyphen." 9 55
                   continue
               fi
 
               # Ask for word count
-              WORDS_CHOICE=$(whiptail --title " Import Wallet " \
+              WORDS_CHOICE=$(whiptail --title " Import Wallet " --notags \
                   --menu "How many seed words does your wallet have?" 12 50 2 \
                   "24" "24 words" \
                   "12" "12 words" \
@@ -581,31 +586,18 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
               mkdir -p "$DATA_DIR/wallets"
 
+              clear
+              echo "=== Import Wallet from Seed ==="
+              echo ""
+              echo "You will be prompted to enter your BIP39 seed words."
+              echo ""
               jm-wallet import --words "$WORDS" --prompt-password -o "$WALLET_PATH"
               RESULT=$?
 
               if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
                   echo ""
                   echo "Wallet imported to: $WALLET_PATH"
-                  read -p "Set as active wallet in config? (Y/n): " SET_ACTIVE
-                  SET_ACTIVE=${SET_ACTIVE:-Y}
-                  if [[ "$SET_ACTIVE" =~ ^[Yy] ]]; then
-                      set_config_value "mnemonic_file" "$WALLET_PATH" "true"
-                      echo "Active wallet updated in config.toml"
-                  fi
-                  # Ask whether to store the encryption password in config.toml
-                  echo ""
-                  echo "You can store the wallet password in config.toml so all"
-                  echo "commands (including the maker) work without prompting."
-                  echo "If you choose No, the maker will ask for the password each time."
-                  read -p "Store wallet password in config.toml? (y/N): " STORE_PWD
-                  if [[ "$STORE_PWD" =~ ^[Yy] ]]; then
-                      read -r -s -p "Enter the wallet encryption password: " PWD_STORE
-                      echo ""
-                      store_password "${PWD_STORE}"
-                      unset PWD_STORE
-                      echo "Password stored in config.toml."
-                  fi
+                  post_wallet_create "$WALLET_PATH"
               else
                   echo "Import may have failed. Check output above."
               fi
@@ -758,32 +750,29 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
           # SEL - Select Active Wallet
           # --------------------------------------------------------------
           SEL)
-              clear
-              echo "=== Select Active Wallet ==="
-              echo ""
               WALLETS=$(list_wallets)
               if [ -z "$WALLETS" ]; then
-                  echo "No wallet files found in $DATA_DIR/wallets/"
-                  echo "Create or import a wallet first."
-              else
-                  echo "Available wallets:"
-                  echo "$WALLETS" | nl -ba
-                  echo ""
-                  echo "Current: $(get_mnemonic_file)"
-                  echo ""
-                  read -p "Enter wallet filename: " WNAME
-                  # Validate: only safe characters, no path separators
-                  if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-                      echo "Invalid wallet filename. Use only letters, numbers, dot, underscore, and hyphen."
-                  elif [ -f "$DATA_DIR/wallets/$WNAME" ]; then
-                      set_config_value "mnemonic_file" "$DATA_DIR/wallets/$WNAME" "true"
-                      echo "Active wallet set to: $WNAME"
-                      echo "Restart the maker service for changes to take effect."
-                  else
-                      echo "File not found: $DATA_DIR/wallets/$WNAME"
-                  fi
+                  whiptail --title " Select Wallet " --msgbox "No wallet files found in $DATA_DIR/wallets/\nCreate or import a wallet first." 9 55
+                  continue
               fi
-              pause
+
+              # Build whiptail menu entries from wallet files
+              MENU_ITEMS=()
+              while IFS= read -r wf; do
+                  MENU_ITEMS+=("$wf" "$wf")
+              done <<< "$WALLETS"
+
+              WNAME=$(whiptail --title " Select Active Wallet " --notags \
+                  --menu "Current: $(basename "$(get_mnemonic_file)" 2>/dev/null || echo '(none)')\n\nChoose a wallet:" \
+                  18 64 6 \
+                  "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3) || continue
+
+              if [ -f "$DATA_DIR/wallets/$WNAME" ]; then
+                  set_config_value "mnemonic_file" "$DATA_DIR/wallets/$WNAME" "true"
+                  whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nRestart the maker service for changes to take effect." 10 55
+              else
+                  whiptail --title " Error " --msgbox "File not found: $DATA_DIR/wallets/$WNAME" 8 55
+              fi
               ;;
 
           # --------------------------------------------------------------
