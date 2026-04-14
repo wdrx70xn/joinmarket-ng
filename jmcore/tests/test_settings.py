@@ -733,9 +733,9 @@ class TestGetUserSections:
         text = "[tor]\nsocks_host = '127.0.0.1'\n\n[bitcoin]\nrpc_url = 'x'\n"
         assert _get_user_sections(text) == {"tor", "bitcoin"}
 
-    def test_ignores_commented_sections(self) -> None:
+    def test_includes_commented_legacy_sections(self) -> None:
         text = "# [tor]\n[bitcoin]\nrpc_url = 'x'\n"
-        assert _get_user_sections(text) == {"bitcoin"}
+        assert _get_user_sections(text) == {"tor", "bitcoin"}
 
     def test_empty_text(self) -> None:
         assert _get_user_sections("") == set()
@@ -753,6 +753,24 @@ class TestGetUserSections:
 
 class TestMigrateConfig:
     """Tests for migrate_config."""
+
+    def test_legacy_commented_placeholders_do_not_duplicate_sections(self, tmp_path: Path) -> None:
+        """Legacy '# [section]' placeholders should count as existing sections."""
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            '# [tor]\n# socks_host = "127.0.0.1"\n\n'
+            '[bitcoin]\n# rpc_url = "http://127.0.0.1:8332"\n\n'
+            "# [maker]\n# cjfee_a = 500\n# cjfee_r = 0.00002\n"
+        )
+
+        result = migrate_config(config_path, template_text=MINI_TEMPLATE)
+
+        assert "section:tor" not in result
+        assert "section:maker" not in result
+        content = config_path.read_text()
+        assert "\n[tor]\n" not in content
+        assert not content.startswith("[tor]\n")
+        assert "\n[maker]\n" not in content
 
     def test_creates_config_from_template_if_missing(self, tmp_path: Path) -> None:
         config_path = tmp_path / "config.toml"

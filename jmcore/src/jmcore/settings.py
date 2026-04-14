@@ -1234,10 +1234,12 @@ _KEY_RE = re.compile(r"^#?\s*(\w+)\s*=", re.MULTILINE)
 
 
 def _get_user_sections(user_text: str) -> set[str]:
-    """Return the set of top-level TOML table names present in user text.
+    """Return section names present in user config text.
 
-    Uses tomlkit so that only *uncommented* ``[section]`` headers are
-    counted.
+    Includes both uncommented ``[section]`` headers and legacy commented
+    placeholders like ``# [section]``. Treating commented placeholders as
+    existing prevents section-level migration from appending duplicate full
+    blocks to older configs that already contain commented template sections.
 
     Args:
         user_text: Contents of the user's config.toml.
@@ -1245,14 +1247,21 @@ def _get_user_sections(user_text: str) -> set[str]:
     Returns:
         Set of section names found in the user config.
     """
+    commented_sections = {
+        m.group(1) for m in re.finditer(r"^\s*#\s*\[(\w+)]\s*$", user_text, re.MULTILINE)
+    }
+
     import tomlkit
 
     try:
         doc = tomlkit.parse(user_text)
-        return set(doc.keys())
+        return set(doc.keys()) | commented_sections
     except Exception:
-        # If parsing fails, fall back to regex (catches bare [section] lines)
-        return {m.group(1) for m in re.finditer(r"^\[(\w+)]", user_text, re.MULTILINE)}
+        # If parsing fails, fall back to regex for uncommented headers.
+        active_sections = {
+            m.group(1) for m in re.finditer(r"^\s*\[(\w+)]\s*$", user_text, re.MULTILINE)
+        }
+        return active_sections | commented_sections
 
 
 def _extract_key_groups(section_block: str) -> list[tuple[str, str]]:
