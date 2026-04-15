@@ -642,6 +642,96 @@ class TestNeutrinoAuthTokenFile:
         assert settings.neutrino_auth_token == "tilde-token"
 
 
+class TestRpcCookieFile:
+    """Tests for the rpc_cookie_file setting."""
+
+    def test_cookie_loaded_from_file(self, tmp_path: Path) -> None:
+        """RPC credentials should be read from cookie file."""
+        cookie_file = tmp_path / ".cookie"
+        cookie_file.write_text("__cookie__:abc123def456\n")
+        settings = BitcoinSettings(rpc_cookie_file=str(cookie_file))
+        assert settings.rpc_user == "__cookie__"
+        assert settings.rpc_password.get_secret_value() == "abc123def456"
+
+    def test_cookie_password_with_colons(self, tmp_path: Path) -> None:
+        """Cookie password containing colons should be preserved."""
+        cookie_file = tmp_path / ".cookie"
+        cookie_file.write_text("__cookie__:abc:def:123\n")
+        settings = BitcoinSettings(rpc_cookie_file=str(cookie_file))
+        assert settings.rpc_user == "__cookie__"
+        assert settings.rpc_password.get_secret_value() == "abc:def:123"
+
+    def test_explicit_credentials_take_priority(self, tmp_path: Path) -> None:
+        """Explicit rpc_user/rpc_password should not be overridden by cookie file."""
+        cookie_file = tmp_path / ".cookie"
+        cookie_file.write_text("__cookie__:from-cookie")
+        settings = BitcoinSettings(
+            rpc_user="myuser",
+            rpc_password="mypassword",
+            rpc_cookie_file=str(cookie_file),
+        )
+        assert settings.rpc_user == "myuser"
+        assert settings.rpc_password.get_secret_value() == "mypassword"
+
+    def test_missing_cookie_file_ignored(self) -> None:
+        """Missing cookie file should not cause an error."""
+        settings = BitcoinSettings(rpc_cookie_file="/nonexistent/.cookie")
+        assert settings.rpc_user == ""
+        assert settings.rpc_password.get_secret_value() == ""
+
+    def test_no_cookie_file_no_change(self) -> None:
+        """Without cookie file, defaults remain unchanged."""
+        settings = BitcoinSettings()
+        assert settings.rpc_cookie_file is None
+        assert settings.rpc_user == ""
+        assert settings.rpc_password.get_secret_value() == ""
+
+    def test_malformed_cookie_file_ignored(self, tmp_path: Path) -> None:
+        """Cookie file without colon separator should be handled gracefully."""
+        cookie_file = tmp_path / ".cookie"
+        cookie_file.write_text("malformed-content")
+        settings = BitcoinSettings(rpc_cookie_file=str(cookie_file))
+        assert settings.rpc_user == ""
+        assert settings.rpc_password.get_secret_value() == ""
+
+    def test_cookie_loaded_from_tilde_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cookie file path should support ~ expansion."""
+        fake_home = tmp_path / "home"
+        cookie_dir = fake_home / ".bitcoin"
+        cookie_dir.mkdir(parents=True)
+        cookie_file = cookie_dir / ".cookie"
+        cookie_file.write_text("__cookie__:tilde-cookie-value")
+
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        settings = BitcoinSettings(rpc_cookie_file="~/.bitcoin/.cookie")
+        assert settings.rpc_user == "__cookie__"
+        assert settings.rpc_password.get_secret_value() == "tilde-cookie-value"
+
+    def test_env_var_sets_cookie_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """BITCOIN__RPC_COOKIE_FILE env var should populate credentials from cookie."""
+        cookie_file = tmp_path / ".cookie"
+        cookie_file.write_text("__cookie__:envvar-cookie")
+        monkeypatch.setenv("BITCOIN__RPC_COOKIE_FILE", str(cookie_file))
+
+        settings = JoinMarketSettings()
+
+        assert settings.bitcoin.rpc_user == "__cookie__"
+        assert settings.bitcoin.rpc_password.get_secret_value() == "envvar-cookie"
+
+    def test_empty_cookie_file(self, tmp_path: Path) -> None:
+        """Empty cookie file should be handled gracefully."""
+        cookie_file = tmp_path / ".cookie"
+        cookie_file.write_text("")
+        settings = BitcoinSettings(rpc_cookie_file=str(cookie_file))
+        assert settings.rpc_user == ""
+        assert settings.rpc_password.get_secret_value() == ""
+
+
 # ============================================================================
 # Config Migration Tests
 # ============================================================================

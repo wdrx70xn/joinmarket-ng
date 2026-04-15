@@ -39,10 +39,16 @@ services:
 
   # Bitcoin Core regtest node (main node for our implementation)
   # Uses latest Bitcoin Core (v30+) with descriptor wallets
+  # Uses -rpcauth instead of -rpcuser/-rpcpassword so that Bitcoin Core
+  # also generates a .cookie file, allowing both authentication methods.
+  # The entrypoint is overridden to skip the kylemanna btc_init script
+  # which auto-generates a bitcoin.conf with rpcuser/rpcpassword; those
+  # fields suppress .cookie file generation.
   bitcoin:
     image: kylemanna/bitcoind:latest
     container_name: jm-bitcoin
     restart: unless-stopped
+    entrypoint: ["bitcoind"]
     logging:
       driver: json-file
       options:
@@ -56,8 +62,15 @@ services:
     command:
       - '-server=1'
       - '-regtest=1'
-      - '-rpcuser=test'
-      - '-rpcpassword=test'
+      - '-printtoconsole=1'
+      # Use -rpcauth (user:test, password:test) to allow both user/password
+      # AND cookie-based authentication. With -rpcuser/-rpcpassword Bitcoin Core
+      # does NOT generate the .cookie file; with -rpcauth it does.
+      - '-rpcauth=test:9d90d7da71b62112d7ba78e0b70f9742$$c83106d1674db13434262d50eb808cf981ee32ce23cb3ce34d0de3fcb89f8999'
+      # Write the cookie file to a shared volume so other containers can read it.
+      # The default location inside the regtest datadir has 700 dir perms.
+      - '-rpccookiefile=/shared/.cookie'
+      - '-rpccookieperms=all'
       - '-rpcallowip=0.0.0.0/0'
       - '-rpcbind=0.0.0.0'
       - '-rpcport=18443'
@@ -75,7 +88,7 @@ services:
       - "18443:18443"
       - "18444:18444"
     volumes:
-      - bitcoin-data:/home/bitcoin/.bitcoin
+      - bitcoin-data:/bitcoin/.bitcoin
       - ./shared:/shared
     networks:
       - jm-network
@@ -244,8 +257,8 @@ services:
     environment:
       - BITCOIN__BACKEND_TYPE=descriptor_wallet
       - BITCOIN__RPC_URL=http://jm-bitcoin:18443
-      - BITCOIN__RPC_USER=test
-      - BITCOIN__RPC_PASSWORD=test
+      # Cookie-based auth: reads credentials from Bitcoin Core's .cookie file
+      - BITCOIN__RPC_COOKIE_FILE=/shared/.cookie
       - NETWORK_CONFIG__NETWORK=testnet
       - NETWORK_CONFIG__BITCOIN_NETWORK=regtest
       - JMWALLETD_HOST=0.0.0.0
@@ -260,6 +273,7 @@ services:
       - "28183:28183"
     volumes:
       - jmwalletd-data:/root/.joinmarket-ng
+      - ./shared:/shared:ro
     networks:
       - jm-network
     depends_on:
@@ -294,8 +308,8 @@ services:
     environment:
       - BITCOIN__BACKEND_TYPE=descriptor_wallet
       - BITCOIN__RPC_URL=http://jm-bitcoin:18443
-      - BITCOIN__RPC_USER=test
-      - BITCOIN__RPC_PASSWORD=test
+      # Cookie-based auth: reads credentials from Bitcoin Core's .cookie file
+      - BITCOIN__RPC_COOKIE_FILE=/shared/.cookie
       - BITCOIN__DESCRIPTOR_WALLET_NAME=jm_playwright_regtest
       # Use testnet for protocol compatibility with directory server and makers
       # (the reference JoinMarket implementation uses "testnet" for regtest networks)
@@ -314,6 +328,7 @@ services:
       - "29183:28183"
     volumes:
       - jam-playwright-data:/root/.joinmarket-ng
+      - ./shared:/shared:ro
     networks:
       - jm-network
     depends_on:
@@ -509,6 +524,7 @@ services:
       - all
 
   # Maker 1 for e2e tests
+  # Uses cookie-based RPC authentication (reads .cookie file from Bitcoin Core data dir)
   maker1:
     image: ${MAKER_IMAGE:-}
     build:
@@ -533,8 +549,8 @@ services:
       - NETWORK_CONFIG__BITCOIN_NETWORK=regtest
       - BITCOIN__BACKEND_TYPE=descriptor_wallet
       - BITCOIN__RPC_URL=http://jm-bitcoin:18443
-      - BITCOIN__RPC_USER=test
-      - BITCOIN__RPC_PASSWORD=test
+      # Cookie-based auth: reads credentials from Bitcoin Core's .cookie file
+      - BITCOIN__RPC_COOKIE_FILE=/shared/.cookie
       - DIRECTORY_SERVERS=jm-directory:5222,jm-directory2:5223
       - LOGGING__LEVEL=DEBUG
       - MAKER__MIN_SIZE=10000
@@ -554,6 +570,7 @@ services:
     volumes:
       - maker1-data:/home/jm/.joinmarket-ng
       - tor-data:/var/lib/tor:ro
+      - ./shared:/shared:ro
     networks:
       - jm-network
     depends_on:

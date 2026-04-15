@@ -164,6 +164,16 @@ class BitcoinSettings(BaseModel):
         default=SecretStr(""),
         description="Bitcoin Core RPC password",
     )
+    rpc_cookie_file: str | None = Field(
+        default=None,
+        description=(
+            "Path to Bitcoin Core .cookie file for cookie-based RPC authentication. "
+            "When set, the cookie file is read at startup and rpc_user/rpc_password "
+            "are populated automatically. This is mutually exclusive with setting "
+            "rpc_user/rpc_password manually. The cookie file is typically located "
+            "at ~/.bitcoin/.cookie (mainnet) or ~/.bitcoin/regtest/.cookie (regtest)."
+        ),
+    )
     descriptor_wallet_name: str = Field(
         default="jm_descriptor_wallet",
         description="Name of the descriptor wallet to use in Bitcoin Core",
@@ -246,6 +256,40 @@ class BitcoinSettings(BaseModel):
             "into a shared volume."
         ),
     )
+
+    @model_validator(mode="after")
+    def _load_rpc_cookie_from_file(self) -> Self:
+        """Read rpc_user/rpc_password from Bitcoin Core .cookie file.
+
+        Bitcoin Core writes a ``.cookie`` file containing
+        ``__cookie__:<random_hex>`` in its data directory.  When
+        ``rpc_cookie_file`` is set and ``rpc_user`` has not been
+        explicitly provided, the cookie file is parsed and the
+        credentials are populated automatically.
+        """
+        if self.rpc_cookie_file is not None:
+            cookie_path = Path(self.rpc_cookie_file).expanduser()
+            # Only override if user hasn't explicitly set credentials
+            if self.rpc_user == "" and self.rpc_password.get_secret_value() == "":
+                if cookie_path.is_file():
+                    content = cookie_path.read_text().strip()
+                    if ":" in content:
+                        user, password = content.split(":", 1)
+                        self.rpc_user = user
+                        self.rpc_password = SecretStr(password)
+                    else:
+                        logger.warning(
+                            f"Cookie file {cookie_path} has unexpected format "
+                            "(expected 'user:password')"
+                        )
+                else:
+                    logger.warning(f"Cookie file not found: {cookie_path}")
+            else:
+                logger.warning(
+                    "Both rpc_cookie_file and rpc_user/rpc_password are set; "
+                    "ignoring rpc_cookie_file in favor of explicit credentials"
+                )
+        return self
 
     @model_validator(mode="after")
     def _load_auth_token_from_file(self) -> Self:

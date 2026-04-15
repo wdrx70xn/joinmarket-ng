@@ -53,6 +53,12 @@
 # rpc_user = ""
 # rpc_password = ""
 
+# Cookie-based RPC authentication (alternative to rpc_user/rpc_password).
+# When set, the cookie file is read at startup and credentials are populated
+# automatically. This is the default auth method for Bitcoin Core when no
+# rpcuser/rpcpassword is configured. Mutually exclusive with rpc_user/rpc_password.
+# rpc_cookie_file = "~/.bitcoin/.cookie"
+
 # Neutrino backend settings (used by all components when backend_type = "neutrino")
 # neutrino_url = "http://127.0.0.1:8334"
 
