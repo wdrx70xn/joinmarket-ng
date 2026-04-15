@@ -20,7 +20,8 @@ Change outputs are also included, but they are of different amounts and can be e
 ## Commands
 
 - **Test (unit)**: `pytest jmcore directory_server orderbook_watcher maker taker jmwallet` (excludes Docker tests by default)
-- **Test (full suite)**: `./scripts/run_all_tests.sh` - Runs all phases with Docker orchestration
+- **Test (full suite, sequential)**: `./scripts/run_all_tests.sh` - Runs all phases with Docker orchestration
+- **Test (full suite, parallel)**: `./scripts/run_parallel_tests.sh` - Runs all suites in parallel via project isolation
 - **Test (specific marker)**: `pytest -m e2e --fail-on-skip` - Uses `--fail-on-skip` to catch missing setup
 - **Lint/Format**: `pre-commit run --all-files` (Recommended).
   - Manual: `ruff check .` / `ruff format .` / `mypy .`
