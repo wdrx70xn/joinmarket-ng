@@ -1148,98 +1148,11 @@ def _get_bundled_template() -> str | None:
         return None
 
 
-def _extract_section_blocks(template_text: str) -> dict[str, str]:
-    """Extract named section blocks from a config template.
-
-    Each block includes the comment header (``# ===`` separator and title)
-    preceding its ``[section]`` header, the header itself, and all content
-    up to the next section separator or end-of-file.
-
-    Args:
-        template_text: Full text of the config template.
-
-    Returns:
-        Mapping of section name to its full text block (including leading
-        comment header).
-    """
-    # Match [section_name] at the start of a line
-    section_re = re.compile(r"^\[(\w+)]", re.MULTILINE)
-    matches = list(section_re.finditer(template_text))
-    if not matches:
-        return {}
-
-    blocks: dict[str, str] = {}
-    for idx, match in enumerate(matches):
-        section_name = match.group(1)
-
-        # Walk backwards from the [section] line to find the ``# ===``
-        # separator block that introduces this section.
-        section_line_start = match.start()
-        block_start = section_line_start
-        before = template_text[:section_line_start]
-
-        sep_pos = before.rfind("# " + "=" * 76)
-        if sep_pos < 0:
-            sep_pos = before.rfind("# ====")
-        if sep_pos >= 0:
-            # The template uses a pair of separator lines with a title between:
-            #   # ====...====
-            #   # Title
-            #   # ====...====
-            # sep_pos points at the closing separator. Look for the opening one.
-            before_sep = before[:sep_pos]
-            opening_sep = before_sep.rfind("# " + "=" * 76)
-            if opening_sep < 0:
-                opening_sep = before_sep.rfind("# ====")
-            if opening_sep >= 0:
-                # Use the opening separator as the start
-                line_start = before.rfind("\n", 0, opening_sep)
-            else:
-                # Only one separator found; use it
-                line_start = before.rfind("\n", 0, sep_pos)
-            block_start = line_start + 1 if line_start >= 0 else 0
-
-        # The block ends where the next section's block begins (or EOF).
-        if idx + 1 < len(matches):
-            next_match = matches[idx + 1]
-            next_section_start = next_match.start()
-            next_before = template_text[:next_section_start]
-            next_sep = next_before.rfind("# " + "=" * 76)
-            if next_sep < 0:
-                next_sep = next_before.rfind("# ====")
-            if next_sep >= 0:
-                # Find the opening separator of the next section's header block
-                before_next_sep = next_before[:next_sep]
-                next_opening = before_next_sep.rfind("# " + "=" * 76)
-                if next_opening < 0:
-                    next_opening = before_next_sep.rfind("# ====")
-                if next_opening >= 0:
-                    nl = next_before.rfind("\n", 0, next_opening)
-                else:
-                    nl = next_before.rfind("\n", 0, next_sep)
-                block_end = nl + 1 if nl >= 0 else next_sep
-            else:
-                block_end = next_section_start
-        else:
-            block_end = len(template_text)
-
-        blocks[section_name] = template_text[block_start:block_end]
-
-    return blocks
-
-
-# Regex matching a TOML key assignment: ``key = value`` or ``# key = value``.
-# Captures the key name.  Handles quoted keys (rare in our templates).
-_KEY_RE = re.compile(r"^#?\s*(\w+)\s*=", re.MULTILINE)
-
-
 def _get_user_sections(user_text: str) -> set[str]:
     """Return section names present in user config text.
 
     Includes both uncommented ``[section]`` headers and legacy commented
-    placeholders like ``# [section]``. Treating commented placeholders as
-    existing prevents section-level migration from appending duplicate full
-    blocks to older configs that already contain commented template sections.
+    placeholders like ``# [section]``.
 
     Args:
         user_text: Contents of the user's config.toml.
@@ -1264,241 +1177,160 @@ def _get_user_sections(user_text: str) -> set[str]:
         return active_sections | commented_sections
 
 
-def _extract_key_groups(section_block: str) -> list[tuple[str, str]]:
-    """Extract key-name / text-block pairs from a template section block.
-
-    A "key group" is a commented-out key line (``# key = value``) together
-    with any preceding comment lines that document it.  Blank lines reset
-    the accumulated comment buffer.
-
-    Args:
-        section_block: The full text of one template section (as returned
-            by ``_extract_section_blocks``).
-
-    Returns:
-        List of ``(key_name, text_block)`` tuples in template order.
-        ``text_block`` includes the leading comment lines and the key line
-        itself, ready to be appended verbatim.
-    """
-    lines = section_block.splitlines(keepends=True)
-    groups: list[tuple[str, str]] = []
-    comment_buf: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-
-        # Blank line resets the comment buffer
-        if not stripped:
-            comment_buf = []
-            continue
-
-        # Check if this line is a commented-out key assignment
-        m = re.match(r"^#\s*(\w+)\s*=", stripped)
-        if m:
-            key_name = m.group(1)
-            text = "".join(comment_buf) + line
-            groups.append((key_name, text))
-            comment_buf = []
-            continue
-
-        # Accumulate comment lines (skip section headers and separators)
-        if (
-            stripped.startswith("#")
-            and not stripped.startswith("# ==")
-            and not stripped.startswith("[")
-        ):
-            comment_buf.append(line)
-        else:
-            comment_buf = []
-
-    return groups
+# Regex matching a TOML key assignment: ``key = value`` or ``# key = value``.
+_KEY_RE = re.compile(r"^#?\s*(\w+)\s*=", re.MULTILINE)
 
 
-def _get_section_keys(section_text: str) -> set[str]:
-    """Return all key names present in a section's text (commented or not).
+def _get_template_section_keys(template_text: str) -> dict[str, set[str]]:
+    """Extract key names per section from the template.
 
     Args:
-        section_text: The text of one section from the user's config,
-            from the ``[section]`` header to the next header or EOF.
+        template_text: Full text of the config template.
 
     Returns:
-        Set of key names found.
+        Mapping of section name to set of key names defined in that section.
     """
-    return {m.group(1) for m in _KEY_RE.finditer(section_text)}
+    section_re = re.compile(r"^\[(\w+)]", re.MULTILINE)
+    matches = list(section_re.finditer(template_text))
+    result: dict[str, set[str]] = {}
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(template_text)
+        section_text = template_text[start:end]
+        result[match.group(1)] = {m.group(1) for m in _KEY_RE.finditer(section_text)}
+    return result
 
 
-def _get_user_section_ranges(user_text: str) -> dict[str, tuple[int, int]]:
-    """Return byte offset ranges for each **uncommented** section in the user's config.
+def _get_user_section_keys(user_text: str) -> dict[str, set[str]]:
+    """Extract key names per section from the user's config.
 
-    Both uncommented (``[section]``) and commented (``# [section]``)
-    headers are used as section boundaries so that the range for an
-    uncommented section ends where the next header of either kind begins.
-    Only uncommented sections are included in the returned mapping because
-    key-level migration can only append to actual TOML sections.
+    Uses both uncommented and commented section headers as boundaries
+    to correctly scope keys.
 
     Args:
         user_text: Full text of the user's config.toml.
 
     Returns:
-        Mapping of section name to ``(start, end)`` byte offsets.
-        ``start`` is the position of the ``[section]`` header.
-        ``end`` is the start of the next section header (commented or not)
-        or end of file.
+        Mapping of uncommented section name to set of key names found.
     """
-    # Match both uncommented and commented section headers as boundaries.
     boundary_re = re.compile(r"^(?:#\s*)?\[(\w+)]", re.MULTILINE)
-    all_matches = list(boundary_re.finditer(user_text))
-
-    # Only uncommented headers produce entries; commented ones are boundaries only.
     uncommented_re = re.compile(r"^\[(\w+)]", re.MULTILINE)
-    uncommented_matches = list(uncommented_re.finditer(user_text))
+    all_boundaries = list(boundary_re.finditer(user_text))
+    uncommented = list(uncommented_re.finditer(user_text))
 
-    ranges: dict[str, tuple[int, int]] = {}
-    for match in uncommented_matches:
-        start = match.start()
-        # Find the next boundary (commented or uncommented) after this one.
+    result: dict[str, set[str]] = {}
+    for match in uncommented:
+        start = match.end()
         end = len(user_text)
-        for boundary in all_matches:
-            if boundary.start() > start:
+        for boundary in all_boundaries:
+            if boundary.start() > match.start():
                 end = boundary.start()
                 break
-        ranges[match.group(1)] = (start, end)
-    return ranges
+        section_text = user_text[start:end]
+        result[match.group(1)] = {m.group(1) for m in _KEY_RE.finditer(section_text)}
+    return result
 
 
-def migrate_config(
+def config_diff(
     config_path: Path,
     template_text: str | None = None,
 ) -> list[str]:
-    """Add new sections and keys from the upstream template to an existing config.
+    """Compare the user's config against the template and report differences.
 
-    This performs an **additive-only** merge:
-
-    * **Section level:** sections present in the template but absent from
-      the user's config are appended verbatim (including their comment
-      headers).
-    * **Key level:** for sections that already exist in the user's config,
-      new keys from the template that are absent (neither commented nor
-      uncommented) are appended as commented-out lines at the end of the
-      section.
-    * Existing keys and values are **never** modified -- user
-      customizations, commented-out keys, and whitespace are preserved.
-    * If ``config_path`` does not exist, a fresh config is created from
-      the template.
-
-    The function is safe to call repeatedly (idempotent): once a section
-    or key exists in the user file it will not be added again.
+    This is a **read-only** operation -- the user's config file is never
+    modified.  Returns a list of new sections and keys that exist in the
+    template but are missing from the user's config, so the caller can
+    display them.
 
     Args:
         config_path: Path to the user's ``config.toml``.
-        template_text: Template text to merge from.  When *None*, the
-            bundled ``config.toml.template`` shipped with the package is
-            used.
+        template_text: Template text to compare against.  When *None*,
+            the bundled ``config.toml.template`` shipped with the package
+            is used.
 
     Returns:
-        List of human-readable descriptions of changes made (empty if
-        nothing changed).  Each entry is either ``"section:<name>"`` for
-        a new section or ``"key:<section>.<key>"`` for a new key.
+        List of human-readable descriptions of missing items (empty if the
+        config is up to date).  Each entry is either ``"section:<name>"``
+        for a missing section or ``"key:<section>.<key>"`` for a missing
+        key within an existing section.
     """
     if template_text is None:
         template_text = _get_bundled_template()
     if template_text is None:
         template_text = generate_config_template()
     if not template_text:
-        logger.warning("No config template available; skipping migration")
         return []
 
-    # If the config file doesn't exist, create it from the template.
     if not config_path.exists():
-        logger.info(f"Config file missing; creating from template at {config_path}")
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(template_text)
         return []
 
     user_text = config_path.read_text()
     user_sections = _get_user_sections(user_text)
-    template_blocks = _extract_section_blocks(template_text)
 
-    changes: list[str] = []
+    # Extract template section names.
+    template_section_re = re.compile(r"^\[(\w+)]", re.MULTILINE)
+    template_section_names = [m.group(1) for m in template_section_re.finditer(template_text)]
 
-    # --- Phase 1: key-level merge for existing sections ---
-    # Process in reverse section order so that byte offsets stay valid
-    # as we insert text.
-    section_ranges = _get_user_section_ranges(user_text)
-    for section_name in reversed(list(template_blocks)):
-        if section_name not in user_sections or section_name not in section_ranges:
+    diffs: list[str] = []
+
+    # Report missing sections.
+    for name in template_section_names:
+        if name not in user_sections:
+            diffs.append(f"section:{name}")
+
+    # Report missing keys within existing sections.
+    template_keys = _get_template_section_keys(template_text)
+    user_keys = _get_user_section_keys(user_text)
+    for section_name in template_section_names:
+        if section_name not in user_keys:
             continue
+        missing = template_keys.get(section_name, set()) - user_keys[section_name]
+        for key in sorted(missing):
+            diffs.append(f"key:{section_name}.{key}")
 
-        start, end = section_ranges[section_name]
-        user_section_text = user_text[start:end]
-        existing_keys = _get_section_keys(user_section_text)
+    return diffs
 
-        template_key_groups = _extract_key_groups(template_blocks[section_name])
-        new_groups = [(key, text) for key, text in template_key_groups if key not in existing_keys]
-        if not new_groups:
-            continue
 
-        # Find the best insertion point: after the last key/comment line that
-        # belongs to this section's content, before any trailing blank lines or
-        # separator comments that visually belong to the next section.
-        insert_at = end
-        # Look for the last key assignment (commented or uncommented) in the
-        # section.  Insert after the end of its line.
-        last_key_match = None
-        for m in _KEY_RE.finditer(user_section_text):
-            last_key_match = m
-        if last_key_match is not None:
-            # Find end of the line containing the last key
-            line_end = user_section_text.find("\n", last_key_match.end())
-            insert_at = start + line_end + 1 if line_end >= 0 else start + len(user_section_text)
+def migrate_config(
+    config_path: Path,
+    template_text: str | None = None,
+) -> list[str]:
+    """Create the config file from the template if it does not exist.
 
-        # Build the text to insert at the end of this section.
-        insert = "\n"
-        for key, text in new_groups:
-            insert += text
-            changes.append(f"key:{section_name}.{key}")
-            logger.info(f"Added new key [{section_name}].{key}")
+    When the config file already exists, no modifications are made.
+    Use :func:`config_diff` to discover new settings that the user
+    may want to add manually.
 
-        # Ensure there's a newline before the insert.
-        if insert_at > 0 and user_text[insert_at - 1] != "\n":
-            insert = "\n" + insert
+    Args:
+        config_path: Path to the user's ``config.toml``.
+        template_text: Template text for fresh creation.  When *None*,
+            the bundled ``config.toml.template`` shipped with the package
+            is used.
 
-        user_text = user_text[:insert_at] + insert + user_text[insert_at:]
+    Returns:
+        Empty list (kept for backward compatibility).
+    """
+    if template_text is None:
+        template_text = _get_bundled_template()
+    if template_text is None:
+        template_text = generate_config_template()
+    if not template_text:
+        logger.warning("No config template available; skipping config creation")
+        return []
 
-    # --- Phase 2: section-level merge for missing sections ---
-    missing_sections = [name for name in template_blocks if name not in user_sections]
-    if missing_sections:
-        additions = "\n"
-        for name in missing_sections:
-            additions += template_blocks[name]
-            changes.append(f"section:{name}")
-            logger.info(f"Added new config section [{name}]")
+    if not config_path.exists():
+        logger.info(f"Config file missing; creating from template at {config_path}")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(template_text)
 
-        if user_text and not user_text.endswith("\n"):
-            additions = "\n" + additions
-
-        user_text = user_text + additions
-
-    # Write if anything changed.
-    if changes:
-        config_path.write_text(user_text)
-        logger.info(
-            f"Merged {len(changes)} change(s) into {config_path}. "
-            "Review the file to see available settings."
-        )
-
-    else:
-        logger.debug("Config is up to date; no changes needed")
-
-    return changes
+    return []
 
 
 def ensure_config_file(data_dir: Path | None = None) -> Path:
-    """Ensure the config file exists and is up to date.
+    """Ensure the config file exists.
 
     On first run the config file is created from the bundled template.
-    On subsequent runs new sections from the template are merged into
-    the existing file (additive only -- user changes are never modified).
+    Existing config files are never modified.
 
     Args:
         data_dir: Optional data directory path. Uses default if not provided.
@@ -1560,6 +1392,7 @@ __all__ = [
     "get_config_path",
     "generate_config_template",
     "ensure_config_file",
+    "config_diff",
     "migrate_config",
     "DEFAULT_DIRECTORY_SERVERS",
 ]

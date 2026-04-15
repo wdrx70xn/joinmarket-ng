@@ -494,60 +494,68 @@ update_packages() {
 
 # Migrate config file: add new sections and keys from the bundled template
 migrate_config() {
-    print_header "Migrating Configuration"
+    print_header "Configuration Check"
 
     local config_file="$DATA_DIR/config.toml"
-    local was_missing=false
 
     if [ ! -f "$config_file" ]; then
-        print_info "No config file found; will create from template"
-        was_missing=true
-    else
-        print_info "Checking config for new sections and settings..."
+        print_info "No config file found; creating from template..."
+        local stderr_file
+        stderr_file=$(mktemp)
+        python3 -c "
+from pathlib import Path
+from jmcore.settings import migrate_config
+migrate_config(Path('$config_file'))
+" 2>"$stderr_file" || {
+            print_warning "Config creation failed"
+            if [ -s "$stderr_file" ]; then
+                tail -5 "$stderr_file" >&2
+            fi
+            rm -f "$stderr_file"
+            return 0
+        }
+        rm -f "$stderr_file"
+        if [ -f "$config_file" ]; then
+            print_success "Config file created at $config_file"
+        fi
+        return 0
     fi
 
-    # Delegate to Python migrate_config which handles both cases.
-    # Capture stderr separately so loguru logs don't mix into the change
-    # list on stdout, but errors are still reported on failure.
+    # Config exists -- check for new settings in the template.
+    print_info "Checking for new settings in the template..."
     local stderr_file
     stderr_file=$(mktemp)
     local result
     result=$(python3 -c "
 from pathlib import Path
-from jmcore.settings import migrate_config
-changes = migrate_config(Path('$config_file'))
-for change in changes:
-    print(change)
+from jmcore.settings import config_diff
+diffs = config_diff(Path('$config_file'))
+for d in diffs:
+    print(d)
 " 2>"$stderr_file") || {
-        print_warning "Config migration failed; config file unchanged"
-        # Show the last few lines of stderr (Python traceback) for debugging
-        if [ -s "$stderr_file" ]; then
-            tail -5 "$stderr_file" >&2
-        fi
-        print_warning "You can manually update your config from config.toml.template"
+        print_warning "Config diff check failed (your config is unchanged)"
         rm -f "$stderr_file"
         return 0
     }
     rm -f "$stderr_file"
 
     if [ -z "$result" ]; then
-        if [[ "$was_missing" == "true" ]] && [ -f "$config_file" ]; then
-            print_success "Config file created from template at $config_file"
-        else
-            print_info "Config is up to date"
-        fi
+        print_info "Config is up to date"
     else
-        local count=0
-        while IFS= read -r change; do
-            if [[ "$change" == section:* ]]; then
-                print_success "Added new section: [${change#section:}]"
-            elif [[ "$change" == key:* ]]; then
-                print_success "Added new setting: ${change#key:}"
+        local section_count=0
+        local key_count=0
+        while IFS= read -r diff; do
+            if [[ "$diff" == section:* ]]; then
+                print_info "  New section available: [${diff#section:}]"
+                section_count=$((section_count + 1))
+            elif [[ "$diff" == key:* ]]; then
+                print_info "  New setting available: ${diff#key:}"
+                key_count=$((key_count + 1))
             fi
-            count=$((count + 1))
         done <<< "$result"
-        print_success "Applied $count change(s) to $config_file"
-        print_info "Review $config_file to see the new settings"
+        local total=$((section_count + key_count))
+        print_info "$total new setting(s) available in the template"
+        print_info "Compare your config with config.toml.template to see details"
     fi
 }
 
