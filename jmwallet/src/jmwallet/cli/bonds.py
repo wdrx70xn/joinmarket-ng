@@ -403,7 +403,6 @@ def generate_bond_address(
         str | None,
         typer.Option("--locktime-date", "-d", help="Locktime as YYYY-MM (must be 1st of month)"),
     ] = None,
-    index: Annotated[int, typer.Option("--index", "-i", help="Address index")] = 0,
     network: Annotated[str | None, typer.Option("--network", "-n")] = None,
     data_dir: Annotated[
         Path | None,
@@ -494,7 +493,12 @@ def generate_bond_address(
     master_key = HDKey.from_seed(seed)
 
     coin_type = 0 if resolved_network == "mainnet" else 1
-    path = f"m/84'/{coin_type}'/0'/{FIDELITY_BOND_BRANCH}/{index}"
+
+    # Compute the timenumber from the locktime (this is the BIP32 child index)
+    from jmcore.timenumber import timestamp_to_timenumber
+
+    timenumber = timestamp_to_timenumber(locktime)
+    path = f"m/84'/{coin_type}'/0'/{FIDELITY_BOND_BRANCH}/{timenumber}"
 
     key = master_key.derive(path)
     pubkey_hex = key.get_public_key_bytes(compressed=True).hex()
@@ -518,7 +522,7 @@ def generate_bond_address(
             bond_info = create_bond_info(
                 address=address,
                 locktime=locktime,
-                index=index,
+                index=timenumber,
                 path=path,
                 pubkey_hex=pubkey_hex,
                 witness_script=witness_script,
@@ -533,7 +537,7 @@ def generate_bond_address(
     print("=" * 80)
     print(f"\nAddress:      {address}")
     print(f"Locktime:     {locktime} ({locktime_dt.strftime('%Y-%m-%d %H:%M:%S')})")
-    print(f"Index:        {index}")
+    print(f"Timenumber:   {timenumber}")
     print(f"Network:      {resolved_network}")
     print(f"Path:         {path}")
     print()
@@ -560,6 +564,193 @@ def generate_bond_address(
     print("=" * 80 + "\n")
 
 
+@app.command("import-bond")
+def import_bond(
+    mnemonic_file: Annotated[
+        Path | None, typer.Option("--mnemonic-file", "-f", envvar="MNEMONIC_FILE")
+    ] = None,
+    prompt_bip39_passphrase: Annotated[
+        bool, typer.Option("--prompt-bip39-passphrase", help="Prompt for BIP39 passphrase")
+    ] = False,
+    locktime: Annotated[
+        int, typer.Option("--locktime", "-L", help="Locktime as Unix timestamp")
+    ] = 0,
+    locktime_date: Annotated[
+        str | None,
+        typer.Option("--locktime-date", "-d", help="Locktime as YYYY-MM (must be 1st of month)"),
+    ] = None,
+    timenumber: Annotated[
+        int | None,
+        typer.Option("--timenumber", "-t", help="Timenumber (0-959). Auto-derived if omitted."),
+    ] = None,
+    path_spec: Annotated[
+        str | None,
+        typer.Option(
+            "--path",
+            "-p",
+            help="Full derivation path with locktime, e.g. m/84'/0'/0'/2/73:1740787200",
+        ),
+    ] = None,
+    network: Annotated[str | None, typer.Option("--network", "-n")] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
+        ),
+    ] = None,
+    log_level: Annotated[
+        str | None,
+        typer.Option("--log-level", "-l", help="Log level"),
+    ] = None,
+) -> None:
+    """
+    Manually import a fidelity bond into the registry.
+
+    Use this when you know the exact derivation path and locktime of a bond
+    that was not discovered automatically. The bond address and keys are
+    derived from your mnemonic.
+
+    Examples:
+        jm-wallet import-bond --locktime-date 2026-02
+        jm-wallet import-bond --path "m/84'/0'/0'/2/73:1740787200"
+        jm-wallet import-bond --timenumber 73
+    """
+    settings = setup_cli(log_level)
+
+    try:
+        resolved = resolve_mnemonic(
+            settings,
+            mnemonic_file=mnemonic_file,
+            prompt_bip39_passphrase=prompt_bip39_passphrase,
+        )
+        if not resolved:
+            raise ValueError("No mnemonic provided")
+        resolved_mnemonic = resolved.mnemonic
+        resolved_bip39_passphrase = resolved.bip39_passphrase
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(str(e))
+        raise typer.Exit(1)
+
+    resolved_network = network if network is not None else settings.network_config.network.value
+    resolved_data_dir = data_dir if data_dir is not None else settings.get_data_dir()
+
+    from jmcore.timenumber import (
+        is_valid_locktime,
+        parse_locktime_date,
+        timenumber_to_timestamp,
+        timestamp_to_timenumber,
+    )
+
+    # Parse --path if provided: m/84'/0'/0'/2/73:1740787200
+    if path_spec:
+        parts = path_spec.rstrip("/").split("/")
+        last = parts[-1]
+        if ":" in last:
+            parsed_timenumber = int(last.split(":")[0])
+            parsed_locktime = int(last.split(":")[1])
+        else:
+            parsed_timenumber = int(last)
+            parsed_locktime = timenumber_to_timestamp(parsed_timenumber)
+
+        if timenumber is None:
+            timenumber = parsed_timenumber
+        if locktime == 0:
+            locktime = parsed_locktime
+
+    # Parse --locktime-date
+    if locktime_date:
+        try:
+            locktime = parse_locktime_date(locktime_date)
+        except ValueError as e:
+            logger.error(f"Invalid locktime date: {e}")
+            raise typer.Exit(1)
+
+    # Derive timenumber from locktime or vice versa
+    if locktime > 0 and timenumber is None:
+        timenumber = timestamp_to_timenumber(locktime)
+    elif timenumber is not None and locktime == 0:
+        locktime = timenumber_to_timestamp(timenumber)
+
+    if locktime <= 0 or timenumber is None:
+        logger.error("Must specify one of: --locktime, --locktime-date, --timenumber, or --path")
+        raise typer.Exit(1)
+
+    if not is_valid_locktime(locktime):
+        logger.error(f"Locktime {locktime} is not a valid fidelity bond locktime")
+        raise typer.Exit(1)
+
+    # Verify consistency
+    expected_timenumber = timestamp_to_timenumber(locktime)
+    if timenumber != expected_timenumber:
+        logger.error(
+            f"Timenumber {timenumber} does not match locktime {locktime} "
+            f"(expected timenumber {expected_timenumber})"
+        )
+        raise typer.Exit(1)
+
+    from jmcore.btc_script import mk_freeze_script
+
+    from jmwallet.wallet.address import script_to_p2wsh_address
+    from jmwallet.wallet.bip32 import HDKey, mnemonic_to_seed
+    from jmwallet.wallet.bond_registry import (
+        create_bond_info,
+        load_registry,
+        save_registry,
+    )
+    from jmwallet.wallet.service import FIDELITY_BOND_BRANCH
+
+    seed = mnemonic_to_seed(resolved_mnemonic, resolved_bip39_passphrase)
+    master_key = HDKey.from_seed(seed)
+
+    coin_type = 0 if resolved_network == "mainnet" else 1
+    deriv_path = f"m/84'/{coin_type}'/0'/{FIDELITY_BOND_BRANCH}/{timenumber}"
+
+    key = master_key.derive(deriv_path)
+    pubkey_hex = key.get_public_key_bytes(compressed=True).hex()
+    witness_script = mk_freeze_script(pubkey_hex, locktime)
+    address = script_to_p2wsh_address(witness_script, resolved_network)
+
+    # Save to registry
+    registry = load_registry(resolved_data_dir)
+    existing = registry.get_bond_by_address(address)
+    if existing:
+        print(f"\nBond already in registry (created: {existing.created_at})")
+        print(f"Address: {address}")
+        raise typer.Exit(0)
+
+    bond_info = create_bond_info(
+        address=address,
+        locktime=locktime,
+        index=timenumber,
+        path=deriv_path,
+        pubkey_hex=pubkey_hex,
+        witness_script=witness_script,
+        network=resolved_network,
+    )
+    registry.add_bond(bond_info)
+    save_registry(registry, resolved_data_dir)
+
+    from jmcore.timenumber import format_locktime_date
+
+    locktime_str = format_locktime_date(locktime)
+    print("\n" + "=" * 80)
+    print("FIDELITY BOND IMPORTED")
+    print("=" * 80)
+    print(f"\nAddress:      {address}")
+    print(f"Locktime:     {locktime} ({locktime_str})")
+    print(f"Timenumber:   {timenumber}")
+    print(f"Path:         {deriv_path}")
+    print(f"Network:      {resolved_network}")
+    print(f"\nSaved to: {resolved_data_dir / 'fidelity_bonds.json'}")
+    print()
+    print(
+        "Note: The bond UTXO will be detected on the next wallet sync.\n"
+        "      Run 'jm-wallet balance' to trigger a sync."
+    )
+    print("=" * 80 + "\n")
+
+
 @app.command("recover-bonds")
 def recover_bonds(
     mnemonic_file: Annotated[
@@ -579,12 +770,6 @@ def recover_bonds(
     neutrino_url: Annotated[
         str | None, typer.Option("--neutrino-url", envvar="NEUTRINO_URL")
     ] = None,
-    max_index: Annotated[
-        int,
-        typer.Option(
-            "--max-index", "-i", help="Max address index per locktime to scan (default 1)"
-        ),
-    ] = 1,
     data_dir: Annotated[
         Path | None,
         typer.Option(
@@ -605,8 +790,8 @@ def recover_bonds(
     recovering a wallet from mnemonic and you don't know which locktimes
     were used for fidelity bonds.
 
-    The scan checks address index 0 by default (most wallets only use index 0).
-    Use --max-index to scan more addresses per locktime if needed.
+    Each timenumber (0-959) maps to exactly one address, matching the
+    reference JoinMarket implementation.
     """
     settings = setup_cli(log_level)
 
@@ -639,7 +824,6 @@ def recover_bonds(
         _recover_bonds_async(
             resolved_mnemonic,
             backend_settings,
-            max_index,
             resolved_bip39_passphrase,
             creation_height=resolved_creation_height,
         )
@@ -649,7 +833,6 @@ def recover_bonds(
 async def _recover_bonds_async(
     mnemonic: str,
     backend_settings: ResolvedBackendSettings,
-    max_index: int,
     bip39_passphrase: str = "",
     *,
     creation_height: int | None = None,
@@ -719,20 +902,22 @@ async def _recover_bonds_async(
 
     print("\nScanning for fidelity bonds...")
     print(f"Timelocks to scan: {TIMENUMBER_COUNT} (Jan 2020 - Dec 2099)")
-    print(f"Addresses per timelock: {max_index}")
-    print(f"Total addresses: {TIMENUMBER_COUNT * max_index:,}")
+    print(f"Total addresses: {TIMENUMBER_COUNT:,}")
     print("-" * 60)
 
-    # Progress callback
+    # Progress callbacks
     def progress_callback(current: int, total: int) -> None:
         percent = (current / total) * 100
-        print(f"\rProgress: {current}/{total} timelocks ({percent:.1f}%)...", end="", flush=True)
+        print(f"\rProgress: {current}/{total} addresses ({percent:.1f}%)...", end="", flush=True)
+
+    def rescan_progress_callback(progress: float) -> None:
+        print(f"\rRescan progress: {progress:.1%}...", end="", flush=True)
 
     try:
         # Discover fidelity bonds
         discovered_utxos = await wallet.discover_fidelity_bonds(
-            max_index=max_index,
             progress_callback=progress_callback,
+            rescan_progress_callback=rescan_progress_callback,
         )
 
         print()  # Newline after progress
@@ -740,7 +925,6 @@ async def _recover_bonds_async(
 
         if not discovered_utxos:
             print("\nNo fidelity bonds found.")
-            print("If you expected to find bonds, try increasing --max-index")
             return
 
         # Group discovered UTXOs by address to handle multiple UTXOs at the
@@ -771,8 +955,8 @@ async def _recover_bonds_async(
             # Pick the largest UTXO by value
             best_utxo = max(addr_utxos, key=lambda u: u.value)
 
-            # Extract index and locktime from path
-            # Path format: m/84'/coin'/0'/2/index:locktime
+            # Extract timenumber and locktime from path
+            # Path format: m/84'/coin'/0'/2/timenumber:locktime
             path_parts = best_utxo.path.split("/")
             index_locktime = path_parts[-1]
             if ":" in index_locktime:

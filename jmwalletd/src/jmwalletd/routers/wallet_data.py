@@ -228,27 +228,29 @@ async def get_timelock_address(
     dt = datetime.datetime(year, month, 1, tzinfo=datetime.UTC)
     locktime = calendar.timegm(dt.timetuple())
 
-    # Use the next available index for this locktime so callers can generate
-    # multiple addresses per expiry month without collision.
-    registry = load_registry(state.data_dir)
-    existing_indices = {b.index for b in registry.bonds if b.locktime == locktime}
-    index = 0
-    while index in existing_indices:
-        index += 1
+    # Each locktime maps to exactly one timenumber (BIP32 child index).
+    # The reference JoinMarket implementation does not support multiple
+    # addresses per locktime.
+    from jmcore.timenumber import timestamp_to_timenumber
 
-    address = ws.get_fidelity_bond_address(index, locktime)
+    timenumber = timestamp_to_timenumber(locktime)
+
+    address = ws.get_fidelity_bond_address(timenumber, locktime)
 
     # Persist the bond to the registry so the maker can pick it up at startup.
+    registry = load_registry(state.data_dir)
     if not registry.get_bond_by_address(address):
         pubkey_hex = (
-            ws.get_fidelity_bond_key(index, locktime).get_public_key_bytes(compressed=True).hex()
+            ws.get_fidelity_bond_key(timenumber, locktime)
+            .get_public_key_bytes(compressed=True)
+            .hex()
         )
-        witness_script = ws.get_fidelity_bond_script(index, locktime)
-        path = f"{ws.root_path}/0'/{FIDELITY_BOND_BRANCH}/{index}"
+        witness_script = ws.get_fidelity_bond_script(timenumber, locktime)
+        path = f"{ws.root_path}/0'/{FIDELITY_BOND_BRANCH}/{timenumber}"
         bond_info = create_bond_info(
             address=address,
             locktime=locktime,
-            index=index,
+            index=timenumber,
             path=path,
             pubkey_hex=pubkey_hex,
             witness_script=witness_script,
@@ -257,9 +259,9 @@ async def get_timelock_address(
         registry.add_bond(bond_info)
         save_registry(registry, state.data_dir)
         logger.debug(
-            "Registered fidelity bond address {} (index={}, locktime={}) in registry",
+            "Registered fidelity bond address {} (timenumber={}, locktime={}) in registry",
             address,
-            index,
+            timenumber,
             locktime,
         )
 

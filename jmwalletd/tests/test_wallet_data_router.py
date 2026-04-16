@@ -452,10 +452,11 @@ class TestTimelockAddress:
         )
         assert resp.status_code == 200
         assert resp.json()["address"] == "bcrt1qfidelity123"
-        # Check that it was called with index 0 (no existing bonds for this locktime)
+        # Check that it was called with the correct timenumber for 2026-06
         ws.get_fidelity_bond_address.assert_called_once()
         args = ws.get_fidelity_bond_address.call_args
-        assert args[0][0] == 0  # index is first arg
+        # 2026-06 -> timenumber 77 (months since Jan 2020)
+        assert args[0][0] == 77  # timenumber is first arg
         # Check that the bond was saved to the registry
         mock_save_registry.assert_called_once()
         mock_registry.add_bond.assert_called_once()

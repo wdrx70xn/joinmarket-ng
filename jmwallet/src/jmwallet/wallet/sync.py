@@ -158,7 +158,9 @@ class WalletSyncMixin:
         Sync fidelity bond UTXOs with specific locktimes.
 
         Fidelity bonds use mixdepth 0, branch 2, with path format:
-        m/84'/coin'/0'/2/index:locktime
+        m/84'/coin'/0'/2/timenumber:locktime
+
+        Each locktime maps to exactly one timenumber (BIP32 child index).
 
         Args:
             locktimes: List of Unix timestamps to scan for
@@ -166,69 +168,58 @@ class WalletSyncMixin:
         Returns:
             List of fidelity bond UTXOs found
         """
+        from jmcore.timenumber import timestamp_to_timenumber
+
         utxos: list[UTXOInfo] = []
 
         if not locktimes:
             logger.debug("No locktimes provided for fidelity bond sync")
             return utxos
 
+        # Each locktime has exactly one address (timenumber = BIP32 child index)
+        addresses: list[str] = []
+        address_to_info: dict[str, tuple[int, int]] = {}  # addr -> (locktime, timenumber)
+
         for locktime in locktimes:
-            consecutive_empty = 0
-            index = 0
+            timenumber = timestamp_to_timenumber(locktime)
+            address = self.get_fidelity_bond_address(timenumber, locktime)
+            addresses.append(address)
+            address_to_info[address] = (locktime, timenumber)
 
-            while consecutive_empty < self.gap_limit:
-                # Generate addresses for this locktime
-                addresses = []
-                for i in range(self.gap_limit):
-                    address = self.get_fidelity_bond_address(index + i, locktime)
-                    addresses.append(address)
+        # Fetch UTXOs for all addresses at once
+        backend_utxos = await self.backend.get_utxos(addresses)
 
-                # Fetch UTXOs
-                backend_utxos = await self.backend.get_utxos(addresses)
+        # Group by address
+        utxos_by_address: dict[str, list] = {addr: [] for addr in addresses}
+        for utxo in backend_utxos:
+            if utxo.address in utxos_by_address:
+                utxos_by_address[utxo.address].append(utxo)
 
-                # Group by address
-                utxos_by_address: dict[str, list] = {addr: [] for addr in addresses}
-                for utxo in backend_utxos:
-                    if utxo.address in utxos_by_address:
-                        utxos_by_address[utxo.address].append(utxo)
-
-                # Process results
-                for i, address in enumerate(addresses):
-                    addr_utxos = utxos_by_address[address]
-
-                    if addr_utxos:
-                        consecutive_empty = 0
-                        # Track that this address has had UTXOs
-                        self.addresses_with_history.add(address)
-                        for utxo in addr_utxos:
-                            # Path includes locktime notation
-                            path = (
-                                f"{self.root_path}/0'/{FIDELITY_BOND_BRANCH}/{index + i}:{locktime}"
-                            )
-                            utxo_info = _make_utxo_info(
-                                txid=utxo.txid,
-                                vout=utxo.vout,
-                                value=utxo.value,
-                                address=address,
-                                confirmations=utxo.confirmations,
-                                scriptpubkey=utxo.scriptpubkey,
-                                path=path,
-                                mixdepth=0,  # Fidelity bonds always in mixdepth 0
-                                height=utxo.height,
-                                locktime=locktime,  # Store locktime for P2WSH signing
-                            )
-                            utxos.append(utxo_info)
-                            logger.info(
-                                f"Found fidelity bond UTXO: {utxo.txid}:{utxo.vout} "
-                                f"value={utxo.value} locktime={locktime}"
-                            )
-                    else:
-                        consecutive_empty += 1
-
-                    if consecutive_empty >= self.gap_limit:
-                        break
-
-                index += self.gap_limit
+        # Process results
+        for address in addresses:
+            addr_utxos = utxos_by_address[address]
+            if addr_utxos:
+                locktime, timenumber = address_to_info[address]
+                self.addresses_with_history.add(address)
+                for utxo in addr_utxos:
+                    path = f"{self.root_path}/0'/{FIDELITY_BOND_BRANCH}/{timenumber}:{locktime}"
+                    utxo_info = _make_utxo_info(
+                        txid=utxo.txid,
+                        vout=utxo.vout,
+                        value=utxo.value,
+                        address=address,
+                        confirmations=utxo.confirmations,
+                        scriptpubkey=utxo.scriptpubkey,
+                        path=path,
+                        mixdepth=0,  # Fidelity bonds always in mixdepth 0
+                        height=utxo.height,
+                        locktime=locktime,  # Store locktime for P2WSH signing
+                    )
+                    utxos.append(utxo_info)
+                    logger.info(
+                        f"Found fidelity bond UTXO: {utxo.txid}:{utxo.vout} "
+                        f"value={utxo.value} locktime={locktime}"
+                    )
 
         # Add fidelity bond UTXOs to mixdepth 0 cache
         if utxos:
@@ -246,8 +237,8 @@ class WalletSyncMixin:
 
     async def discover_fidelity_bonds(
         self,
-        max_index: int = 1,
         progress_callback: Any | None = None,
+        rescan_progress_callback: Any | None = None,
     ) -> list[UTXOInfo]:
         """
         Discover fidelity bonds by scanning all 960 possible locktimes.
@@ -259,25 +250,19 @@ class WalletSyncMixin:
         For descriptor_wallet backend, this method will import addresses into
         the wallet as it scans in batches, then clean up addresses that had no UTXOs.
 
-        The scan is optimized by:
-        1. Using index=0 only (most users only use one address per locktime)
-        2. Batching address generation and UTXO queries
-        3. Optionally extending index range only for locktimes with funds
+        Each timenumber maps to exactly one BIP32 child index and one locktime,
+        matching the reference JoinMarket implementation.
 
         Args:
-            max_index: Maximum address index to scan per locktime (default 1).
-                      Higher values increase scan time linearly.
-            progress_callback: Optional callback(timenumber, total) for progress updates
+            progress_callback: Optional callback(current, total) for progress updates
+            rescan_progress_callback: Optional callback(progress) with 0.0-1.0 for rescan
 
         Returns:
             List of discovered fidelity bond UTXOs
         """
         from jmcore.timenumber import TIMENUMBER_COUNT, timenumber_to_timestamp
 
-        logger.info(
-            f"Starting fidelity bond discovery scan "
-            f"({TIMENUMBER_COUNT} timelocks × {max_index} index(es))"
-        )
+        logger.info(f"Starting fidelity bond discovery scan ({TIMENUMBER_COUNT} timelocks)")
 
         discovered_utxos: list[UTXOInfo] = []
         batch_size = 100  # Process timenumbers in batches
@@ -285,13 +270,13 @@ class WalletSyncMixin:
             self.backend if isinstance(self.backend, DescriptorWalletBackend) else None
         )
 
-        # Build the full address map across all timenumbers first.
+        # Build the full address map across all timenumbers.
+        # Each timenumber has exactly one address (timenumber = BIP32 child index).
         all_address_to_locktime: dict[str, tuple[int, int]] = {}
         for timenumber in range(TIMENUMBER_COUNT):
             locktime = timenumber_to_timestamp(timenumber)
-            for idx in range(max_index):
-                address = self.get_fidelity_bond_address(idx, locktime)
-                all_address_to_locktime[address] = (locktime, idx)
+            address = self.get_fidelity_bond_address(timenumber, locktime)
+            all_address_to_locktime[address] = (locktime, timenumber)
 
         # For descriptor wallets, import all addresses in batches WITHOUT triggering
         # a per-batch rescan.  A single blockchain rescan is run after all descriptors
@@ -301,7 +286,8 @@ class WalletSyncMixin:
             all_bond_addrs = [
                 (addr, lt, idx) for addr, (lt, idx) in all_address_to_locktime.items()
             ]
-            for batch_start in range(0, len(all_bond_addrs), batch_size):
+            total_addrs = len(all_bond_addrs)
+            for batch_start in range(0, total_addrs, batch_size):
                 batch = all_bond_addrs[batch_start : batch_start + batch_size]
                 batch_end = batch_start + len(batch)
                 try:
@@ -313,16 +299,17 @@ class WalletSyncMixin:
                     logger.error(f"Failed to import batch {batch_start}-{batch_end}: {e}")
 
                 if progress_callback:
-                    progress_callback(batch_end, TIMENUMBER_COUNT)
+                    progress_callback(batch_end, total_addrs)
 
             # Single rescan after all descriptors are registered.
             logger.info(
-                "All fidelity bond addresses imported, starting full rescan from genesis..."
+                "All fidelity bond addresses imported, starting full rescan from genesis. "
+                "This may take a long time on mainnet (1-2+ hours with HDD)..."
             )
             await descriptor_backend.start_background_rescan(0)
             await descriptor_backend.wait_for_rescan_complete(
                 poll_interval=5.0,
-                progress_callback=lambda p: logger.debug(f"Rescan progress: {p:.1%}"),
+                progress_callback=rescan_progress_callback,
             )
 
             # Query all UTXOs in a single call after rescan completes.
@@ -338,7 +325,8 @@ class WalletSyncMixin:
             backend_utxos = []
             address_to_locktime = all_address_to_locktime
             all_addresses_list = list(all_address_to_locktime.keys())
-            for batch_start in range(0, len(all_addresses_list), batch_size):
+            total_addrs = len(all_addresses_list)
+            for batch_start in range(0, total_addrs, batch_size):
                 batch_addrs = all_addresses_list[batch_start : batch_start + batch_size]
                 batch_end = batch_start + len(batch_addrs)
                 try:
@@ -348,7 +336,7 @@ class WalletSyncMixin:
                     logger.error(f"Failed to scan batch {batch_start}-{batch_end}: {e}")
 
                 if progress_callback:
-                    progress_callback(batch_end, TIMENUMBER_COUNT)
+                    progress_callback(batch_end, total_addrs)
 
         from jmcore.timenumber import format_locktime_date
 

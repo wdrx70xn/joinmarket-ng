@@ -229,7 +229,6 @@ class TestBIP39PassphraseWallet:
                 logger.info(f"  Scanning: {current}/{total} timelocks")
 
         discovered = await recovered_wallet.discover_fidelity_bonds(
-            max_index=1,
             progress_callback=progress,
         )
 

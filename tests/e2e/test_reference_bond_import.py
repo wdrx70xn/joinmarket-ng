@@ -647,7 +647,6 @@ class TestReferenceBondImport:
                 logger.info(f"  Scanning: {current}/{total} timelocks")
 
         discovered = await wallet.discover_fidelity_bonds(
-            max_index=1,
             progress_callback=progress,
         )
 
@@ -773,7 +772,7 @@ class TestReferenceBondImport:
 
         # Discover fidelity bonds
         logger.info("Discovering fidelity bonds...")
-        discovered_bonds = await wallet.discover_fidelity_bonds(max_index=1)
+        discovered_bonds = await wallet.discover_fidelity_bonds()
 
         # Calculate total balance
         total_regular = sum(

@@ -382,16 +382,14 @@ class MakerBot(BackgroundTasksMixin, ProtocolHandlersMixin, DirectConnectionMixi
             ):
                 logger.info(
                     f"Using manual fidelity bond specification: "
-                    f"index={self.config.fidelity_bond_index}, "
                     f"locktimes={self.config.fidelity_bond_locktimes}"
                 )
                 for locktime in self.config.fidelity_bond_locktimes:
-                    address = self.wallet.get_fidelity_bond_address(
-                        self.config.fidelity_bond_index, locktime
-                    )
-                    fidelity_bond_addresses.append(
-                        (address, locktime, self.config.fidelity_bond_index)
-                    )
+                    from jmcore.timenumber import timestamp_to_timenumber
+
+                    timenumber = timestamp_to_timenumber(locktime)
+                    address = self.wallet.get_fidelity_bond_address(timenumber, locktime)
+                    fidelity_bond_addresses.append((address, locktime, timenumber))
                     logger.info(
                         f"Generated fidelity bond address for locktime {locktime}: {address}"
                     )

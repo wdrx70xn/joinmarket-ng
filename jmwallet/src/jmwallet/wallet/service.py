@@ -193,18 +193,31 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
         """
         Get the HD key for a fidelity bond.
 
-        Fidelity bond path: m/84'/coin'/0'/2/index
-        The locktime is NOT in the derivation path, but stored separately.
+        Fidelity bond path: m/84'/coin'/0'/2/timenumber
+
+        In the JoinMarket protocol, the BIP32 child index for fidelity bonds
+        is the **timenumber** (0-959), NOT a separate address index. Each
+        timenumber maps 1:1 to a locktime (1st of month, Jan 2020 - Dec 2099).
+
+        For backward compatibility, the ``index`` parameter is still accepted
+        but is **ignored** when ``locktime`` is a valid timenumber locktime.
+        The timenumber is computed from the locktime and used as the child index.
 
         Args:
-            index: Address index within the fidelity bond branch
-            locktime: Unix timestamp for the timelock (stored in path notation as :locktime)
+            index: Legacy address index (ignored when locktime is valid).
+                   Kept for API compatibility.
+            locktime: Unix timestamp for the timelock. Must be a valid
+                      timenumber locktime (1st of month, midnight UTC).
 
         Returns:
             HDKey for the fidelity bond
         """
-        # Fidelity bonds always use mixdepth 0, branch 2
-        path = f"{self.root_path}/0'/{FIDELITY_BOND_BRANCH}/{index}"
+        from jmcore.timenumber import timestamp_to_timenumber
+
+        # The BIP32 child index is the timenumber derived from the locktime,
+        # matching the reference JoinMarket implementation.
+        timenumber = timestamp_to_timenumber(locktime)
+        path = f"{self.root_path}/0'/{FIDELITY_BOND_BRANCH}/{timenumber}"
         return self.master_key.derive(path)
 
     def get_fidelity_bond_address(self, index: int, locktime: int) -> str:
@@ -214,13 +227,18 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
         Creates a timelocked script: <locktime> OP_CLTV OP_DROP <pubkey> OP_CHECKSIG
         wrapped in P2WSH.
 
+        The ``index`` parameter is a legacy argument and is **ignored**; the
+        BIP32 child index is always the timenumber derived from ``locktime``.
+
         Args:
-            index: Address index within the fidelity bond branch
+            index: Legacy address index (ignored; timenumber is used instead)
             locktime: Unix timestamp for the timelock
 
         Returns:
             P2WSH address for the fidelity bond
         """
+        from jmcore.timenumber import timestamp_to_timenumber
+
         key = self.get_fidelity_bond_key(index, locktime)
         pubkey_hex = key.get_public_key_bytes(compressed=True).hex()
 
@@ -230,9 +248,9 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
         # Convert to P2WSH address
         address = script_to_p2wsh_address(script, self.network)
 
-        # Cache with special path notation including locktime
-        # Path format: m/84'/coin'/0'/2/index:locktime
-        self.address_cache[address] = (0, FIDELITY_BOND_BRANCH, index)
+        # Cache with timenumber as the index (matches BIP32 child index)
+        timenumber = timestamp_to_timenumber(locktime)
+        self.address_cache[address] = (0, FIDELITY_BOND_BRANCH, timenumber)
         # Also store the locktime in a separate cache for fidelity bonds
         self.fidelity_bond_locktime_cache[address] = locktime
 
@@ -243,8 +261,11 @@ class WalletService(WalletSyncMixin, CoinSelectionMixin, WalletDisplayMixin):
         """
         Get the redeem script for a fidelity bond.
 
+        The ``index`` parameter is a legacy argument and is **ignored**; the
+        BIP32 child index is always the timenumber derived from ``locktime``.
+
         Args:
-            index: Address index within the fidelity bond branch
+            index: Legacy address index (ignored; timenumber is used instead)
             locktime: Unix timestamp for the timelock
 
         Returns:

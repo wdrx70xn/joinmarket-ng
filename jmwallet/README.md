@@ -38,6 +38,8 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │                              address.                                        │
 │ recover-bonds                Recover fidelity bonds by scanning all 960      │
 │                              possible timelocks.                             │
+│ import-bond                  Manually import a fidelity bond into the        │
+│                              registry.                                       │
 │ create-bond-address          Create a fidelity bond address from a public    │
 │                              key (cold wallet workflow).                     │
 │ generate-hot-keypair         Generate a hot wallet keypair for fidelity bond │
@@ -162,6 +164,46 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --max-index                -i      INTEGER  Max address index per locktime   │
 │                                             to scan (default 1)              │
 │                                             [default: 1]                     │
+│ --data-dir                         PATH     Data directory (default:         │
+│                                             ~/.joinmarket-ng or              │
+│                                             $JOINMARKET_DATA_DIR)            │
+│ --log-level                -l      TEXT     Log level                        │
+│ --help                                      Show this message and exit.      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+</details>
+
+<details>
+<summary><code>jm-wallet import-bond --help</code></summary>
+
+```
+
+ Usage: jm-wallet import-bond [OPTIONS]
+
+ Manually import a fidelity bond into the registry.
+
+ Use this when you know the exact derivation path and locktime of a bond that
+ was not discovered automatically. The bond address and keys are derived from
+ your mnemonic.
+
+ Examples:
+     jm-wallet import-bond --locktime-date 2026-02
+     jm-wallet import-bond --path "m/84'/0'/0'/2/73:1740787200"
+     jm-wallet import-bond --timenumber 73
+
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --mnemonic-file            -f      PATH     [env var: MNEMONIC_FILE]         │
+│ --prompt-bip39-passphrase                   Prompt for BIP39 passphrase      │
+│ --locktime                 -L      INTEGER  Locktime as Unix timestamp       │
+│ --locktime-date            -d      TEXT     Locktime as YYYY-MM (must be     │
+│                                             1st of month)                    │
+│ --timenumber               -t      INTEGER  Timenumber (0-959). Auto-derived │
+│                                             if omitted.                      │
+│ --path                     -p      TEXT     Full derivation path with        │
+│                                             locktime, e.g.                   │
+│                                             m/84'/0'/0'/2/73:1740787200     │
+│ --network                  -n      TEXT                                      │
 │ --data-dir                         PATH     Data directory (default:         │
 │                                             ~/.joinmarket-ng or              │
 │                                             $JOINMARKET_DATA_DIR)            │
