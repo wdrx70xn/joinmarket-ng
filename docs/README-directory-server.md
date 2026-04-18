@@ -236,7 +236,7 @@ The Docker image includes automatic health checks using the CLI command:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["jm-directory-server", "health"]
+    CMD ["jm-directory-ctl", "health"]
 ```
 
 Check container health status:

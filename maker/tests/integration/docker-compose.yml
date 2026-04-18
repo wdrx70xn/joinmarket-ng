@@ -65,7 +65,7 @@ services:
     networks:
       - jm-test
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s = socket.socket(); s.connect(('localhost', 5222)); s.close()"]
+      test: ["CMD", "jm-directory-ctl", "health"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -110,7 +110,7 @@ ENV PATH=/home/jm/.local/bin:$PATH
 EXPOSE 5222 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["jm-directory-server", "health"]
+    CMD ["jm-directory-ctl", "health"]
 
 CMD ["jm-directory-server"]
 
@@ -210,6 +210,6 @@ ENV PATH=/home/jm/.local/bin:$PATH
 EXPOSE 5222 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["jm-directory-server", "health"]
+    CMD ["jm-directory-ctl", "health"]
 
 CMD ["jm-directory-server"]
