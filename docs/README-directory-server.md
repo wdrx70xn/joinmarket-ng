@@ -22,7 +22,7 @@ network with no direct internet access; only the Tor container bridges both inte
 external networks.
 
 1. Go to the `directory_server` directory.
-2. Run `docker-compose up` (or `docker-compose up -d` for non-interactive run)
+2. Run `docker compose up` (or `docker compose up -d` for non-interactive run)
 
 Retrieve your `.onion` address:
 
