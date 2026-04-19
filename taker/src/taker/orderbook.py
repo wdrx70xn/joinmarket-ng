@@ -363,141 +363,139 @@ def weighted_order_choose(
 def fidelity_bond_weighted_choose(
     offers: list[Offer],
     n: int,
-    bondless_makers_allowance: float = 0.125,
+    bondless_makers_allowance: float = 0.2,
     bondless_require_zero_fee: bool = True,
     cj_amount: int = 0,
 ) -> list[Offer]:
     """
-    Choose n offers with mixed fidelity bond and random selection.
+    Choose n offers using per-slot probabilistic selection.
 
-    Strategy:
-    1. Calculate proportion of bonded slots: round(n * (1 - bondless_makers_allowance))
-    2. Fill bonded slots using weighted selection by bond value
-    3. Fill remaining slots randomly from ALL remaining offers (bonded or bondless)
+    **Pre-filtering** (when ``bondless_require_zero_fee`` is True):
+    Bondless offers (``fidelity_bond_value == 0``) that charge a non-zero
+    absolute fee are removed before selection.  This prevents an attacker
+    from flooding the orderbook with fee-charging bondless offers to steal
+    fees while still allowing genuine zero-fee bondless makers to participate.
+    Relative-fee offers are kept because their effective fee depends on the
+    CoinJoin amount and is evaluated elsewhere.
 
-    "Bondless" means bond-agnostic (equal probability), not anti-bond. The bondless
-    slots give all remaining makers equal opportunity regardless of their bond status.
+    **Per-slot selection** (for each of the *n* slots independently):
 
-    This ensures high-bond makers are prioritized while still allowing new/bondless
-    makers to participate in a predictable proportion.
+    * With probability ``bondless_makers_allowance``: pick **uniformly at
+      random** from all remaining offers (bonded and bondless alike).  This
+      gives every surviving offer equal probability, so a rare bondless maker
+      naturally has low selection odds (``~ allowance / total_offers`` per
+      slot).
+    * Otherwise: pick from the bonded pool (``fidelity_bond_value > 0``)
+      **weighted by bond value**.
+
+    Fallback: if the chosen pool is empty the other pool is tried, then
+    uniform random over everything remaining.
+
+    This mirrors the reference JoinMarket implementation and ensures:
+
+    * High-bond makers are strongly favoured (~80% of slots with default
+      0.2 allowance).
+    * When many bondless zero-fee makers exist, roughly
+      ``n * bondless_makers_allowance`` of them appear in the final set
+      (e.g. 2 out of 10).
+    * When only a few bondless makers exist, each has low individual
+      selection probability (proportional to ``1 / total_remaining``),
+      avoiding taker fingerprinting.
+    * Smaller bonded makers also benefit from the uniform-random slots.
 
     Args:
-        offers: Eligible offers
-        n: Number of offers to choose
-        bondless_makers_allowance: Proportion of slots for random selection (0.0-1.0)
-        bondless_require_zero_fee: If True, bondless spots only select zero-fee offers
-        cj_amount: CoinJoin amount for fee filtering (unused currently)
+        offers: Eligible offers (already filtered and deduped).
+        n: Number of offers to choose.
+        bondless_makers_allowance: Per-slot probability of uniform-random
+            selection (0.0-1.0).
+        bondless_require_zero_fee: If True, pre-filter removes bondless
+            offers with non-zero absolute fee.
+        cj_amount: CoinJoin amount (reserved for future fee filtering).
 
     Returns:
-        Selected offers
+        Selected offers.
     """
     if len(offers) <= n:
         return offers[:]
 
-    # Log bonded offers for debugging
-    bonded_offers = [o for o in offers if o.fidelity_bond_value > 0]
-    logger.debug(
-        f"Found {len(bonded_offers)} offers with fidelity bond: "
-        f"{[o.counterparty for o in bonded_offers]}"
-    )
-
-    # Calculate split: prioritize bonded makers, fill remainder with random
-    # Use round() for fair rounding instead of floor
-    num_bonded = round(n * (1 - bondless_makers_allowance))
-    num_bondless = n - num_bonded
-
-    logger.debug(
-        f"Selection split: {num_bonded} bonded, {num_bondless} bondless "
-        f"(allowance={bondless_makers_allowance})"
-    )
+    # --- Pre-filter: remove bondless offers charging a fee ---
+    if bondless_require_zero_fee:
+        filtered: list[Offer] = []
+        removed = 0
+        for o in offers:
+            if o.fidelity_bond_value == 0 and _is_nonzero_absolute_fee(o):
+                removed += 1
+            else:
+                filtered.append(o)
+        if removed:
+            logger.debug(f"Pre-filter: removed {removed} bondless offers with non-zero fee")
+        if len(filtered) <= n:
+            return filtered[:]
+        remaining = filtered
+    else:
+        remaining = offers[:]
 
     selected: list[Offer] = []
-    remaining_offers = offers[:]  # Copy to modify
 
-    # 1. Select Bonded Makers (weighted by bond value)
-    if num_bonded > 0:
-        # Build pool of (offer, bond_value) pairs
-        pool = [(o, o.fidelity_bond_value) for o in remaining_offers]
-        # Remove zero-bond offers from bonded pool
-        bonded_pool = [(o, w) for o, w in pool if w > 0]
+    bonded_count = sum(1 for o in remaining if o.fidelity_bond_value > 0)
+    logger.debug(
+        f"Selection pool: {len(remaining)} offers ({bonded_count} bonded, "
+        f"{len(remaining) - bonded_count} bondless), picking {n} with "
+        f"bondless_allowance={bondless_makers_allowance}"
+    )
 
-        total_bond = sum(w for _, w in bonded_pool)
+    for _i in range(n):
+        if not remaining:
+            logger.warning(f"Exhausted offer pool after {len(selected)}/{n} picks")
+            break
 
-        if total_bond == 0 or len(bonded_pool) == 0:
-            logger.debug(
-                f"No fidelity bonds found for {num_bonded} bonded slots, "
-                "will fill from bondless pool"
-            )
-            # Don't increment num_bondless here, we'll handle shortage at the end
+        picked: Offer | None = None
+
+        if random.random() < bondless_makers_allowance:
+            # Bondless slot: pick uniformly from ALL remaining offers.
+            # Bonded and bondless compete on equal footing here, so a rare
+            # bondless maker has probability ~1/len(remaining).
+            picked = random.choice(remaining)
         else:
-            # Weighted selection without replacement
-            for _ in range(min(num_bonded, len(bonded_pool))):
-                if not bonded_pool:
-                    break
+            # Bonded slot: pick weighted by bond value
+            picked = _pick_weighted_bonded(remaining)
 
-                current_total = sum(w for _, w in bonded_pool)
-                r = random.uniform(0, current_total)
-                cumulative = 0
+        if picked is None:
+            # Bonded pool empty -- fall back to uniform random
+            picked = random.choice(remaining)
 
-                for i, (offer, weight) in enumerate(bonded_pool):
-                    cumulative += weight
-                    if r <= cumulative:
-                        selected.append(offer)
-                        remaining_offers.remove(offer)
-                        bonded_pool.pop(i)
-                        break
+        selected.append(picked)
+        remaining.remove(picked)
 
-    # 2. Fill remaining slots (bondless selection - uniform random from all remaining)
-    slots_remaining = n - len(selected)
-    if slots_remaining > 0:
-        if not remaining_offers:
-            logger.warning(
-                f"Not enough offers to fill {slots_remaining} remaining slots "
-                f"(selected {len(selected)}/{n})"
-            )
-            return selected
-
-        # For bondless slots: select uniformly from all remaining offers
-        # (both bonded and bondless makers have equal probability)
-        candidates = remaining_offers
-
-        # Optionally filter to zero-fee offers only
-        if bondless_require_zero_fee:
-            zero_fee_candidates = [
-                o
-                for o in candidates
-                if (
-                    o.ordertype in (OfferType.SW0_ABSOLUTE, OfferType.SWA_ABSOLUTE)
-                    and int(o.cjfee) == 0
-                )
-                or (
-                    o.ordertype not in (OfferType.SW0_ABSOLUTE, OfferType.SWA_ABSOLUTE)
-                    # For relative offers, we can't strictly say fee is 0 without amount,
-                    # but usually 'zero fee' implies 0 absolute.
-                    # The original logic included relative fee offers in the eligible list.
-                    # We'll stick to that.
-                )
-            ]
-
-            if len(zero_fee_candidates) >= slots_remaining:
-                candidates = zero_fee_candidates
-                logger.debug(
-                    f"Bondless slots: filtered to {len(candidates)} zero-fee offers "
-                    f"(bonded + bondless)"
-                )
-            else:
-                logger.warning(
-                    f"Not enough zero-fee offers for bondless selection "
-                    f"({len(zero_fee_candidates)} < {slots_remaining}), "
-                    "using all remaining offers"
-                )
-
-        # Uniform random selection for remaining slots
-        picked = random_order_choose(candidates, slots_remaining)
-        selected.extend(picked)
-
-    logger.debug(f"Final selection: {len(selected)} makers chosen")
+    logger.debug(
+        f"Final selection: {len(selected)} makers "
+        f"({sum(1 for o in selected if o.fidelity_bond_value > 0)} bonded, "
+        f"{sum(1 for o in selected if o.fidelity_bond_value == 0)} bondless)"
+    )
     return selected
+
+
+def _is_nonzero_absolute_fee(offer: Offer) -> bool:
+    """Check if an offer charges a non-zero absolute fee."""
+    return (
+        offer.ordertype in (OfferType.SW0_ABSOLUTE, OfferType.SWA_ABSOLUTE)
+        and int(offer.cjfee) != 0
+    )
+
+
+def _pick_weighted_bonded(pool: list[Offer]) -> Offer | None:
+    """Pick one offer from *pool* weighted by fidelity_bond_value."""
+    bonded = [(o, o.fidelity_bond_value) for o in pool if o.fidelity_bond_value > 0]
+    if not bonded:
+        return None
+    total = sum(w for _, w in bonded)
+    r = random.uniform(0, total)
+    cumulative = 0
+    for offer, weight in bonded:
+        cumulative += weight
+        if r <= cumulative:
+            return offer
+    return bonded[-1][0]  # float rounding guard
 
 
 def choose_orders(
@@ -508,7 +506,7 @@ def choose_orders(
     choose_fn: Callable[[list[Offer], int], list[Offer]] | None = None,
     ignored_makers: set[str] | None = None,
     min_nick_version: int | None = None,
-    bondless_makers_allowance: float = 0.125,
+    bondless_makers_allowance: float = 0.2,
     bondless_require_zero_fee: bool = True,
     required_features: set[str] | None = None,
 ) -> tuple[dict[str, Offer], int]:
@@ -589,7 +587,7 @@ def choose_sweep_orders(
     choose_fn: Callable[[list[Offer], int], list[Offer]] | None = None,
     ignored_makers: set[str] | None = None,
     min_nick_version: int | None = None,
-    bondless_makers_allowance: float = 0.125,
+    bondless_makers_allowance: float = 0.2,
     bondless_require_zero_fee: bool = True,
     required_features: set[str] | None = None,
 ) -> tuple[dict[str, Offer], int, int]:
@@ -718,7 +716,7 @@ class OrderbookManager:
     def __init__(
         self,
         max_cj_fee: MaxCjFee,
-        bondless_makers_allowance: float = 0.125,
+        bondless_makers_allowance: float = 0.2,
         bondless_require_zero_fee: bool = True,
         data_dir: Any = None,  # Path | None, but avoid import
         own_wallet_nicks: set[str] | None = None,

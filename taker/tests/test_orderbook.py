@@ -742,10 +742,10 @@ class TestOrderbookManager:
 
 
 class TestMixedBondedBondlessSelection:
-    """Tests for the mixed bonded/bondless selection strategy."""
+    """Tests for the per-slot probabilistic bonded/bondless selection."""
 
-    def test_deterministic_split(self) -> None:
-        """Test that the split between bonded and bondless is deterministic."""
+    def test_always_fills_n_slots(self) -> None:
+        """Regardless of coin flips, we always fill exactly n slots."""
         offers = [
             Offer(
                 counterparty=f"Maker{i}",
@@ -760,12 +760,11 @@ class TestMixedBondedBondlessSelection:
             for i in range(10)
         ]
 
-        # With 3 makers and 0.125 allowance: bonded = floor(3 * 0.875) = 2
-        selected = fidelity_bond_weighted_choose(
-            offers=offers, n=3, bondless_makers_allowance=0.125, bondless_require_zero_fee=False
-        )
-
-        assert len(selected) == 3
+        for _ in range(20):
+            selected = fidelity_bond_weighted_choose(
+                offers=offers, n=3, bondless_makers_allowance=0.2, bondless_require_zero_fee=False
+            )
+            assert len(selected) == 3
 
     def test_fills_all_slots(self) -> None:
         """Ensure we always fill all n slots when enough offers exist."""
@@ -835,8 +834,7 @@ class TestMixedBondedBondlessSelection:
         offers = [high_bond] + low_bonds
 
         # Run 100 times, high bond should be selected almost always
-        # With allowance=0.2, bonded slots = floor(3 * 0.8) = 2
-        # HighBond should win at least one of these slots nearly every time
+        # Each slot has 80% chance of being bonded, and HighBond dominates
         high_bond_count = 0
         for _ in range(100):
             selected = fidelity_bond_weighted_choose(
@@ -848,8 +846,8 @@ class TestMixedBondedBondlessSelection:
         # Should be selected in >90% of runs
         assert high_bond_count > 90
 
-    def test_bondless_fills_remaining_with_zero_fee(self) -> None:
-        """Bondless slots should fill from zero-fee offers when required."""
+    def test_bondless_zero_fee_filter(self) -> None:
+        """Non-zero-fee bondless offers are pre-filtered out entirely."""
         bonded = [
             Offer(
                 counterparty=f"Bonded{i}",
@@ -861,10 +859,10 @@ class TestMixedBondedBondlessSelection:
                 cjfee=0,
                 fidelity_bond_value=100000,
             )
-            for i in range(2)
+            for i in range(5)
         ]
 
-        # Zero fee bondless
+        # Zero fee bondless -- should survive pre-filter
         zero_fee = [
             Offer(
                 counterparty=f"ZeroFee{i}",
@@ -873,13 +871,13 @@ class TestMixedBondedBondlessSelection:
                 minsize=1000,
                 maxsize=1000000,
                 txfee=0,
-                cjfee=0,  # Zero fee
+                cjfee=0,
                 fidelity_bond_value=0,
             )
             for i in range(3)
         ]
 
-        # Non-zero fee bondless (should be excluded from bondless slots)
+        # Non-zero fee bondless -- should be pre-filtered out
         nonzero_fee = [
             Offer(
                 counterparty=f"NonZeroFee{i}",
@@ -888,7 +886,7 @@ class TestMixedBondedBondlessSelection:
                 minsize=1000,
                 maxsize=1000000,
                 txfee=0,
-                cjfee=100,  # Non-zero fee
+                cjfee=100,
                 fidelity_bond_value=0,
             )
             for i in range(3)
@@ -896,26 +894,18 @@ class TestMixedBondedBondlessSelection:
 
         offers = bonded + zero_fee + nonzero_fee
 
-        # With n=3, allowance=0.4: bonded=floor(3*0.6)=1, bondless=2
-        # Should pick 1 bonded + 2 from zero_fee (not nonzero_fee)
-        for _ in range(10):
+        # NonZeroFee makers should never appear (pre-filtered)
+        for _ in range(20):
             selected = fidelity_bond_weighted_choose(
-                offers=offers, n=3, bondless_makers_allowance=0.4, bondless_require_zero_fee=True
+                offers=offers, n=3, bondless_makers_allowance=0.5, bondless_require_zero_fee=True
             )
             assert len(selected) == 3
-
-            # Check that nonzero_fee makers are not in bondless slots
-            # (Note: they could be in bonded slots since they have bond=0,
-            # but bonded prioritizes bond>0)
             selected_nicks = {o.counterparty for o in selected}
             nonzero_nicks = {o.counterparty for o in nonzero_fee}
-
-            # Since bonded slots pick from bond>0 only, and bondless require zero fee,
-            # nonzero_fee makers should not appear
             assert len(selected_nicks & nonzero_nicks) == 0
 
-    def test_insufficient_bonded_fills_from_bondless(self) -> None:
-        """If not enough bonded offers, fill remainder from bondless pool."""
+    def test_insufficient_bonded_fills_from_all(self) -> None:
+        """If not enough bonded offers, fill remainder from all remaining."""
         # Only 1 bonded maker
         bonded = Offer(
             counterparty="OnlyBonded",
@@ -945,15 +935,160 @@ class TestMixedBondedBondlessSelection:
 
         offers = [bonded] + bondless
 
-        # With n=4, allowance=0.25: bonded=floor(4*0.75)=3, bondless=1
-        # But we only have 1 bonded offer, so remaining 3 slots filled from bondless
-        selected = fidelity_bond_weighted_choose(
-            offers=offers, n=4, bondless_makers_allowance=0.25, bondless_require_zero_fee=False
+        # With low bondless allowance, the bonded maker should be selected
+        # most of the time (80% of slots try bonded first)
+        bonded_count = 0
+        for _ in range(100):
+            selected = fidelity_bond_weighted_choose(
+                offers=offers, n=4, bondless_makers_allowance=0.2, bondless_require_zero_fee=False
+            )
+            assert len(selected) == 4
+            if bonded in selected:
+                bonded_count += 1
+
+        # Bonded maker should be selected in most runs
+        assert bonded_count > 70
+
+    def test_per_slot_coin_flip_varies_bondless_count(self) -> None:
+        """The number of bondless picks should vary across runs (not deterministic)."""
+        bonded = [
+            Offer(
+                counterparty=f"Bonded{i}",
+                oid=0,
+                ordertype=OfferType.SW0_ABSOLUTE,
+                minsize=1000,
+                maxsize=1000000,
+                txfee=0,
+                cjfee=0,
+                fidelity_bond_value=100000,
+            )
+            for i in range(20)
+        ]
+
+        bondless = [
+            Offer(
+                counterparty=f"Bondless{i}",
+                oid=0,
+                ordertype=OfferType.SW0_ABSOLUTE,
+                minsize=1000,
+                maxsize=1000000,
+                txfee=0,
+                cjfee=0,
+                fidelity_bond_value=0,
+            )
+            for i in range(20)
+        ]
+
+        offers = bonded + bondless
+
+        bondless_counts: set[int] = set()
+        for _ in range(100):
+            selected = fidelity_bond_weighted_choose(
+                offers=offers,
+                n=10,
+                bondless_makers_allowance=0.3,
+                bondless_require_zero_fee=False,
+            )
+            assert len(selected) == 10
+            num_bondless = sum(1 for o in selected if o.fidelity_bond_value == 0)
+            bondless_counts.add(num_bondless)
+
+        # With per-slot coin flip (p=0.3), we should see varying counts
+        assert len(bondless_counts) >= 3
+
+    def test_zero_allowance_selects_only_bonded(self) -> None:
+        """With allowance=0, all slots should use bonded weighted selection."""
+        bonded = [
+            Offer(
+                counterparty=f"Bonded{i}",
+                oid=0,
+                ordertype=OfferType.SW0_ABSOLUTE,
+                minsize=1000,
+                maxsize=1000000,
+                txfee=0,
+                cjfee=0,
+                fidelity_bond_value=100000,
+            )
+            for i in range(10)
+        ]
+
+        bondless = [
+            Offer(
+                counterparty=f"Bondless{i}",
+                oid=0,
+                ordertype=OfferType.SW0_ABSOLUTE,
+                minsize=1000,
+                maxsize=1000000,
+                txfee=0,
+                cjfee=0,
+                fidelity_bond_value=0,
+            )
+            for i in range(10)
+        ]
+
+        offers = bonded + bondless
+
+        for _ in range(20):
+            selected = fidelity_bond_weighted_choose(
+                offers=offers, n=5, bondless_makers_allowance=0.0, bondless_require_zero_fee=False
+            )
+            assert len(selected) == 5
+            # All should be bonded
+            assert all(o.fidelity_bond_value > 0 for o in selected)
+
+    def test_bondless_slot_picks_uniformly_from_all(self) -> None:
+        """Bondless (uniform) slots pick from ALL offers, not just bondless."""
+        # 50 bonded + 1 bondless. With high allowance, the bondless maker
+        # should appear rarely because they compete with 50 others uniformly.
+        bonded = [
+            Offer(
+                counterparty=f"Bonded{i}",
+                oid=0,
+                ordertype=OfferType.SW0_ABSOLUTE,
+                minsize=1000,
+                maxsize=1000000,
+                txfee=0,
+                cjfee=0,
+                fidelity_bond_value=100000,
+            )
+            for i in range(50)
+        ]
+
+        bondless_maker = Offer(
+            counterparty="RareBondless",
+            oid=0,
+            ordertype=OfferType.SW0_ABSOLUTE,
+            minsize=1000,
+            maxsize=1000000,
+            txfee=0,
+            cjfee=0,
+            fidelity_bond_value=0,
         )
 
-        assert len(selected) == 4
-        # OnlyBonded should always be selected (in bonded phase)
-        assert bonded in selected
+        offers = bonded + [bondless_maker]
+
+        # Run many times: bondless maker should appear infrequently
+        appearances = 0
+        runs = 500
+        for _ in range(runs):
+            selected = fidelity_bond_weighted_choose(
+                offers=offers,
+                n=10,
+                bondless_makers_allowance=0.2,
+                bondless_require_zero_fee=False,
+            )
+            if bondless_maker in selected:
+                appearances += 1
+
+        # With 51 offers, P(per uniform slot) = 1/51 ≈ 0.02
+        # Expected uniform slots per run = 10 * 0.2 = 2
+        # P(picked in run) ≈ 1 - (1 - 1/51)^2 ≈ 0.039
+        # So appearances should be roughly 2-6% of runs
+        # Allow generous bounds for statistical test
+        assert appearances < runs * 0.15, (
+            f"Bondless maker appeared {appearances}/{runs} times "
+            f"({appearances / runs:.1%}), expected <15%"
+        )
 
 
 class TestFilterOffersByNickVersion:

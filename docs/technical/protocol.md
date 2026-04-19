@@ -205,10 +205,22 @@ After collecting offers, the taker selects makers through three phases:
 
 | Algorithm | Behavior |
 |-----------|----------|
-| `fidelity_bond_weighted` (default) | Mixed strategy: ~87.5% slots filled by bond-weighted selection, remaining slots randomly from all offers |
+| `fidelity_bond_weighted` (default) | Per-slot coin flip: each slot independently picks bonded (weighted) or uniform-random based on `bondless_makers_allowance` |
 | `cheapest` | Lowest fee first |
 | `weighted` | Exponentially weighted by inverse fee |
 | `random` | Uniform random selection |
+
+**Fidelity bond selection details** (`fidelity_bond_weighted`):
+
+The default algorithm uses a per-slot Bernoulli trial (matching the reference JoinMarket implementation):
+
+1. **Pre-filter**: When `bondless_require_zero_fee` is enabled (default), bondless offers (no fidelity bond) that charge a non-zero absolute fee are removed. This prevents attackers from flooding the orderbook with fee-charging bondless offers.
+2. **Per-slot selection**: For each of the `n` slots independently:
+   - With probability `bondless_makers_allowance` (default 0.2): pick uniformly at random from **all** remaining offers (bonded and bondless compete equally).
+   - Otherwise: pick from the bonded pool weighted by `fidelity_bond_value`.
+3. **Fallback**: If the chosen pool is empty, the other pool is tried, then uniform random.
+
+This design ensures that when few bondless makers exist, each has naturally low individual selection probability (~`allowance / total_offers` per slot), avoiding taker fingerprinting. When many bondless zero-fee makers are available, roughly `n * bondless_makers_allowance` appear in the final set (e.g., 2 out of 10 with 20% allowance). The uniform-random slots also benefit smaller bonded makers.
 
 **Key Point**: Selection probability is proportional to the **maker identity (nick)**, not the number of offers. A maker with 5 offers has the same selection probability as a maker with 1 offer (assuming both pass filters).
 

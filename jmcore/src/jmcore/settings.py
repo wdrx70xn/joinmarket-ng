@@ -654,10 +654,10 @@ class TakerSettings(BaseModel):
         description="Target blocks for fee estimation",
     )
     bondless_makers_allowance: float = Field(
-        default=0.0,
+        default=0.2,
         ge=0.0,
         le=1.0,
-        description="Fraction of time to choose makers randomly",
+        description="Per-slot probability of selecting a bondless (zero-fee) maker",
     )
     bond_value_exponent: float = Field(
         default=1.3,
