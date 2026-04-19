@@ -1062,6 +1062,50 @@ def test_interactive_mnemonic_input_paste_too_many_words():
     assert result == valid_mnemonic
 
 
+def test_interactive_mnemonic_input_paste_comma_separated():
+    """Test that pasting comma-separated words works correctly."""
+    from unittest.mock import patch
+
+    from jmwallet.cli import interactive_mnemonic_input
+
+    # 12-word valid mnemonic with commas
+    mnemonic_commas = (
+        "abandon,abandon,abandon,abandon,abandon,abandon,"
+        "abandon,abandon,abandon,abandon,abandon,about"
+    )
+    expected = (
+        "abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon abandon abandon about"
+    )
+
+    with patch("builtins.input", return_value=mnemonic_commas):
+        result = interactive_mnemonic_input(word_count=12)
+
+    assert result == expected
+
+
+def test_interactive_mnemonic_input_paste_semicolon_separated():
+    """Test that pasting semicolon-separated words works correctly."""
+    from unittest.mock import patch
+
+    from jmwallet.cli import interactive_mnemonic_input
+
+    # 12-word valid mnemonic with semicolons
+    mnemonic_semicolons = (
+        "abandon;abandon;abandon;abandon;abandon;abandon;"
+        "abandon;abandon;abandon;abandon;abandon;about"
+    )
+    expected = (
+        "abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon abandon abandon about"
+    )
+
+    with patch("builtins.input", return_value=mnemonic_semicolons):
+        result = interactive_mnemonic_input(word_count=12)
+
+    assert result == expected
+
+
 def test_supports_raw_terminal_returns_false_when_not_tty():
     """Test that _supports_raw_terminal returns False when stdin is not a tty."""
     from unittest.mock import patch

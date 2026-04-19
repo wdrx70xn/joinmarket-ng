@@ -383,6 +383,34 @@ def _read_char() -> str:
     return ch
 
 
+def _read_remaining_stdin() -> str:
+    """Read all remaining characters from stdin without blocking.
+
+    Used to detect pasted content after a space character.
+    Returns empty string if no data is available.
+    """
+    import select
+    import sys
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    result = []
+    try:
+        tty.setraw(fd)
+        # Use a short timeout to detect paste vs manual typing
+        while select.select([sys.stdin], [], [], 0.05)[0]:
+            ch = sys.stdin.read(1)
+            if ch:
+                result.append(ch)
+            else:
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return "".join(result).strip()
+
+
 def _interactive_word_input(
     prompt: str,
     wordlist: list[str],
@@ -469,10 +497,20 @@ def _interactive_word_input(
                         sys.stdout.write(prompt + buffer)
                         sys.stdout.flush()
             continue
-        elif ch == " ":  # Space - might be pasting multiple words
+        elif ch in (" ", ",", ";"):  # Word separators (space, comma, semicolon)
             if buffer:
-                # Treat space as confirming current word and potentially starting paste mode
-                # Return current buffer, let caller handle it
+                # Check if more data is available in stdin (paste detection)
+                remaining = _read_remaining_stdin()
+                if remaining:
+                    # Pasting multiple words - return all of them
+                    full_input = buffer + " " + remaining
+                    if suggestion_line:
+                        sys.stdout.write(f"\r{prompt}{buffer}" + " " * (len(suggestion_line) + 5))
+                        sys.stdout.write(f"\r{prompt}{buffer}")
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    return full_input
+                # Single separator - confirm current word
                 if suggestion_line:
                     sys.stdout.write(f"\r{prompt}{buffer}" + " " * (len(suggestion_line) + 5))
                     sys.stdout.write(f"\r{prompt}{buffer}")
@@ -584,7 +622,9 @@ def interactive_mnemonic_input(word_count: int = 24) -> str:
         console.print(
             f"[dim]Expected: {word_count} words | Tab to autocomplete | Ctrl+C to cancel[/dim]"
         )
-    console.print("[dim]Tip: You can paste all words at once[/dim]")
+    console.print(
+        "[dim]Tip: You can paste all words at once (space, comma, or semicolon separated)[/dim]"
+    )
     console.print()
 
     try:
@@ -622,8 +662,13 @@ def interactive_mnemonic_input(word_count: int = 24) -> str:
             if not user_input:
                 continue
 
+            # Normalize separators: support comma, semicolon, and space
+            import re
+
+            normalized_input = re.sub(r"[,;\s]+", " ", user_input).strip()
+
             # Check if user pasted multiple words at once
-            input_parts = user_input.split()
+            input_parts = normalized_input.split()
             if len(input_parts) > 1:
                 # Validate all pasted words
                 all_valid = all(part in wordlist for part in input_parts)
@@ -647,18 +692,19 @@ def interactive_mnemonic_input(word_count: int = 24) -> str:
                     continue
 
             # Check for exact match (single word)
-            if user_input in wordlist:
-                words.append(user_input)
+            single_word = input_parts[0] if len(input_parts) == 1 else normalized_input
+            if single_word in wordlist:
+                words.append(single_word)
                 # Only print confirmation if not using realtime (realtime already shows it)
                 if not use_realtime:
-                    console.print(f"  [green]{user_input}[/green]", highlight=False)
+                    console.print(f"  [green]{single_word}[/green]", highlight=False)
                 continue
 
             # Check for prefix matches
-            matches = get_word_completions(user_input, wordlist)
+            matches = get_word_completions(single_word, wordlist)
 
             if len(matches) == 0:
-                console.print(f"  [red]'{user_input}' - no matching BIP39 word[/red]")
+                console.print(f"  [red]'{single_word}' - no matching BIP39 word[/red]")
                 continue
             elif len(matches) == 1:
                 # Auto-complete unique match
@@ -666,7 +712,7 @@ def interactive_mnemonic_input(word_count: int = 24) -> str:
                 words.append(word)
                 if not use_realtime:
                     console.print(
-                        f"  [green]{word}[/green] [dim](auto-completed from '{user_input}')[/dim]"
+                        f"  [green]{word}[/green] [dim](auto-completed from '{single_word}')[/dim]"
                     )
             else:
                 # Show suggestions
