@@ -79,6 +79,18 @@ def test_tui_script_has_sed_escaping() -> None:
     assert "sed -e 's/[&\\\\/|]/\\\\&/g'" in content or "escape" in content.lower()
 
 
+def test_tui_script_has_clear_config_value() -> None:
+    """clear_config_value helper must exist for clearing config keys."""
+    content = SCRIPT_PATH.read_text()
+    assert "clear_config_value()" in content
+
+
+def test_tui_script_select_wallet_clears_password() -> None:
+    """Select Active Wallet must clear stored password to prevent mismatch."""
+    content = SCRIPT_PATH.read_text()
+    assert 'clear_config_value "mnemonic_password"' in content
+
+
 # ---------------------------------------------------------------------------
 # Python entry point tests
 # ---------------------------------------------------------------------------

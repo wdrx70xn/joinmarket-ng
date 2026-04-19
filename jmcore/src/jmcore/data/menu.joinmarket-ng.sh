@@ -92,6 +92,14 @@ get_mnemonic_file() {
     echo "$val"
 }
 
+# Helper: Comment out (clear) a value in config.toml
+clear_config_value() {
+    local key=$1
+    if grep -q "^${key}[[:space:]]*=" "$CONFIG_FILE"; then
+        sed -i "s|^${key}[[:space:]]*=.*|# ${key} =|" "$CONFIG_FILE"
+    fi
+}
+
 # Helper: Set a value in config.toml (uncomment if needed)
 # Values are escaped for safe use in sed replacement strings.
 set_config_value() {
@@ -769,7 +777,9 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
 
               if [ -f "$DATA_DIR/wallets/$WNAME" ]; then
                   set_config_value "mnemonic_file" "$DATA_DIR/wallets/$WNAME" "true"
-                  whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nRestart the maker service for changes to take effect." 10 55
+                  # Clear stored password to prevent mismatch with the new wallet
+                  clear_config_value "mnemonic_password"
+                  whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nStored password has been cleared.\nYou will be prompted for the password on next use.\n\nRestart the maker service for changes to take effect." 12 60
               else
                   whiptail --title " Error " --msgbox "File not found: $DATA_DIR/wallets/$WNAME" 8 55
               fi
