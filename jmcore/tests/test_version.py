@@ -10,8 +10,32 @@ from jmcore.version import (
     UpdateCheckResult,
     _parse_version_tag,
     check_for_updates_from_github,
+    get_commit_hash,
     get_version,
 )
+
+
+class TestGetCommitHash:
+    """Tests for get_commit_hash."""
+
+    def test_returns_short_hash_in_git_repo(self) -> None:
+        """In this repo, get_commit_hash should return a short hex string."""
+        result = get_commit_hash()
+        assert result is not None
+        assert len(result) >= 7
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_returns_none_when_git_missing(self) -> None:
+        """When git is not found, return None."""
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert get_commit_hash() is None
+
+    def test_returns_none_on_failure(self) -> None:
+        """When git command fails, return None."""
+        mock_result = MagicMock()
+        mock_result.returncode = 128
+        with patch("subprocess.run", return_value=mock_result):
+            assert get_commit_hash() is None
 
 
 class TestParseVersionTag:

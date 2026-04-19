@@ -28,6 +28,31 @@ def get_version() -> str:
     return __version__
 
 
+def get_commit_hash() -> str | None:
+    """Return the short git commit hash, or None if unavailable.
+
+    This runs ``git rev-parse --short HEAD`` from the package directory.
+    Returns None when git is not installed, the code is not in a git repo,
+    or the command fails for any other reason.
+    """
+    import subprocess
+    from pathlib import Path
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
 def get_version_tuple() -> tuple[int, int, int]:
     """Return the version as a tuple of (major, minor, patch)."""
     parts = __version__.split(".")

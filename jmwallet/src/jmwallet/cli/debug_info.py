@@ -17,7 +17,7 @@ from typing import Annotated, Any
 
 import typer
 from jmcore.cli_common import resolve_backend_settings, setup_cli
-from jmcore.version import get_version
+from jmcore.version import get_commit_hash, get_version
 from loguru import logger
 
 from jmwallet.cli import app
@@ -423,8 +423,11 @@ def debug_info(
     lines = [
         "JoinMarket NG",
         f"  version:    {get_version()}",
-        f"  deployment: {_detect_deployment()}",
     ]
+    commit_hash = get_commit_hash()
+    if commit_hash:
+        lines.append(f"  commit:     {commit_hash}")
+    lines.append(f"  deployment: {_detect_deployment()}")
     pkg_versions = _get_package_versions()
     if pkg_versions:
         lines.append("  packages:")
