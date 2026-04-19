@@ -351,11 +351,12 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
 $WALLET_INFO | Maker Bot: $MAKER_STATUS
 
 " \
-    18 64 9 \
+    18 64 10 \
     "S" "Send Bitcoin" \
     "W" "Wallet Management" \
     "M" "Maker Bot Control" \
     "C" "Edit Configuration" \
+    "U" "Update JoinMarket-NG" \
     "I" "Info / Documentation" \
     "X" "Exit" 3>&1 1>&2 2>&3)
 
@@ -936,6 +937,72 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               done
               ;;
       esac
+      ;;
+
+    U)
+      CURRENT_VERSION=$("${VENV_BIN}/python" -c "from jmcore.version import get_version; print(get_version())" 2>/dev/null || echo "unknown")
+
+      UCHOICE=$(whiptail --title " Update JoinMarket-NG (current: v${CURRENT_VERSION}) " \
+          --menu "Choose update channel:" 16 64 5 \
+          "STABLE" "Latest stable release (recommended)" \
+          "DEV" "Latest development build (main branch)" \
+          "VERSION" "Install a specific version" \
+          "BACK" "Return to main menu" 3>&1 1>&2 2>&3)
+
+      [ $? != 0 ] && continue
+
+      case $UCHOICE in
+        STABLE)
+          UPDATE_ARGS=""
+          ;;
+        DEV)
+          UPDATE_ARGS="--dev"
+          ;;
+        VERSION)
+          TARGET_VERSION=$(whiptail --title " Specific Version " \
+              --inputbox "Enter version number (e.g. 0.27.0):" 9 50 "" 3>&1 1>&2 2>&3)
+          [ $? != 0 ] && continue
+          [ -z "$TARGET_VERSION" ] && continue
+          UPDATE_ARGS="--version $TARGET_VERSION"
+          ;;
+        BACK)
+          continue
+          ;;
+      esac
+
+      # Warn if maker bot is running
+      if [ "$MAKER_STATUS" = "RUNNING" ]; then
+          whiptail --title " Warning " --yesno \
+              "The Maker Bot is currently running.\n\nIt will be stopped during the update and must be restarted manually afterwards.\n\nContinue?" 12 60
+          [ $? != 0 ] && continue
+      fi
+
+      whiptail --title " Confirm Update " --yesno \
+          "Update JoinMarket-NG?\n\nChannel: ${UCHOICE}\nCurrent: v${CURRENT_VERSION}\n\nThe TUI will close during the update.\nRestart it afterwards with: jm-tui" 14 60
+      [ $? != 0 ] && continue
+
+      clear
+
+      if [ "$RASPIBLITZ" = "1" ]; then
+          if [ "$UCHOICE" = "VERSION" ]; then
+              sudo "$BONUS_SCRIPT" update "$TARGET_VERSION"
+          elif [ "$UCHOICE" = "DEV" ]; then
+              sudo "$BONUS_SCRIPT" update main
+          else
+              sudo "$BONUS_SCRIPT" update
+          fi
+      else
+          # Standalone: download and run install.sh --update
+          echo "Downloading latest installer..."
+          INSTALL_SCRIPT=$(mktemp)
+          curl -sSL "https://raw.githubusercontent.com/joinmarket-ng/joinmarket-ng/main/install.sh" -o "$INSTALL_SCRIPT"
+          bash "$INSTALL_SCRIPT" --update $UPDATE_ARGS -y
+          rm -f "$INSTALL_SCRIPT"
+      fi
+
+      echo ""
+      echo "Update complete. Please restart the TUI: jm-tui"
+      exit 0
       ;;
 
     C)

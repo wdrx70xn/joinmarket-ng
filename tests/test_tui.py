@@ -98,6 +98,28 @@ def test_tui_script_select_wallet_clears_password() -> None:
     assert 'clear_config_value "mnemonic_password"' in content
 
 
+def test_tui_script_has_update_menu() -> None:
+    """Main menu must offer an Update option."""
+    content = SCRIPT_PATH.read_text()
+    assert '"U" "Update JoinMarket-NG"' in content
+
+
+def test_tui_script_update_has_channels() -> None:
+    """Update submenu must offer STABLE, DEV, and VERSION channels."""
+    content = SCRIPT_PATH.read_text()
+    assert '"STABLE"' in content
+    assert '"DEV"' in content
+    assert '"VERSION"' in content
+
+
+def test_tui_script_update_warns_running_maker() -> None:
+    """Update flow must warn when the maker bot is running."""
+    content = SCRIPT_PATH.read_text()
+    assert "MAKER_STATUS" in content
+    # Check the warning mentions maker being running
+    assert "Maker Bot is currently running" in content
+
+
 # ---------------------------------------------------------------------------
 # Python entry point tests
 # ---------------------------------------------------------------------------
