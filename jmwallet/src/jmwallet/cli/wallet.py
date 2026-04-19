@@ -117,7 +117,7 @@ def import_mnemonic(
         logger.warning(f"Wallet file already exists: {output_file}")
         if not typer.confirm("Overwrite existing wallet file?", default=False):
             typer.echo("Import cancelled")
-            raise typer.Exit(0)
+            raise typer.Exit(1)
 
     # Get password for encryption
     password: str | None = None
@@ -163,6 +163,21 @@ def generate(
     setup_logging()
 
     try:
+        # Auto-enable save if output_file is specified (even if --no-save was used)
+        should_save = save or output_file is not None
+
+        if should_save:
+            if output_file is None:
+                output_file = Path.home() / ".joinmarket-ng" / "wallets" / "default.mnemonic"
+
+            # Check if file already exists BEFORE generating the seed
+            if output_file.exists():
+                logger.warning(f"Wallet file already exists: {output_file}")
+                overwrite = typer.confirm("Overwrite existing wallet file?", default=False)
+                if not overwrite:
+                    typer.echo("Wallet generation cancelled")
+                    raise typer.Exit(1)
+
         mnemonic = generate_mnemonic_secure(word_count)
 
         # Validate the generated mnemonic
@@ -181,21 +196,7 @@ def generate(
         typer.echo("Store it securely offline - NEVER share it with anyone!")
         typer.echo("=" * 80 + "\n")
 
-        # Auto-enable save if output_file is specified (even if --no-save was used)
-        should_save = save or output_file is not None
-
         if should_save:
-            if output_file is None:
-                output_file = Path.home() / ".joinmarket-ng" / "wallets" / "default.mnemonic"
-
-            # Check if file already exists and prompt for confirmation
-            if output_file.exists():
-                logger.warning(f"Wallet file already exists: {output_file}")
-                overwrite = typer.confirm("Overwrite existing wallet file?", default=False)
-                if not overwrite:
-                    typer.echo("Wallet generation cancelled")
-                    raise typer.Exit(0)
-
             # Prompt for password if requested
             password: str | None = None
             if prompt_password:

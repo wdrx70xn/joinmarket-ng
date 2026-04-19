@@ -680,15 +680,18 @@ def test_generate_overwrite_protection():
             input="n\n",  # Decline overwrite
         )
 
-        # Should exit with code 0 (cancelled by user choice)
-        assert result.exit_code == 0, (
-            f"Expected exit 0, got {result.exit_code}. Output: {result.stdout}"
+        # Should exit with code 1 (cancelled by user choice, signals no wallet created)
+        assert result.exit_code == 1, (
+            f"Expected exit 1, got {result.exit_code}. Output: {result.stdout}"
         )
         assert "Overwrite existing wallet file?" in result.stdout
         assert "Wallet generation cancelled" in result.stdout
 
         # File should still contain original content
         assert output_file.read_text() == "existing mnemonic"
+
+        # Seed should NOT have been shown before the overwrite prompt
+        assert "GENERATED MNEMONIC" not in result.stdout
 
         # Try again with confirmation
         result = runner.invoke(
