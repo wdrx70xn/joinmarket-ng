@@ -200,6 +200,20 @@ class MessageRouter:
         from_nick, to_nick, rest = parsed
         logger.info(f"PRIVMSG routing: {from_nick} -> {to_nick} (rest: {rest[:50]}...)")
 
+        # Diagnostic: warn if the message appears to lack a signature.
+        # The JoinMarket protocol appends "<pubkey_hex> <sig_base64>" to all
+        # privmsgs.  A missing signature will cause the recipient to reject
+        # the message with "Sig not properly appended to privmsg".
+        rest_parts = rest.split()
+        if len(rest_parts) < 3:
+            # Need at least: command, pubkey, sig
+            logger.warning(
+                f"PRIVMSG from {from_nick} -> {to_nick} appears to lack a "
+                f"signature (only {len(rest_parts)} space-separated tokens). "
+                f"Relaying anyway but recipient will likely reject it. "
+                f"Sender peer_key: {from_key}"
+            )
+
         to_peer = self.peer_registry.get_by_nick(to_nick)
         if not to_peer:
             logger.warning(f"Target peer not found: {to_nick}")

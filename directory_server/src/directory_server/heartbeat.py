@@ -71,11 +71,13 @@ class HeartbeatManager:
         send_callback: SendCallback,
         evict_callback: EvictCallback,
         config: HeartbeatConfig | None = None,
+        server_nick: str = "",
     ) -> None:
         self.peer_registry = peer_registry
         self.send_callback = send_callback
         self.evict_callback = evict_callback
         self.config = config or HeartbeatConfig()
+        self.server_nick = server_nick
 
         # Peers waiting for a PONG reply
         self._pong_pending: set[str] = set()
@@ -208,18 +210,23 @@ class HeartbeatManager:
         The maker will respond with its offers, which updates last_seen on the
         next message receive.  This matches the joinmarket-rs fallback for
         peers that don't support PING.
+
+        The probe is formatted as a standard PUBMSG addressed to PUBLIC so the
+        reference implementation routes it through ``on_pubmsg`` (which handles
+        ``!orderbook``) rather than ``on_privmsg`` (which requires a signature).
+        Although the wire message is sent unicast to the target peer, the
+        payload uses the correct ``from_nick!PUBLIC!orderbook`` format.
         """
-        # We need a "from" nick for the pubmsg format.  The directory server
-        # uses a pseudo-nick for this probe -- the maker will see it as an
-        # orderbook request from the directory.  We re-use the PUBMSG type
-        # with a unicast target instead of PUBLIC.
-        #
-        # Wire format: {"type":687,"line":"DN_NICK!MAKER_NICK!orderbook"}
-        # But we don't know the DN nick here.  Instead, send a PUBMSG
-        # addressed to the specific maker via their connection.
+        from jmcore.protocol import COMMAND_PREFIX
+
+        # Build a properly formatted PUBMSG:
+        # from_nick!PUBLIC!orderbook
+        # The reference client splits on COMMAND_PREFIX ("!") and checks
+        # to_nick == "PUBLIC" to route to on_pubmsg.
+        payload = f"{self.server_nick}{COMMAND_PREFIX}PUBLIC{COMMAND_PREFIX}orderbook"
         probe_envelope = MessageEnvelope(
             message_type=MessageType.PUBMSG,
-            payload=f"!{nick}!orderbook",
+            payload=payload,
         )
         try:
             await self.send_callback(peer_key, probe_envelope.to_bytes())

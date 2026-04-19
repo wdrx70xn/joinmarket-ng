@@ -210,11 +210,17 @@ class TestHeartbeatSweep:
     async def test_non_ping_maker_receives_orderbook_probe(
         self,
         registry: PeerRegistry,
-        manager: HeartbeatManager,
         send_cb: AsyncMock,
         config: HeartbeatConfig,
     ) -> None:
-        """Non-ping makers get a unicast !orderbook probe."""
+        """Non-ping makers get a unicast !orderbook probe with proper PUBLIC format."""
+        manager = HeartbeatManager(
+            peer_registry=registry,
+            send_callback=send_cb,
+            evict_callback=AsyncMock(),
+            config=config,
+            server_nick="J5DNtestdir",
+        )
         idle_time = datetime.now(UTC) - timedelta(seconds=config.idle_threshold_sec + 10)
         # No "ping" feature, but is a maker (has onion address)
         peer = _make_peer("legacy_maker")
@@ -229,7 +235,57 @@ class TestHeartbeatSweep:
 
         envelope = json.loads(sent_data.decode("utf-8"))
         assert envelope["type"] == MessageType.PUBMSG.value
-        assert "orderbook" in envelope["line"]
+        # Must be proper format: from_nick!PUBLIC!orderbook
+        payload = envelope["line"]
+        assert "orderbook" in payload
+        assert "!PUBLIC!" in payload
+        assert payload.startswith("J5DNtestdir!")
+
+    @pytest.mark.anyio
+    async def test_orderbook_probe_format_compatible_with_reference(
+        self,
+        registry: PeerRegistry,
+        send_cb: AsyncMock,
+        config: HeartbeatConfig,
+    ) -> None:
+        """Orderbook probe must be parseable as on_pubmsg by reference clients.
+
+        The reference implementation splits on '!' (COMMAND_PREFIX) and checks
+        that to_nick == "PUBLIC" to route through on_pubmsg.  A malformed probe
+        that sets to_nick to the maker's nick would be routed through on_privmsg
+        instead, causing "Sig not properly appended to privmsg" errors.
+        """
+        manager = HeartbeatManager(
+            peer_registry=registry,
+            send_callback=send_cb,
+            evict_callback=AsyncMock(),
+            config=config,
+            server_nick="J5DNnode",
+        )
+        idle_time = datetime.now(UTC) - timedelta(seconds=config.idle_threshold_sec + 10)
+        peer = _make_peer("legacy_maker2", onion="e" * 56 + ".onion")
+        _register_and_handshake(registry, peer, last_seen=idle_time)
+
+        await manager._sweep()
+
+        import json
+
+        sent_data = send_cb.call_args_list[0][0][1]
+        envelope = json.loads(sent_data.decode("utf-8"))
+        payload = envelope["line"]
+
+        # Simulate reference client parsing: split on "!" (COMMAND_PREFIX)
+        parts = payload.split("!")
+        assert len(parts) >= 3, f"Expected at least 3 parts, got {parts}"
+        from_nick = parts[0]
+        to_nick = parts[1]
+        rest = "!".join(parts[2:])
+
+        assert from_nick == "J5DNnode"
+        assert to_nick == "PUBLIC", (
+            f"to_nick must be 'PUBLIC' for on_pubmsg routing, got '{to_nick}'"
+        )
+        assert rest == "orderbook"
 
     @pytest.mark.anyio
     async def test_non_ping_taker_gets_no_probe(

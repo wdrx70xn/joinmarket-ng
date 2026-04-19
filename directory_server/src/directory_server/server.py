@@ -64,6 +64,7 @@ class DirectoryServer:
             send_callback=self._send_to_peer,
             evict_callback=self._evict_peer,
             config=heartbeat_config,
+            server_nick=server_nick,
         )
 
         self.message_router = MessageRouter(
