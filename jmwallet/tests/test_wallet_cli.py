@@ -1485,3 +1485,41 @@ def test_verify_password_no_password_no_prompt_errors() -> None:
         )
         assert result.exit_code == 1
         assert "no password" in result.stdout.lower()
+
+
+# ============================================================================
+# _prompt_for_password shows wallet name (issue #454)
+# ============================================================================
+
+
+def test_prompt_for_password_includes_wallet_name() -> None:
+    """_prompt_for_password must mention the wallet name when a path is given
+    so the user knows which wallet they are unlocking."""
+    from jmcore.cli_common import _prompt_for_password
+
+    captured: dict[str, str] = {}
+
+    def fake_prompt(text: str, hide_input: bool = False) -> str:  # noqa: ARG001
+        captured["text"] = text
+        return "unused"
+
+    with patch.object(typer, "prompt", side_effect=fake_prompt):
+        _prompt_for_password(Path("/tmp/wallets/my-wallet.mnemonic"))
+
+    assert "my-wallet.mnemonic" in captured["text"]
+
+
+def test_prompt_for_password_without_path_generic() -> None:
+    """Backward-compatible generic prompt when no path is supplied."""
+    from jmcore.cli_common import _prompt_for_password
+
+    captured: dict[str, str] = {}
+
+    def fake_prompt(text: str, hide_input: bool = False) -> str:  # noqa: ARG001
+        captured["text"] = text
+        return "unused"
+
+    with patch.object(typer, "prompt", side_effect=fake_prompt):
+        _prompt_for_password()
+
+    assert "mnemonic file password" in captured["text"].lower()

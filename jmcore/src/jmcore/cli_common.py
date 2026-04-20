@@ -338,16 +338,25 @@ def resolve_directory_servers(
 # =============================================================================
 
 
-def _prompt_for_password() -> str:
-    """Prompt for mnemonic file password interactively."""
+def _prompt_for_password(path: Path | None = None) -> str:
+    """Prompt for mnemonic file password interactively.
+
+    When ``path`` is provided, the wallet file name is shown in the prompt so
+    the user knows which wallet they are unlocking. This avoids confusing
+    "Decryption failed" errors when multiple wallets exist (see issue #454).
+    """
+    if path is not None:
+        prompt_text = f"Enter password for wallet '{path.name}'"
+    else:
+        prompt_text = "Enter mnemonic file password"
     try:
         import typer
 
-        return typer.prompt("Enter mnemonic file password", hide_input=True)
+        return typer.prompt(prompt_text, hide_input=True)
     except ImportError:
         import getpass
 
-        return getpass.getpass("Enter mnemonic file password: ")
+        return getpass.getpass(f"{prompt_text}: ")
 
 
 def load_mnemonic_from_file(
@@ -390,7 +399,7 @@ def load_mnemonic_from_file(
         password = os.environ.get("MNEMONIC_PASSWORD")
     if not password:
         if auto_prompt:
-            password = _prompt_for_password()
+            password = _prompt_for_password(path)
         else:
             raise ValueError(
                 f"Mnemonic file appears to be encrypted. "
