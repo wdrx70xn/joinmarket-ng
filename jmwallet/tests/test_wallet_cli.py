@@ -1392,3 +1392,96 @@ def test_generate_mnemonic_password_retry():
         assert result.exit_code == 0, f"generate failed: {result.stdout}"
         assert output_file.exists()
         assert "Passwords do not match" in result.stdout
+
+
+# ============================================================================
+# verify-password subcommand (issue #452 support)
+# ============================================================================
+
+
+def _make_encrypted_wallet(tmpdir: str, password: str) -> Path:
+    """Create an encrypted mnemonic file on disk, return its path."""
+    from jmwallet.cli.mnemonic import encrypt_mnemonic
+
+    mnemonic = (
+        "abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon abandon abandon about"
+    )
+    out = Path(tmpdir) / "wallet.mnemonic"
+    out.write_bytes(encrypt_mnemonic(mnemonic, password))
+    return out
+
+
+def test_verify_password_correct_password_exits_zero() -> None:
+    password = "correct_horse_battery_staple"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wallet = _make_encrypted_wallet(tmpdir, password)
+        result = runner.invoke(
+            app,
+            ["verify-password", "-f", str(wallet), "-p", password, "--no-prompt"],
+        )
+        assert result.exit_code == 0, result.stdout
+        assert "CORRECT" in result.stdout
+
+
+def test_verify_password_wrong_password_exits_nonzero() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wallet = _make_encrypted_wallet(tmpdir, "right_password")
+        result = runner.invoke(
+            app,
+            ["verify-password", "-f", str(wallet), "-p", "wrong_password", "--no-prompt"],
+        )
+        assert result.exit_code == 1
+        assert "INCORRECT" in result.stdout
+
+
+def test_verify_password_missing_file_exits_nonzero() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        missing = Path(tmpdir) / "does-not-exist.mnemonic"
+        result = runner.invoke(
+            app,
+            ["verify-password", "-f", str(missing), "-p", "x", "--no-prompt"],
+        )
+        assert result.exit_code == 1
+        assert "not found" in result.stdout.lower()
+
+
+def test_verify_password_plaintext_file_exits_code_two() -> None:
+    """Plaintext wallets are not encrypted -- nothing to verify."""
+    mnemonic = (
+        "abandon abandon abandon abandon abandon abandon "
+        "abandon abandon abandon abandon abandon about"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir) / "plain.mnemonic"
+        out.write_text(mnemonic)
+        result = runner.invoke(
+            app,
+            ["verify-password", "-f", str(out), "-p", "any", "--no-prompt"],
+        )
+        assert result.exit_code == 2
+        assert "not encrypted" in result.stdout.lower()
+
+
+def test_verify_password_reads_env_var() -> None:
+    password = "env_password_42"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wallet = _make_encrypted_wallet(tmpdir, password)
+        result = runner.invoke(
+            app,
+            ["verify-password", "-f", str(wallet), "--no-prompt"],
+            env={"MNEMONIC_PASSWORD": password},
+        )
+        assert result.exit_code == 0, result.stdout
+        assert "CORRECT" in result.stdout
+
+
+def test_verify_password_no_password_no_prompt_errors() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wallet = _make_encrypted_wallet(tmpdir, "pw")
+        result = runner.invoke(
+            app,
+            ["verify-password", "-f", str(wallet), "--no-prompt"],
+        )
+        assert result.exit_code == 1
+        assert "no password" in result.stdout.lower()

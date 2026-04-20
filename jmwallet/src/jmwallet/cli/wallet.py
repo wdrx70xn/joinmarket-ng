@@ -685,6 +685,79 @@ def _show_extended_wallet_info(
             print(f"Balance for mixdepth {md}:\t{sats_to_btc(total_md_balance):.8f}")
 
 
+@app.command("verify-password")
+def verify_password(
+    mnemonic_file: Annotated[
+        Path,
+        typer.Option(
+            "--mnemonic-file",
+            "-f",
+            help="Path to encrypted mnemonic file",
+            envvar="MNEMONIC_FILE",
+        ),
+    ],
+    password: Annotated[
+        str | None,
+        typer.Option(
+            "--password",
+            "-p",
+            help="Password to verify. If not provided, read from MNEMONIC_PASSWORD env or prompt.",
+            envvar="MNEMONIC_PASSWORD",
+        ),
+    ] = None,
+    prompt: Annotated[
+        bool,
+        typer.Option(
+            "--prompt/--no-prompt",
+            help="Prompt for password if not provided via flag/env.",
+        ),
+    ] = True,
+) -> None:
+    """Verify that a password can decrypt an encrypted mnemonic file.
+
+    Exits with status 0 if the password is correct, 1 otherwise.
+    Intended for scripting (e.g. the TUI) to validate a password before
+    storing it in config.toml. No mnemonic content is printed.
+    """
+    if not mnemonic_file.exists():
+        print(f"Error: Mnemonic file not found: {mnemonic_file}")
+        raise typer.Exit(1)
+
+    # Detect plaintext wallets up front: there is nothing to verify.
+    try:
+        data = mnemonic_file.read_bytes()
+        text = data.decode("utf-8")
+        words = text.strip().split()
+        if len(words) in (12, 15, 18, 21, 24) and all(w.isalpha() for w in words):
+            print("Mnemonic file is not encrypted; no password to verify.")
+            raise typer.Exit(2)
+    except UnicodeDecodeError:
+        pass
+
+    if not password and prompt:
+        password = typer.prompt("Enter password to verify", hide_input=True)
+
+    if not password:
+        print("Error: No password provided.")
+        raise typer.Exit(1)
+
+    try:
+        load_mnemonic_file(mnemonic_file, password)
+    except ValueError as e:
+        # Wrong password or corrupt file -- do not leak details.
+        msg = str(e).lower()
+        if "decryption failed" in msg or "wrong password" in msg:
+            print("Password is INCORRECT")
+        else:
+            print(f"Error: {e}")
+        raise typer.Exit(1)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        raise typer.Exit(1)
+
+    print("Password is CORRECT")
+
+
 @app.command()
 def validate(
     mnemonic_file: Annotated[
