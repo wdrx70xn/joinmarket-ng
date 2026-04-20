@@ -363,6 +363,7 @@ def load_mnemonic_from_file(
     path: Path,
     password: str | None = None,
     auto_prompt: bool = True,
+    max_prompt_attempts: int = 3,
 ) -> str:
     """
     Load mnemonic from a file (plain text or Fernet encrypted).
@@ -371,6 +372,11 @@ def load_mnemonic_from_file(
         path: Path to mnemonic file
         password: Password for decrypting the file (NOT BIP39 passphrase)
         auto_prompt: If True, prompt for password when encrypted file is detected
+        max_prompt_attempts: When interactively prompting for a password, how
+            many times to retry on wrong-password errors before giving up.
+            A value of 1 disables retry. Only applies to the interactive
+            prompt path: explicit ``password`` arguments and passwords coming
+            from the MNEMONIC_PASSWORD env var still fail fast on mismatch.
 
     Returns:
         The mnemonic phrase
@@ -395,11 +401,13 @@ def load_mnemonic_from_file(
         pass
 
     # If not plain text, assume it's Fernet encrypted
+    prompt_used = False
     if not password:
         password = os.environ.get("MNEMONIC_PASSWORD")
     if not password:
         if auto_prompt:
             password = _prompt_for_password(path)
+            prompt_used = True
         else:
             raise ValueError(
                 f"Mnemonic file appears to be encrypted. "
@@ -407,46 +415,39 @@ def load_mnemonic_from_file(
                 f"or use interactive prompt: {path}"
             )
 
-    # Try Fernet decryption
-    try:
-        import base64
+    # Retry budget: only honoured for passwords the user is typing interactively
+    # so that scripted callers with an explicit password/env var still fail
+    # fast (issue #456 applies to the TUI's manual prompt path).
+    attempts_remaining = max_prompt_attempts if prompt_used else 1
+    mnemonic: str | None = None
+    last_error: ValueError | None = None
 
-        from cryptography.fernet import Fernet, InvalidToken
-        from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-        if len(content) < 16:
-            raise ValueError("Invalid encrypted data")
-
-        # Extract salt and encrypted token
-        salt = content[:16]
-        encrypted_token = content[16:]
-
-        # Derive key from password
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=600_000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
-
-        # Decrypt
-        fernet = Fernet(key)
+    while attempts_remaining > 0:
         try:
-            decrypted = fernet.decrypt(encrypted_token)
-            mnemonic = decrypted.decode("utf-8")
-        except InvalidToken as e:
-            raise ValueError("Decryption failed - wrong password or corrupted file") from e
-        except UnicodeDecodeError as e:
-            raise ValueError(
-                f"Decrypted content is not valid UTF-8. File may be corrupted or "
-                f"encrypted with a different tool: {path}"
-            ) from e
-    except ImportError as e:
-        raise ValueError(
-            "Fernet encryption requires cryptography library. Install with: pip install cryptography"
-        ) from e
+            mnemonic = _decrypt_fernet_mnemonic(content, password, path)
+            break
+        except ValueError as e:
+            last_error = e
+            attempts_remaining -= 1
+            # Only retry wrong-password errors from the interactive prompt.
+            if not prompt_used or attempts_remaining <= 0:
+                raise
+            if "decryption failed" not in str(e).lower():
+                # Corruption or encoding error -- pointless to retry.
+                raise
+            try:
+                import typer
+
+                typer.echo(f"Decryption failed. {attempts_remaining} attempt(s) remaining.")
+            except ImportError:
+                print(f"Decryption failed. {attempts_remaining} attempt(s) remaining.")
+            password = _prompt_for_password(path)
+
+    if mnemonic is None:
+        # Should not happen because the loop either breaks or raises, but keep
+        # type checkers happy and surface the last error.
+        assert last_error is not None
+        raise last_error
 
     # Basic validation
     words = mnemonic.split()
@@ -457,6 +458,55 @@ def load_mnemonic_from_file(
         )
 
     return mnemonic
+
+
+def _decrypt_fernet_mnemonic(content: bytes, password: str, path: Path) -> str:
+    """Decrypt a Fernet-encrypted mnemonic blob.
+
+    Raised ValueError differentiates three classes of failure:
+    - "Decryption failed - wrong password or corrupted file" (InvalidToken)
+    - "Decrypted content is not valid UTF-8..." (corrupt plaintext)
+    - "Invalid encrypted data" (too short)
+    """
+    try:
+        import base64
+
+        from cryptography.fernet import Fernet, InvalidToken
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    except ImportError as e:
+        raise ValueError(
+            "Fernet encryption requires cryptography library. Install with: pip install cryptography"
+        ) from e
+
+    if len(content) < 16:
+        raise ValueError("Invalid encrypted data")
+
+    # Extract salt and encrypted token
+    salt = content[:16]
+    encrypted_token = content[16:]
+
+    # Derive key from password
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=600_000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+
+    # Decrypt
+    fernet = Fernet(key)
+    try:
+        decrypted = fernet.decrypt(encrypted_token)
+        return decrypted.decode("utf-8")
+    except InvalidToken as e:
+        raise ValueError("Decryption failed - wrong password or corrupted file") from e
+    except UnicodeDecodeError as e:
+        raise ValueError(
+            f"Decrypted content is not valid UTF-8. File may be corrupted or "
+            f"encrypted with a different tool: {path}"
+        ) from e
 
 
 def resolve_mnemonic(

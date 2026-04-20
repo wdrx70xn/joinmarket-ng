@@ -215,6 +215,152 @@ class TestLoadMnemonicFromFile:
         finally:
             os.unlink(temp_path)
 
+    @staticmethod
+    def _write_encrypted(mnemonic: str, password: str) -> Path:
+        salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=600_000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+        fernet = Fernet(key)
+        token = fernet.encrypt(mnemonic.encode("utf-8"))
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mnemonic") as f:
+            f.write(salt + token)
+            return Path(f.name)
+
+    def test_interactive_prompt_retries_on_wrong_password(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Wrong password at the interactive prompt retries up to max_prompt_attempts (#456)."""
+        mnemonic = (
+            "abandon abandon abandon abandon abandon abandon "
+            "abandon abandon abandon abandon abandon about"
+        )
+        password = "correct_password"
+        temp_path = self._write_encrypted(mnemonic, password)
+
+        attempts = {"n": 0}
+
+        def fake_prompt(path: Path | None = None) -> str:
+            attempts["n"] += 1
+            # First two prompts return wrong passwords; third returns correct.
+            if attempts["n"] < 3:
+                return f"wrong{attempts['n']}"
+            return password
+
+        monkeypatch.setattr("jmcore.cli_common._prompt_for_password", fake_prompt)
+
+        try:
+            result = load_mnemonic_from_file(temp_path, password=None, auto_prompt=True)
+            assert result == mnemonic
+            assert attempts["n"] == 3
+        finally:
+            os.unlink(temp_path)
+
+    def test_interactive_prompt_gives_up_after_max_attempts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """After max_prompt_attempts wrong passwords, the last error is raised."""
+        mnemonic = (
+            "abandon abandon abandon abandon abandon abandon "
+            "abandon abandon abandon abandon abandon about"
+        )
+        temp_path = self._write_encrypted(mnemonic, "correct_password")
+
+        calls = {"n": 0}
+
+        def fake_prompt(path: Path | None = None) -> str:
+            calls["n"] += 1
+            return "still_wrong"
+
+        monkeypatch.setattr("jmcore.cli_common._prompt_for_password", fake_prompt)
+
+        try:
+            with pytest.raises(ValueError, match="Decryption failed"):
+                load_mnemonic_from_file(
+                    temp_path, password=None, auto_prompt=True, max_prompt_attempts=3
+                )
+            assert calls["n"] == 3
+        finally:
+            os.unlink(temp_path)
+
+    def test_explicit_wrong_password_does_not_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An explicit password argument must fail fast without prompting (#456)."""
+        mnemonic = (
+            "abandon abandon abandon abandon abandon abandon "
+            "abandon abandon abandon abandon abandon about"
+        )
+        temp_path = self._write_encrypted(mnemonic, "correct_password")
+
+        def fake_prompt(path: Path | None = None) -> str:
+            raise AssertionError("interactive prompt must not run for explicit password")
+
+        monkeypatch.setattr("jmcore.cli_common._prompt_for_password", fake_prompt)
+
+        try:
+            with pytest.raises(ValueError, match="Decryption failed"):
+                load_mnemonic_from_file(
+                    temp_path, password="wrong", auto_prompt=True, max_prompt_attempts=5
+                )
+        finally:
+            os.unlink(temp_path)
+
+    def test_env_var_wrong_password_does_not_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MNEMONIC_PASSWORD env var must fail fast without prompting (#456)."""
+        mnemonic = (
+            "abandon abandon abandon abandon abandon abandon "
+            "abandon abandon abandon abandon abandon about"
+        )
+        temp_path = self._write_encrypted(mnemonic, "correct_password")
+
+        def fake_prompt(path: Path | None = None) -> str:
+            raise AssertionError("interactive prompt must not run when env var is set")
+
+        monkeypatch.setattr("jmcore.cli_common._prompt_for_password", fake_prompt)
+        monkeypatch.setenv("MNEMONIC_PASSWORD", "wrong_env_password")
+
+        try:
+            with pytest.raises(ValueError, match="Decryption failed"):
+                load_mnemonic_from_file(temp_path, password=None, auto_prompt=True)
+        finally:
+            os.unlink(temp_path)
+
+    def test_corrupted_encrypted_file_does_not_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Decrypted-but-invalid-UTF-8 (corruption) must not trigger retry."""
+        password = "test_password"
+        salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=600_000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+        fernet = Fernet(key)
+        token = fernet.encrypt(b"\x80\x81\x82\x83")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mnemonic") as f:
+            f.write(salt + token)
+            temp_path = Path(f.name)
+
+        calls = {"n": 0}
+
+        def fake_prompt(path: Path | None = None) -> str:
+            calls["n"] += 1
+            return password
+
+        monkeypatch.setattr("jmcore.cli_common._prompt_for_password", fake_prompt)
+
+        try:
+            with pytest.raises(ValueError, match="not valid UTF-8"):
+                load_mnemonic_from_file(temp_path, password=None, auto_prompt=True)
+            # Prompt was called once; corruption did not trigger another attempt.
+            assert calls["n"] == 1
+        finally:
+            os.unlink(temp_path)
+
 
 class TestResolveBackendSettings:
     """Tests for resolve_backend_settings() populating neutrino_add_peers."""
