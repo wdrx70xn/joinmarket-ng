@@ -1230,7 +1230,7 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
 
         # Confirm dialog -- show both current and target (#451 point 4).
         if ! whiptail --title " Confirm Update " --yesno \
-            "Update JoinMarket-NG?\n\nCurrent:\t${CURRENT_LABEL}\nTarget:\t\t${TARGET_LABEL}\n\nThe TUI will close during the update.\nRestart it afterwards with: jm-ng" \
+            "Update JoinMarket-NG?\n\nCurrent:  ${CURRENT_LABEL}\nTarget:   ${TARGET_LABEL}\n\nThe TUI will close during the update.\nRestart it afterwards with: jm-ng" \
             14 64 3>&1 1>&2 2>&3; then
             # Cancel returns to the update menu (#451 point 6).
             continue
