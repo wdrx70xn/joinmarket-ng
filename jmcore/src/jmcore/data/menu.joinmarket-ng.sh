@@ -1132,16 +1132,32 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
           CURRENT_LABEL="v${CURRENT_VERSION}"
       fi
 
-      # Best-effort network lookups. Short timeouts so a flaky connection
-      # can't wedge the menu; fall back to "unknown" when anything fails.
-      LATEST_STABLE=$(curl -fsSL --max-time 5 \
-          "https://api.github.com/repos/joinmarket-ng/joinmarket-ng/releases/latest" 2>/dev/null | \
-          grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[^"]*"([^"]+)".*/\1/' || true)
+      # Best-effort network lookups, run in PARALLEL so a slow response on
+      # one endpoint doesn't stack on top of the other. Short timeouts
+      # keep the blackout between the main menu and the update menu to a
+      # minimum; any failure falls back to "unknown".
+      LATEST_STABLE_FILE=$(mktemp)
+      LATEST_MAIN_FILE=$(mktemp)
+      (
+          curl -fsSL --max-time 3 \
+              "https://api.github.com/repos/joinmarket-ng/joinmarket-ng/releases/latest" 2>/dev/null \
+              | grep -m1 '"tag_name"' \
+              | sed -E 's/.*"tag_name"[^"]*"([^"]+)".*/\1/' \
+              > "$LATEST_STABLE_FILE" 2>/dev/null || true
+      ) &
+      STABLE_PID=$!
+      (
+          git ls-remote --quiet \
+              "https://github.com/joinmarket-ng/joinmarket-ng.git" HEAD 2>/dev/null \
+              | cut -c1-7 \
+              > "$LATEST_MAIN_FILE" 2>/dev/null || true
+      ) &
+      MAIN_PID=$!
+      wait "$STABLE_PID" "$MAIN_PID" 2>/dev/null || true
+      LATEST_STABLE=$(tr -d '[:space:]' < "$LATEST_STABLE_FILE" 2>/dev/null || true)
+      LATEST_MAIN=$(tr -d '[:space:]' < "$LATEST_MAIN_FILE" 2>/dev/null || true)
+      rm -f "$LATEST_STABLE_FILE" "$LATEST_MAIN_FILE"
       [ -z "$LATEST_STABLE" ] && LATEST_STABLE="unknown"
-
-      LATEST_MAIN=$(git ls-remote --quiet \
-          "https://github.com/joinmarket-ng/joinmarket-ng.git" HEAD 2>/dev/null | \
-          cut -c1-7 || true)
       [ -z "$LATEST_MAIN" ] && LATEST_MAIN="unknown"
 
       # Outer loop so "Cancel" on the confirm dialog returns to this menu
