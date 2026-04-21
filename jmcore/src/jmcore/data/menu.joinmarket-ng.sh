@@ -92,6 +92,13 @@ get_mnemonic_file() {
     echo "$val"
 }
 
+# Helper: Get stored mnemonic_password from config.toml (empty if unset/commented).
+get_stored_mnemonic_password() {
+    local val
+    val=$(grep '^mnemonic_password[[:space:]]*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/^mnemonic_password[[:space:]]*=[[:space:]]*//' | tr -d '"')
+    echo "$val"
+}
+
 # Helper: Comment out (clear) a value in config.toml
 clear_config_value() {
     local key=$1
@@ -330,6 +337,95 @@ prompt_and_store_password() {
         fi
     done
     unset pwd_store
+    return 1
+}
+
+# Helper: Ensure MNEMONIC_PASSWORD is available for jm-wallet calls.
+#
+# Without this, jm-wallet commands that need the decrypted mnemonic fall
+# through to a raw terminal password prompt, breaking the whiptail-based
+# TUI flow (issue: "wallet info" drops to a CLI password prompt).
+#
+# Behaviour:
+#   - If the wallet file is plaintext (unencrypted), do nothing.
+#   - If MNEMONIC_PASSWORD is already exported in the environment, do nothing.
+#   - If config.toml has a non-empty mnemonic_password, export it.
+#   - Otherwise prompt the user via whiptail --passwordbox, verify the
+#     password against the wallet, and export MNEMONIC_PASSWORD on success.
+#
+# Returns 0 on success (password available or not needed), 1 if the user
+# cancelled or exhausted retry attempts.
+#
+# Typical usage -- run the jm-wallet call inside a subshell so the exported
+# password does not leak beyond the single invocation:
+#   (
+#       ensure_wallet_password "$CURRENT_WALLET" || exit 1
+#       jm-wallet info
+#   )
+ensure_wallet_password() {
+    local wallet_path="$1"
+    local attempts=0
+    local max_attempts=3
+    local pwd_entry
+
+    if [ -z "$wallet_path" ] || [ ! -f "$wallet_path" ]; then
+        return 0
+    fi
+
+    # Plaintext wallets have nothing to unlock.
+    # verify-password exits 2 when the file is not encrypted.
+    jm-wallet verify-password -f "$wallet_path" --no-prompt --password "" \
+        >/dev/null 2>&1
+    if [ $? -eq 2 ]; then
+        return 0
+    fi
+
+    # Already set in env (e.g. by a previous call in the same subshell).
+    if [ -n "${MNEMONIC_PASSWORD:-}" ]; then
+        return 0
+    fi
+
+    # Stored in config.toml -- jmcore picks it up automatically, but also
+    # export it here so verify loops in the same shell short-circuit.
+    local stored
+    stored=$(get_stored_mnemonic_password)
+    if [ -n "$stored" ]; then
+        export MNEMONIC_PASSWORD="$stored"
+        return 0
+    fi
+
+    while [ $attempts -lt $max_attempts ]; do
+        pwd_entry=$(whiptail --title " Wallet Password " \
+            --passwordbox "Enter the wallet encryption password for:\n$(basename "$wallet_path")" \
+            10 60 3>&1 1>&2 2>&3)
+        local rc=$?
+        if [ $rc -ne 0 ]; then
+            unset pwd_entry
+            return 1
+        fi
+        if [ -z "$pwd_entry" ]; then
+            whiptail --title " Error " --msgbox "Password cannot be empty." 8 40
+            attempts=$((attempts + 1))
+            continue
+        fi
+        if verify_wallet_password "$wallet_path" "$pwd_entry"; then
+            export MNEMONIC_PASSWORD="$pwd_entry"
+            unset pwd_entry
+            return 0
+        fi
+        attempts=$((attempts + 1))
+        local remaining=$((max_attempts - attempts))
+        if [ $remaining -gt 0 ]; then
+            whiptail --title " Password Mismatch " \
+                --msgbox "Wrong password.\n\n${remaining} attempt(s) remaining." \
+                9 50
+        else
+            whiptail --title " Password Mismatch " \
+                --msgbox "Too many attempts. Returning to menu." \
+                9 50
+        fi
+    done
+    unset pwd_entry
     return 1
 }
 
@@ -817,7 +913,10 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                           echo ""
                           echo "Active wallet: $(basename "$CURRENT_WALLET")"
                           echo ""
-                          jm-wallet info
+                          (
+                              ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                              jm-wallet info
+                          )
                           pause
                           ;;
                       EXT)
@@ -826,7 +925,10 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                           echo ""
                           echo "Active wallet: $(basename "$CURRENT_WALLET")"
                           echo ""
-                          jm-wallet info --extended
+                          (
+                              ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                              jm-wallet info --extended
+                          )
                           pause
                           ;;
                       BACK|"")
@@ -895,7 +997,10 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                   [ -n "$HIST_ROLE" ]  && HIST_ARGS+=(-r "$HIST_ROLE")
                   [ -n "$HIST_LIMIT" ] && HIST_ARGS+=(-n "$HIST_LIMIT")
                   [ $HIST_SHOW_STATS -eq 0 ] && HIST_ARGS+=(-s)
-                  jm-wallet history "${HIST_ARGS[@]}"
+                  (
+                      ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                      jm-wallet history "${HIST_ARGS[@]}"
+                  )
                   pause
               fi
               ;;
@@ -914,7 +1019,10 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                   echo "Opening interactive UTXO selector. Use arrow keys to navigate,"
                   echo "Space to toggle freeze state, Enter to confirm, q to quit."
                   echo ""
-                  jm-wallet freeze
+                  (
+                      ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                      jm-wallet freeze
+                  )
               fi
               pause
               ;;
@@ -1064,7 +1172,10 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                         else
                             echo "Scanning for fidelity bonds (this may take a moment)..."
                             echo ""
-                            jm-wallet list-bonds
+                            (
+                                ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                                jm-wallet list-bonds
+                            )
                         fi
                         pause
                         ;;
@@ -1097,9 +1208,12 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                         clear
                         echo "=== Generating Bond Address ==="
                         echo ""
-                        jm-wallet generate-bond-address \
-                          --locktime-date "${LOCKDATE}" \
-                          --index "${BOND_INDEX}"
+                        (
+                            ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                            jm-wallet generate-bond-address \
+                              --locktime-date "${LOCKDATE}" \
+                              --index "${BOND_INDEX}"
+                        )
                         echo ""
                         echo "Send coins to the address above to create the fidelity bond."
                         echo "Funds will be locked until the locktime expires."

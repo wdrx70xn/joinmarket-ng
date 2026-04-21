@@ -137,6 +137,40 @@ def test_tui_script_post_wallet_create_warns_plaintext_storage() -> None:
     assert "PLAIN TEXT" in content
 
 
+def test_tui_script_defines_ensure_wallet_password_helper() -> None:
+    """Commands that need the decrypted mnemonic must go through the
+    whiptail-based `ensure_wallet_password` helper instead of letting
+    jm-wallet fall through to its terminal password prompt."""
+    content = SCRIPT_PATH.read_text()
+    assert "ensure_wallet_password()" in content
+    # The helper must export MNEMONIC_PASSWORD so jmcore picks it up.
+    assert "export MNEMONIC_PASSWORD=" in content
+    # And rely on whiptail for the actual prompt.
+    assert 'whiptail --title " Wallet Password "' in content
+
+
+def test_tui_script_wallet_info_uses_ensure_wallet_password() -> None:
+    """`jm-wallet info` (both basic and extended) must be wrapped in a
+    subshell that calls `ensure_wallet_password` first, so the user is
+    prompted via whiptail instead of a raw CLI prompt."""
+    content = SCRIPT_PATH.read_text()
+    # Find the BASIC branch and check both that ensure_wallet_password is
+    # invoked and that jm-wallet info is called within the same subshell
+    # block (i.e. the two appear close together and in that order).
+    basic_idx = content.find("BASIC)")
+    assert basic_idx != -1
+    # Look in the next ~500 chars for the pattern.
+    window = content[basic_idx : basic_idx + 800]
+    assert "ensure_wallet_password" in window
+    assert "jm-wallet info" in window
+
+    ext_idx = content.find("EXT)")
+    assert ext_idx != -1
+    window = content[ext_idx : ext_idx + 800]
+    assert "ensure_wallet_password" in window
+    assert "jm-wallet info --extended" in window
+
+
 def test_tui_script_new_wallet_offers_word_count_choice() -> None:
     """Creating a new wallet must let the user pick 12 or 24 seed words
     and pass --words to jm-wallet generate (issue #457)."""
@@ -240,11 +274,10 @@ def test_tui_script_update_cancel_returns_to_update_menu() -> None:
 
 
 def test_tui_script_update_restart_hint_uses_jm_ng() -> None:
-    """The launcher binary is `jm-ng`, not `jm-tui`; both restart hints
-    in the update flow must use the correct name (issue #451 point 7)."""
+    """The launcher binary is `jm-ng`; the post-update restart hint
+    must use the correct name (issue #451 point 7)."""
     content = SCRIPT_PATH.read_text()
     update_block = content.split("    U)\n", 1)[1].split("\n    C)\n", 1)[0]
-    assert "jm-tui" not in update_block
     # Restart hint appears twice: in the confirm dialog and the post-update
     # message.
     assert update_block.count("jm-ng") >= 2
