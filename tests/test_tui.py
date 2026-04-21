@@ -148,6 +148,19 @@ def test_tui_script_new_wallet_offers_word_count_choice() -> None:
     assert 'jm-wallet generate --words "$WORDS"' in content
 
 
+def test_tui_script_select_wallet_offers_password_storage() -> None:
+    """Selecting an active wallet must offer to store the new wallet's
+    password, otherwise the config ends up with a cleared password that
+    can never be re-populated through the TUI (issue #455 Case 3)."""
+    content = SCRIPT_PATH.read_text()
+    # The SEL branch must invoke prompt_and_store_password to capture
+    # the newly-selected wallet's password.
+    assert 'prompt_and_store_password "$DATA_DIR/wallets/$WNAME"' in content
+    # And still clear any pre-existing password first so a declined
+    # prompt leaves the config in a clean state (no mismatch).
+    assert 'clear_config_value "mnemonic_password"' in content
+
+
 def test_tui_script_has_update_menu() -> None:
     """Main menu must offer an Update option."""
     content = SCRIPT_PATH.read_text()

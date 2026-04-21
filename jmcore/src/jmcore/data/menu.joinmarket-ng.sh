@@ -944,7 +944,22 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                   set_config_value "mnemonic_file" "$DATA_DIR/wallets/$WNAME" "true"
                   # Clear stored password to prevent mismatch with the new wallet
                   clear_config_value "mnemonic_password"
-                  whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nStored password has been cleared.\nYou will be prompted for the password on next use.\n\nRestart the maker service for changes to take effect." 12 60
+
+                  # Offer to store the matching password for the freshly
+                  # selected wallet so the maker can restart unattended
+                  # (issue #455 Case 3: previously the old password was
+                  # cleared with no way to record the new one, leaving a
+                  # wallet_file/password mismatch until the user edited
+                  # config.toml by hand).
+                  if whiptail --title " Store Password " \
+                      --yesno "Active wallet set to: $WNAME\n\nStore this wallet's password in config.toml?\nThis lets the maker start without prompting.\nChoose No to be asked for the password on each use." \
+                      12 64 --defaultno 3>&1 1>&2 2>&3; then
+                      prompt_and_store_password "$DATA_DIR/wallets/$WNAME" || \
+                          echo "Password not stored."
+                      whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nRestart the maker service for changes to take effect." 10 60
+                  else
+                      whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nStored password cleared; you will be prompted\nfor the password on next use.\n\nRestart the maker service for changes to take effect." 12 60
+                  fi
               else
                   whiptail --title " Error " --msgbox "File not found: $DATA_DIR/wallets/$WNAME" 8 55
               fi
