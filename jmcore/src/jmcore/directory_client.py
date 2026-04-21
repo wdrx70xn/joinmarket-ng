@@ -251,6 +251,20 @@ class DirectoryClient:
         # (e.g., PEERLIST). These messages should be processed, not discarded.
         self._message_buffer: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
+        # In-flight GETPEERLIST sink. When non-None, the listen() receive loop
+        # redirects PEERLIST payloads into this queue instead of handling them
+        # itself. This prevents a race where _fetch_peerlist() and listen()
+        # both read from self.connection concurrently and the listener
+        # "steals" the response (see issue #259).
+        self._peerlist_inflight: asyncio.Queue[str] | None = None
+
+        # True only while listen_continuously()'s receive loop is actively
+        # reading from the connection. _fetch_peerlist() uses this to decide
+        # whether to route its response through _peerlist_inflight (sink mode)
+        # or read directly from the connection (standalone mode, e.g. during
+        # the initial startup fetch before the listen loop begins).
+        self._listen_loop_active: bool = False
+
     async def connect(self) -> None:
         """Connect to the directory server and perform handshake."""
         try:
@@ -454,6 +468,22 @@ class DirectoryClient:
 
         self._last_peerlist_request_time = current_time
 
+        # When listen() is running there is already a coroutine reading from
+        # self.connection. Reading concurrently would race: the listen loop
+        # could consume the PEERLIST response before we see it, causing a
+        # spurious timeout here (see issue #259). Use a sink queue so the
+        # listen loop can forward PEERLIST payloads to us instead.
+        use_inflight_sink = self._listen_loop_active
+        if use_inflight_sink:
+            if self._peerlist_inflight is not None:
+                # Concurrent _fetch_peerlist callers would corrupt each other's
+                # state (both routing into a single queue). This should never
+                # happen -- callers are serialised by the listen loop -- but
+                # surface the condition loudly if it ever does.
+                logger.warning("Another GETPEERLIST is already in flight; aborting duplicate fetch")
+                return None
+            self._peerlist_inflight = asyncio.Queue()
+
         getpeerlist_msg = {"type": MessageType.GETPEERLIST.value, "line": ""}
         logger.debug("Sending GETPEERLIST request")
         await self.connection.send(json.dumps(getpeerlist_msg).encode("utf-8"))
@@ -475,73 +505,97 @@ class DirectoryClient:
         chunks_received = 0
         got_first_response = False
 
-        while True:
-            elapsed = asyncio.get_event_loop().time() - start_time
-
-            # Determine timeout for this receive
-            if not got_first_response:
-                # Waiting for first PEERLIST - use full timeout
-                remaining = first_response_timeout - elapsed
-                if remaining <= 0:
-                    self._handle_peerlist_timeout()
-                    return []
-                receive_timeout = remaining
-            else:
-                # Already received at least one chunk - use shorter inter-chunk timeout
-                receive_timeout = inter_chunk_timeout
-
-            try:
-                response_data = await asyncio.wait_for(
-                    self.connection.receive(), timeout=receive_timeout
-                )
-                response = json.loads(response_data.decode("utf-8"))
-                msg_type = response.get("type")
-
-                if msg_type == MessageType.PEERLIST.value:
-                    got_first_response = True
-                    chunks_received += 1
-                    peerlist_str = response.get("line", "")
-                    chunk_peers = self._handle_peerlist_response(peerlist_str)
-                    all_peers.extend(chunk_peers)
-                    logger.debug(
-                        f"Received PEERLIST chunk {chunks_received} with "
-                        f"{len(chunk_peers)} peers (total: {len(all_peers)})"
-                    )
-                    # Continue to check for more chunks
-                    continue
-
-                # Buffer unexpected messages (like PUBMSG offers) for later processing
-                # Handle PING immediately instead of buffering
-                if msg_type == MessageType.PING.value:
-                    await self._send_pong()
-                    continue
-
-                logger.trace(
-                    f"Buffering unexpected message type {msg_type} while waiting for PEERLIST"
-                )
-                await self._message_buffer.put(response)
-
-            except TimeoutError:
-                if not got_first_response:
-                    # Never received any PEERLIST - this is a real timeout
-                    self._handle_peerlist_timeout()
-                    return []
-                # Received at least one chunk, inter-chunk timeout means we're done
-                logger.debug(
-                    f"Peerlist complete: received {len(all_peers)} peers "
-                    f"in {chunks_received} chunks"
-                )
-                break
-
-            except Exception as e:
-                logger.warning(f"Error receiving/parsing message while waiting for PEERLIST: {e}")
+        try:
+            while True:
                 elapsed = asyncio.get_event_loop().time() - start_time
-                if not got_first_response and elapsed > first_response_timeout:
-                    self._handle_peerlist_timeout()
-                    return []
-                # If we already have some data, return what we have
-                if got_first_response:
+
+                # Determine timeout for this receive
+                if not got_first_response:
+                    # Waiting for first PEERLIST - use full timeout
+                    remaining = first_response_timeout - elapsed
+                    if remaining <= 0:
+                        self._handle_peerlist_timeout()
+                        return []
+                    receive_timeout = remaining
+                else:
+                    # Already received at least one chunk - use shorter inter-chunk timeout
+                    receive_timeout = inter_chunk_timeout
+
+                try:
+                    if use_inflight_sink:
+                        assert self._peerlist_inflight is not None
+                        # The listen loop feeds PEERLIST payloads (the "line"
+                        # field) into this queue. Non-PEERLIST messages stay
+                        # in the listen loop and are handled there.
+                        peerlist_str = await asyncio.wait_for(
+                            self._peerlist_inflight.get(), timeout=receive_timeout
+                        )
+                        got_first_response = True
+                        chunks_received += 1
+                        chunk_peers = self._handle_peerlist_response(peerlist_str)
+                        all_peers.extend(chunk_peers)
+                        logger.debug(
+                            f"Received PEERLIST chunk {chunks_received} with "
+                            f"{len(chunk_peers)} peers (total: {len(all_peers)})"
+                        )
+                        continue
+
+                    response_data = await asyncio.wait_for(
+                        self.connection.receive(), timeout=receive_timeout
+                    )
+                    response = json.loads(response_data.decode("utf-8"))
+                    msg_type = response.get("type")
+
+                    if msg_type == MessageType.PEERLIST.value:
+                        got_first_response = True
+                        chunks_received += 1
+                        peerlist_str = response.get("line", "")
+                        chunk_peers = self._handle_peerlist_response(peerlist_str)
+                        all_peers.extend(chunk_peers)
+                        logger.debug(
+                            f"Received PEERLIST chunk {chunks_received} with "
+                            f"{len(chunk_peers)} peers (total: {len(all_peers)})"
+                        )
+                        # Continue to check for more chunks
+                        continue
+
+                    # Buffer unexpected messages (like PUBMSG offers) for later processing
+                    # Handle PING immediately instead of buffering
+                    if msg_type == MessageType.PING.value:
+                        await self._send_pong()
+                        continue
+
+                    logger.trace(
+                        f"Buffering unexpected message type {msg_type} while waiting for PEERLIST"
+                    )
+                    await self._message_buffer.put(response)
+
+                except TimeoutError:
+                    if not got_first_response:
+                        # Never received any PEERLIST - this is a real timeout
+                        self._handle_peerlist_timeout()
+                        return []
+                    # Received at least one chunk, inter-chunk timeout means we're done
+                    logger.debug(
+                        f"Peerlist complete: received {len(all_peers)} peers "
+                        f"in {chunks_received} chunks"
+                    )
                     break
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error receiving/parsing message while waiting for PEERLIST: {e}"
+                    )
+                    elapsed = asyncio.get_event_loop().time() - start_time
+                    if not got_first_response and elapsed > first_response_timeout:
+                        self._handle_peerlist_timeout()
+                        return []
+                    # If we already have some data, return what we have
+                    if got_first_response:
+                        break
+        finally:
+            if use_inflight_sink:
+                self._peerlist_inflight = None
 
         # Success - reset timeout counter and mark as supported
         self._peerlist_timeout_count = 0
@@ -1074,6 +1128,12 @@ class DirectoryClient:
         last_orderbook_request = time.time()
         orderbook_request_min_interval = 60.0  # Minimum 60 seconds between requests
 
+        # Mark the listen loop as active so that _fetch_peerlist() (called by
+        # periodic/on-demand peerlist refreshes) routes its response through
+        # the in-flight sink instead of racing with the receive loop below.
+        # Cleared in the finally at the end of this method.
+        self._listen_loop_active = True
+
         while self.running:
             try:
                 # First check if we have buffered messages from previous operations
@@ -1095,6 +1155,16 @@ class DirectoryClient:
 
                 # Handle PEERLIST responses (from periodic or automatic requests)
                 if msg_type == MessageType.PEERLIST.value:
+                    # If a _fetch_peerlist() call is in flight, forward the
+                    # payload to it instead of processing here. Otherwise
+                    # this message is an unsolicited update (e.g. a peer
+                    # disconnect broadcast) and we update state directly.
+                    if self._peerlist_inflight is not None:
+                        try:
+                            self._peerlist_inflight.put_nowait(line)
+                        except asyncio.QueueFull:
+                            logger.debug("PEERLIST sink queue full; dropping chunk")
+                        continue
                     try:
                         self._handle_peerlist_response(line)
                     except Exception as e:
@@ -1230,6 +1300,7 @@ class DirectoryClient:
                 break
 
         self.running = False
+        self._listen_loop_active = False
         logger.info(f"Stopped continuous listening on {self.host}:{self.port}")
 
     def _parse_offer_from_message(
