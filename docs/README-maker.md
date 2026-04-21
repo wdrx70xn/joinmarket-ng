@@ -16,6 +16,10 @@ See [Installation](install.md) for backend setup, Tor configuration, and manual 
 
 - Tor is required for production maker operation.
 - For Tor SOCKS/control defaults, see [Tor Notes](install.md#tor-notes).
+- **No minimum balance is required to run a maker.** The 100k sats
+  per mixdepth figure is a common orientation for new users, not a
+  protocol requirement; makers with smaller balances will simply match
+  fewer taker requests.
 
 ## Quick Start
 
