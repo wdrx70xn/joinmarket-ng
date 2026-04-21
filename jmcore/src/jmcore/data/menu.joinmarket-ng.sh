@@ -1360,17 +1360,27 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
             else
                 sudo "$BONUS_SCRIPT" update
             fi
+            UPDATE_RC=$?
         else
             # Standalone: download and run install.sh --update
             echo "Downloading latest installer..."
             INSTALL_SCRIPT=$(mktemp)
             curl -sSL "https://raw.githubusercontent.com/joinmarket-ng/joinmarket-ng/main/install.sh" -o "$INSTALL_SCRIPT"
             bash "$INSTALL_SCRIPT" --update $UPDATE_ARGS -y
+            UPDATE_RC=$?
             rm -f "$INSTALL_SCRIPT"
         fi
 
         echo ""
-        echo "Update complete. Please restart the TUI: jm-ng"
+        if [ "$UPDATE_RC" -eq 0 ]; then
+            echo "Update complete. Please restart the TUI: jm-ng"
+        else
+            echo "ERROR: Update failed (exit code ${UPDATE_RC})."
+            echo "Review the output above for details."
+            echo "The previous installation is unchanged."
+            pause
+            continue
+        fi
         exit 0
       done
       ;;

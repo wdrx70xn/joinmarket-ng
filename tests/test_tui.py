@@ -283,6 +283,21 @@ def test_tui_script_update_restart_hint_uses_jm_ng() -> None:
     assert update_block.count("jm-ng") >= 2
 
 
+def test_tui_script_update_fails_fast_on_nonzero_exit() -> None:
+    """The update flow must check the exit code of the installer/bonus
+    script and NOT print \"Update complete\" when it failed. Otherwise a
+    user whose update aborted (e.g. missing sudoers rule on raspiblitz)
+    is told success and walks away with a broken setup."""
+    content = SCRIPT_PATH.read_text()
+    update_block = content.split("    U)\n", 1)[1].split("\n    C)\n", 1)[0]
+    # Must capture the exit code from the update invocation.
+    assert "UPDATE_RC=" in update_block
+    # Must branch on success before printing the success message.
+    assert 'if [ "$UPDATE_RC" -eq 0 ]' in update_block
+    # Failure path must surface an error and NOT fall through to exit 0.
+    assert "ERROR: Update failed" in update_block
+
+
 # ---------------------------------------------------------------------------
 # Python entry point tests
 # ---------------------------------------------------------------------------
