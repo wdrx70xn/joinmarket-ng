@@ -12,6 +12,7 @@ from pydantic.dataclasses import dataclass
 AddressStatus = Literal[
     "deposit",  # External address with funds (received deposit)
     "cj-out",  # Internal address - CoinJoin output (from previous CJ)
+    "cj-change",  # Internal address - change output from a CoinJoin tx
     "non-cj-change",  # Internal address - regular change (not from CJ)
     "new",  # Unused address (no funds, never used)
     "reused",  # Address that was used and reused (privacy warning)

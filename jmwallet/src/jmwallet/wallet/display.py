@@ -164,7 +164,13 @@ class WalletDisplayMixin:
             if history_type == "cj_out":
                 return "cj-out"
             elif history_type == "change":
-                return "non-cj-change"
+                # Change output from a CoinJoin transaction we created.
+                # NOTE: unlike "cj-out" (an equal-amount output which can
+                # plausibly belong to any participant), "cj-change" is
+                # deanonymising — it ties this address back to our
+                # specific CoinJoin — so we label it distinctly from
+                # ordinary "non-cj-change" outputs.
+                return "cj-change"
             elif is_external:
                 return "deposit"
             else:

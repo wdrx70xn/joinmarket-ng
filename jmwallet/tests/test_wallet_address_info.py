@@ -78,6 +78,20 @@ class TestAddressStatusDetermination:
         )
         assert status == "non-cj-change"
 
+    def test_determine_status_cj_change(self, wallet):
+        """Change output that came from a CoinJoin transaction must be
+        labeled 'cj-change' (not 'non-cj-change'): it is deanonymising
+        and should be displayed distinctly so the user can avoid merging
+        it with other coins."""
+        status = wallet._determine_address_status(
+            address="bc1q_cj_change",
+            balance=50000,
+            is_external=False,
+            used_addresses={"bc1q_cj_change"},
+            history_addresses={"bc1q_cj_change": "change"},
+        )
+        assert status == "cj-change"
+
     def test_determine_status_new(self, wallet):
         """Test new status for unused address."""
         status = wallet._determine_address_status(

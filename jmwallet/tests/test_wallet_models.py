@@ -200,6 +200,7 @@ class TestAddressInfo:
         statuses = [
             "deposit",
             "cj-out",
+            "cj-change",
             "non-cj-change",
             "new",
             "reused",

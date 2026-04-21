@@ -596,7 +596,7 @@ def _show_extended_wallet_info(
     Mirrors the reference implementation's output format:
     - Shows zpub for each mixdepth (BIP84 native segwit format)
     - Lists external and internal addresses with derivation paths
-    - Shows address status (deposit, cj-out, non-cj-change, new, etc.)
+    - Shows address status (deposit, cj-out, cj-change, non-cj-change, new, etc.)
     - Shows balance per address and per branch
 
     When ``show_empty`` is False (the default), addresses with zero balance
@@ -622,6 +622,7 @@ def _show_extended_wallet_info(
     print("  new         - Unused, safe for receiving")
     print("  deposit     - External address with funds")
     print("  cj-out      - CoinJoin output (mixed funds)")
+    print("  cj-change   - Change output from a CoinJoin (deanonymising, keep separate)")
     print("  non-cj-change - Regular change (not from CoinJoin)")
     print("  used-empty  - Previously used, now empty (do not reuse)")
     print("  flagged     - Shared with peers but tx failed (do not reuse)")
