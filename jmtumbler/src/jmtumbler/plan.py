@@ -104,14 +104,18 @@ class MakerSessionPhase(_PhaseBase):
     """
     Run a maker bot as part of the tumble.
 
-    The session ends when either ``duration_seconds`` elapses or
-    ``target_cj_count`` CoinJoins have been served (whichever is reached first).
-    At least one of the two bounds must be set.
+    The session ends when any configured bound is reached: ``duration_seconds``
+    elapses, ``target_cj_count`` CoinJoins have been served, or no CoinJoin has
+    been served for ``idle_timeout_seconds`` (whichever comes first). At least
+    one of ``duration_seconds`` or ``target_cj_count`` must be set;
+    ``idle_timeout_seconds`` is an optional safety fallback so the phase does
+    not hang forever when the maker is never chosen as counterparty.
     """
 
     kind: Literal[PhaseKind.MAKER_SESSION] = PhaseKind.MAKER_SESSION
     duration_seconds: float | None = Field(default=None, gt=0.0)
     target_cj_count: int | None = Field(default=None, ge=1)
+    idle_timeout_seconds: float | None = Field(default=None, gt=0.0)
     cj_served: int = Field(default=0, ge=0, description="CoinJoins served so far.")
 
     @model_validator(mode="after")

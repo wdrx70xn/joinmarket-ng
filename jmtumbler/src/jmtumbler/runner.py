@@ -334,12 +334,28 @@ class TumbleRunner:
         start_task = asyncio.create_task(maker.start())
         try:
             deadline = _deadline(phase)
+            last_served = phase.cj_served
+            last_progress = _now()
             while True:
                 if maker_finished(maker, phase, start_task):
                     break
                 if self._stop_requested.is_set():
                     raise _StopRequestedError()
                 if deadline is not None and _now() >= deadline:
+                    break
+                if phase.cj_served != last_served:
+                    last_served = phase.cj_served
+                    last_progress = _now()
+                if (
+                    phase.idle_timeout_seconds is not None
+                    and (_now() - last_progress).total_seconds() >= phase.idle_timeout_seconds
+                ):
+                    logger.info(
+                        "maker phase %s: idle timeout (%.1fs) reached with %d cj served",
+                        phase.index,
+                        phase.idle_timeout_seconds,
+                        phase.cj_served,
+                    )
                     break
                 await self.ctx.sleep(1.0)
         finally:
