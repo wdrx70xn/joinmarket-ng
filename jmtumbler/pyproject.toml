@@ -38,7 +38,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=jm_tumbler --cov-report=html --cov-report=term --timeout=60"
+addopts = "-v --cov=jmtumbler --cov-report=html --cov-report=term --timeout=60"
 
 [tool.mypy]
 python_version = "3.11"

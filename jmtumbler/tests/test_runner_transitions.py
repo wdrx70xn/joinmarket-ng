@@ -1,5 +1,5 @@
 """
-Tests for :class:`jm_tumbler.runner.TumbleRunner`.
+Tests for :class:`jmtumbler.runner.TumbleRunner`.
 
 These tests fake out the taker and maker so we can drive the runner's state
 machine deterministically, focusing on:
@@ -16,9 +16,9 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from jm_tumbler.builder import PlanBuilder, TumbleParameters
-from jm_tumbler.persistence import load_plan, save_plan
-from jm_tumbler.plan import (
+from jmtumbler.builder import PlanBuilder, TumbleParameters
+from jmtumbler.persistence import load_plan, save_plan
+from jmtumbler.plan import (
     BondlessTakerBurstPhase,
     MakerSessionPhase,
     PhaseStatus,
@@ -26,7 +26,7 @@ from jm_tumbler.plan import (
     PlanStatus,
     TakerCoinjoinPhase,
 )
-from jm_tumbler.runner import RunnerContext, TumbleRunner
+from jmtumbler.runner import RunnerContext, TumbleRunner
 
 # --------------------------------------------------------------------------- fakes
 

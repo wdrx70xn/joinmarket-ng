@@ -69,7 +69,7 @@ Three problems follow the reference design into joinmarket-ng:
 
 ## Architecture
 
-New package `jm-tumbler` at `joinmarket-ng/jm_tumbler/` sits *above* both
+New package `jm-tumbler` at `joinmarket-ng/jmtumbler/` sits *above* both
 `taker` and `maker`:
 
 ```
@@ -395,7 +395,7 @@ endpoints directly and drop the 7-tuple schedule type.
 
 ### Testing
 
-- Unit (`jm_tumbler/tests/`): `test_plan_builder.py`,
+- Unit (`jmtumbler/tests/`): `test_plan_builder.py`,
   `test_plan_persistence.py`, `test_runner_transitions.py`. Uses fakes for
   `Taker` and `MakerBot`.
 - Router (`jmwalletd/tests/`): extend `test_coinjoin_router.py` and add
