@@ -327,6 +327,43 @@ class TestRunnerMakerPhase:
         assert result.status == PlanStatus.COMPLETED
         assert all(m.stopped for m in built)
 
+    async def test_maker_phase_exits_on_idle_timeout(self, tmp_path: Path) -> None:
+        """Maker phase should exit successfully when idle_timeout elapses with no CJ served."""
+        plan = _plan(tmp_path, include_maker=True)
+        maker_phases = [p for p in plan.phases if isinstance(p, MakerSessionPhase)]
+        assert maker_phases, "expected at least one maker session"
+        # Remove duration/target bounds (target must stay if duration is removed,
+        # but the idle fallback must fire first). Keep a large target and no
+        # duration, plus a short idle timeout.
+        for mp in maker_phases:
+            mp.duration_seconds = None
+            mp.target_cj_count = 1_000_000
+            mp.idle_timeout_seconds = 0.05
+
+        built: list[FakeMaker] = []
+
+        async def make_taker(phase: Any) -> FakeTaker:
+            return FakeTaker(phase)
+
+        async def make_maker(phase: MakerSessionPhase) -> FakeMaker:
+            m = FakeMaker(phase, run_seconds=10.0)
+            built.append(m)
+            return m
+
+        ctx = RunnerContext(
+            wallet_service=FakeWalletService(),  # type: ignore[arg-type]
+            wallet_name="RunnerTest",
+            data_dir=tmp_path,
+            taker_factory=make_taker,
+            maker_factory=make_maker,
+        )
+        result = await TumbleRunner(plan, ctx).run()
+        assert result.status == PlanStatus.COMPLETED
+        assert all(m.stopped for m in built)
+        # No CJs were served and the target was not met; exit was due to idle.
+        for mp in maker_phases:
+            assert mp.cj_served == 0
+
 
 class TestRunnerBondlessBurst:
     async def test_burst_runs_configured_cj_count(self, tmp_path: Path) -> None:
