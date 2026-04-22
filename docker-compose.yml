@@ -261,6 +261,9 @@ services:
       - BITCOIN__RPC_COOKIE_FILE=/shared/.cookie
       - NETWORK_CONFIG__NETWORK=testnet
       - NETWORK_CONFIG__BITCOIN_NETWORK=regtest
+      # Directory servers for CoinJoin (tumbler/do_coinjoin taker needs these).
+      # Regtest has no defaults so we must supply the local compose directories.
+      - NETWORK_CONFIG__DIRECTORY_SERVERS=jm-directory:5222,jm-directory2:5223
       - JMWALLETD_HOST=0.0.0.0
       - JMWALLETD_NO_TLS=true
       - LOGGING__LEVEL=DEBUG
