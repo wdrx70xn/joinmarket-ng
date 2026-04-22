@@ -31,7 +31,7 @@ async def do_direct_send(
     from jmwalletd._backend import get_backend
 
     data_dir: Path = wallet_service.data_dir or Path.home() / ".joinmarket-ng"
-    backend = await get_backend(data_dir)
+    backend = await get_backend(data_dir, wallet_service=wallet_service)
 
     # Ensure the wallet is synced before sending.
     await wallet_service.sync()
