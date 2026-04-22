@@ -289,39 +289,63 @@ class DoCoinjoinRequest(BaseModel):
     txfee: int | None = None
 
 
-class TumblerOptions(BaseModel):
-    """Optional tumbler configuration."""
+class TumblerPlanRequest(BaseModel):
+    """POST /api/v1/wallet/{walletname}/tumbler/plan request.
 
-    addrcount: int | None = None
-    minmakercount: int | None = None
-    makercountrange: list[int] | None = None
-    mixdepthcount: int | None = None
-    mintxcount: int | None = None
-    txcountparams: list[int] | None = None
-    timelambda: float | None = None
-    stage1_timelambda_increase: float | None = None
-    liquiditywait: int | None = None
-    waittime: float | None = None
-    mixdepthsrc: int | None = None
-    restart: bool | None = None
-    schedulefile: str | None = None
-    mincjamount: int | None = None
-    amtmixdepths: int | None = None
-    rounding_chance: float | None = None
-    rounding_sigfig_weights: list[int] | None = None
+    Destinations are the external bitcoin addresses the tumble should
+    ultimately sweep funds to; order is significant (first destination
+    maps to the first non-empty landing mixdepth). ``parameters`` lets
+    the caller override the builder defaults; omit for sensible knobs.
+    ``force`` overrides a pending-only plan on disk; plans that are
+    ``RUNNING`` in the daemon are always protected (stop first).
+    """
+
+    destinations: list[str] = Field(..., min_length=1)
+    parameters: dict[str, object] | None = None
+    force: bool = False
 
 
-class RunScheduleRequest(BaseModel):
-    """POST /api/v1/wallet/{walletname}/taker/schedule request."""
+class TumblerPhaseResponse(BaseModel):
+    """A single phase rendered for the API. Keeps the discriminator flat."""
 
-    destination_addresses: list[str] | None = None
-    tumbler_options: TumblerOptions | None = None
+    kind: str
+    index: int
+    status: str
+    wait_seconds: float
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    # Optional variant fields; only the ones relevant to ``kind`` are populated.
+    mixdepth: int | None = None
+    amount: int | None = None
+    amount_fraction: float | None = None
+    counterparty_count: int | None = None
+    destination: str | None = None
+    rounding: int | None = None
+    txid: str | None = None
+    txids: list[str] | None = None
+    completed_count: int | None = None
+    cj_count: int | None = None
+    duration_seconds: float | None = None
+    target_cj_count: int | None = None
+    cj_served: int | None = None
 
 
-class GetScheduleResponse(BaseModel):
-    """Response for schedule get/start."""
+class TumblerPlanResponse(BaseModel):
+    """Response body returned by tumbler plan / status endpoints."""
 
-    schedule: list[list[str | int | float]] = Field(default_factory=list)
+    plan_id: str
+    wallet_name: str
+    status: str
+    destinations: list[str]
+    current_phase: int
+    phases: list[TumblerPhaseResponse]
+    created_at: str
+    updated_at: str
+    error: str | None = None
+    # True iff the plan was found in ``RUNNING`` on disk but no runner is
+    # live in the daemon; set by the status endpoint so the UI can flag it.
+    stale: bool = False
 
 
 # ---------------------------------------------------------------------------

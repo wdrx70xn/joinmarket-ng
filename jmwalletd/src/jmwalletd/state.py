@@ -22,11 +22,18 @@ from jmwalletd.auth import JMTokenAuthority
 
 
 class CoinjoinState(enum.IntEnum):
-    """Matches reference implementation's coinjoin state constants."""
+    """Matches reference implementation's coinjoin state constants.
+
+    ``TUMBLER_RUNNING`` is a jm-ng extension used while a :mod:`jm_tumbler`
+    plan is executing; it is distinct from ``TAKER_RUNNING`` so that direct
+    single-shot taker runs and tumbler runs can be mutually excluded from
+    one another without conflating the two.
+    """
 
     TAKER_RUNNING = 0
     MAKER_RUNNING = 1
     NOT_RUNNING = 2
+    TUMBLER_RUNNING = 3
 
 
 class DaemonState:
@@ -62,6 +69,19 @@ class DaemonState:
         self._maker_task: asyncio.Task[None] | None = None
         self._taker_task: asyncio.Task[None] | None = None
         self._wallet_sync_task: asyncio.Task[None] | None = None
+
+        # Tumbler runtime. ``tumble_runner`` is a ``jm_tumbler.runner.TumbleRunner``
+        # and ``tumble_task`` is the task running ``runner.run()``. They are kept
+        # as dedicated fields (rather than reusing ``_taker_ref`` / ``_taker_task``)
+        # so that direct single-shot taker runs cannot be interfered with by the
+        # tumbler router and vice versa. ``tumble_plan_wallet`` records which
+        # wallet the currently running / pending plan belongs to; this is always
+        # ``wallet_name`` while ``tumble_runner`` is set but is kept separately
+        # so the router can surface the originating wallet even during a stop
+        # race.
+        self.tumble_runner: Any = None
+        self.tumble_task: asyncio.Task[Any] | None = None
+        self.tumble_plan_wallet: str | None = None
 
         # Rescan state
         self.rescanning: bool = False
@@ -112,6 +132,17 @@ class DaemonState:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._maker_task
 
+        # Stop any in-flight tumbler (cooperative, then hard-cancel the task).
+        if self.tumble_runner is not None:
+            try:
+                self.tumble_runner.request_stop()
+            except Exception:
+                logger.exception("Error requesting tumbler stop during wallet lock")
+        if self.tumble_task is not None and not self.tumble_task.done():
+            self.tumble_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self.tumble_task
+
         # Stop the taker if running.
         if self._taker_ref is not None:
             try:
@@ -144,6 +175,9 @@ class DaemonState:
         self._maker_task = None
         self._taker_task = None
         self._wallet_sync_task = None
+        self.tumble_runner = None
+        self.tumble_task = None
+        self.tumble_plan_wallet = None
         self.config_overrides.clear()
         self.token_authority.reset()
         return False  # was not locked, we just locked it
@@ -154,7 +188,9 @@ class DaemonState:
         if state == CoinjoinState.MAKER_RUNNING:
             self.maker_running = True
             self.taker_running = False
-        elif state == CoinjoinState.TAKER_RUNNING:
+        elif state in (CoinjoinState.TAKER_RUNNING, CoinjoinState.TUMBLER_RUNNING):
+            # The tumbler drives takers internally; surface it as taker activity
+            # for legacy UI elements that only inspect ``taker_running``.
             self.taker_running = True
             self.maker_running = False
         else:
@@ -187,3 +223,54 @@ class DaemonState:
         """Unregister a WebSocket client."""
         self._ws_clients.discard(q)
         logger.debug("WebSocket client unregistered (total: {})", len(self._ws_clients))
+
+    def reconcile_stale_tumbler_plans(self) -> list[str]:
+        """Mark any on-disk tumbler plan left in a non-terminal state as FAILED.
+
+        A ``RUNNING`` or ``PENDING`` plan on disk at startup means the daemon
+        exited mid-run (crash, restart, lost power). The backend state (taker
+        session, directory connection, wallet sync cursor) is gone, so silently
+        resuming would risk double-spending. Instead, mark the plan FAILED with
+        a diagnostic so the UI can surface it; the user can then delete the
+        plan and build a new one.
+
+        Returns the list of wallet names whose plans were touched, for
+        logging / metrics.
+        """
+        # Local import to avoid a circular dependency at module import time.
+        from jm_tumbler.persistence import (
+            SCHEDULES_SUBDIR,
+            PlanCorruptError,
+            load_plan,
+            save_plan,
+        )
+        from jm_tumbler.plan import PhaseStatus, PlanStatus
+
+        schedules_dir = self.data_dir / SCHEDULES_SUBDIR
+        if not schedules_dir.exists():
+            return []
+
+        reconciled: list[str] = []
+        for path in sorted(schedules_dir.glob("*.yaml")):
+            try:
+                plan = load_plan(path.stem, self.data_dir)
+            except (PlanCorruptError, OSError) as exc:
+                logger.warning("Skipping unreadable plan at {}: {}", path, exc)
+                continue
+            if plan.status not in (PlanStatus.RUNNING, PlanStatus.PENDING):
+                continue
+            plan.status = PlanStatus.FAILED
+            plan.error = "daemon restarted mid-run"
+            current = plan.current()
+            if current is not None and current.status == PhaseStatus.RUNNING:
+                current.status = PhaseStatus.FAILED
+                current.error = "daemon restarted mid-run"
+            try:
+                save_plan(plan, self.data_dir)
+            except OSError as exc:  # pragma: no cover - disk full, permissions
+                logger.warning("Failed to persist reconciled plan at {}: {}", path, exc)
+                continue
+            reconciled.append(plan.wallet_name)
+        if reconciled:
+            logger.info("Reconciled {} stale tumbler plan(s) on startup", len(reconciled))
+        return reconciled
