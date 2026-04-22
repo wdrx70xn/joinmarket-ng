@@ -10,11 +10,11 @@ for the full design.
 
 ```
 pip install -e jmcore jmwallet taker maker
-pip install -e jm_tumbler[dev]
+pip install -e jmtumbler[dev]
 ```
 
 ## Tests
 
 ```
-pytest jm_tumbler/tests
+pytest jmtumbler/tests
 ```

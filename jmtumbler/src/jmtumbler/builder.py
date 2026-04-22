@@ -1,7 +1,7 @@
 """
 Plan builder.
 
-Constructs a :class:`~jm_tumbler.plan.Plan` from a list of destination
+Constructs a :class:`~jmtumbler.plan.Plan` from a list of destination
 addresses and the current wallet state (per-mixdepth balances). Callers are
 expected to hold wallet locks while reading balances; the builder itself is
 pure and side-effect free so it is trivially testable.
@@ -12,13 +12,13 @@ Shape of the produced plan
 The plan is a sequence of phases grouped into two conceptual stages:
 
 * **Stage 1 - origin cleavage.** For every non-empty mixdepth, schedule one
-  :class:`~jm_tumbler.plan.TakerCoinjoinPhase` sweep to an internal address
+  :class:`~jmtumbler.plan.TakerCoinjoinPhase` sweep to an internal address
   of the next mixdepth. This severs the pre-tumble coin graph before any
   funds reach a destination.
 * **Stage 2 - destination mixing.** For each destination, schedule a
   small number of fractional taker CoinJoins, optionally interleaved with
-  :class:`~jm_tumbler.plan.MakerSessionPhase` sessions and
-  :class:`~jm_tumbler.plan.BondlessTakerBurstPhase` sub-bursts, and a final
+  :class:`~jmtumbler.plan.MakerSessionPhase` sessions and
+  :class:`~jmtumbler.plan.BondlessTakerBurstPhase` sub-bursts, and a final
   sweep to the destination address.
 
 The role mixing mitigates, but does not eliminate, the subset-sum signature
@@ -34,7 +34,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from jm_tumbler.plan import (
+from jmtumbler.plan import (
     BondlessTakerBurstPhase,
     MakerSessionPhase,
     Phase,
@@ -52,7 +52,7 @@ class TumbleParameters:
     """
     High-level knobs passed to :meth:`PlanBuilder.build`.
 
-    These are copied into :class:`~jm_tumbler.plan.PlanParameters` on the plan
+    These are copied into :class:`~jmtumbler.plan.PlanParameters` on the plan
     so the choices can be inspected later and the plan can be rebuilt for
     debugging. They do not drive the runner directly.
     """
@@ -86,7 +86,7 @@ class TumbleParameters:
 
 @dataclass
 class PlanBuilder:
-    """Turns :class:`TumbleParameters` into a :class:`~jm_tumbler.plan.Plan`."""
+    """Turns :class:`TumbleParameters` into a :class:`~jmtumbler.plan.Plan`."""
 
     wallet_name: str
     params: TumbleParameters

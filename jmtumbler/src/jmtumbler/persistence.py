@@ -16,7 +16,7 @@ import yaml
 from jmcore.paths import get_default_data_dir
 from pydantic import ValidationError
 
-from jm_tumbler.plan import Plan
+from jmtumbler.plan import Plan
 
 SCHEDULES_SUBDIR = "schedules"
 
