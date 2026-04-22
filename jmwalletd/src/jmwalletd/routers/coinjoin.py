@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, cast
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -25,8 +25,6 @@ from jmwalletd.models import (
     DirectSendRequest,
     DirectSendResponse,
     DoCoinjoinRequest,
-    GetScheduleResponse,
-    RunScheduleRequest,
     StartMakerRequest,
     TxInfo,
     TxInput,
@@ -157,118 +155,6 @@ async def do_coinjoin(
         raise BackendNotReady(str(exc)) from exc
 
     return JSONResponse(content={}, status_code=202)
-
-
-# ---------------------------------------------------------------------------
-# POST /api/v1/wallet/{walletname}/taker/schedule
-# ---------------------------------------------------------------------------
-@router.post("/wallet/{walletname}/taker/schedule", status_code=202)
-async def run_schedule(
-    walletname: str,
-    body: RunScheduleRequest,
-    _auth: dict[str, Any] = Depends(require_auth),
-    _wallet: None = Depends(require_wallet_match),
-    state: DaemonState = Depends(get_daemon_state),
-) -> JSONResponse:
-    """Start a tumbler schedule (asynchronous).
-
-    Note: The Taker class does not yet have a dedicated tumbler mode.
-    This endpoint creates a Taker that can run a multi-step schedule
-    via ``taker.run_schedule()`` when that API is available.
-    """
-    if state.coinjoin_state != CoinjoinState.NOT_RUNNING:
-        raise ServiceAlreadyStarted("A coinjoin or maker service is already running.")
-    if not state.wallet_mnemonic:
-        raise NoWalletFound("Wallet mnemonic not available in daemon state.")
-
-    try:
-        from jmwalletd._backend import get_backend
-        from taker.config import TakerConfig
-        from taker.taker import Taker
-
-        state.activate_coinjoin_state(CoinjoinState.TAKER_RUNNING)
-
-        async def _run_tumbler() -> None:
-            taker: Any | None = None
-            try:
-                ws = state.wallet_service
-                backend = await get_backend(state.data_dir, force_new=True)
-                jm_settings = get_settings()
-                config = TakerConfig(
-                    mnemonic=state.wallet_mnemonic,
-                    network=jm_settings.network_config.network,
-                    directory_servers=jm_settings.get_directory_servers(),
-                    socks_host=jm_settings.tor.socks_host,
-                    socks_port=jm_settings.tor.socks_port,
-                    stream_isolation=jm_settings.tor.stream_isolation,
-                )
-                taker = Taker(
-                    wallet=ws,
-                    backend=backend,
-                    config=config,
-                )
-                state._taker_ref = taker
-                # run_schedule is the closest to tumbler in the Taker API.
-                if hasattr(taker, "run_schedule") and body.destination_addresses:
-                    schedule = cast(list[str | int | float], body.destination_addresses)
-                    state.current_schedule = [schedule]
-                await taker.start()
-                if hasattr(taker, "run_schedule") and body.destination_addresses:
-                    from taker.config import Schedule, ScheduleEntry
-
-                    entries = [
-                        ScheduleEntry(
-                            mixdepth=0,
-                            amount=0,
-                            counterparty_count=1,
-                            destination=destination,
-                        )
-                        for destination in body.destination_addresses
-                    ]
-                    schedule_obj = Schedule(entries=entries)
-                    await taker.run_schedule(schedule_obj)
-            except Exception:
-                logger.exception("Tumbler failed")
-            finally:
-                # Always tear down the taker so its directory-client and
-                # background tasks do not leak. Keep the shared wallet open.
-                if taker is not None:
-                    try:
-                        await taker.stop(close_wallet=False)
-                    except Exception:
-                        logger.exception("Taker teardown failed")
-                state.activate_coinjoin_state(CoinjoinState.NOT_RUNNING)
-                state.current_schedule = None
-                state._taker_ref = None
-
-        state._taker_task = asyncio.create_task(_run_tumbler())
-
-        # Return initial schedule placeholder.
-        return JSONResponse(content={"schedule": []}, status_code=202)
-
-    except ImportError:
-        state.activate_coinjoin_state(CoinjoinState.NOT_RUNNING)
-        raise BackendNotReady("Taker module not available.") from None
-    except Exception as exc:
-        state.activate_coinjoin_state(CoinjoinState.NOT_RUNNING)
-        raise BackendNotReady(str(exc)) from exc
-
-
-# ---------------------------------------------------------------------------
-# GET /api/v1/wallet/{walletname}/taker/schedule
-# ---------------------------------------------------------------------------
-@router.get("/wallet/{walletname}/taker/schedule")
-async def get_schedule(
-    walletname: str,
-    _auth: dict[str, Any] = Depends(require_auth),
-    _wallet: None = Depends(require_wallet_match),
-    state: DaemonState = Depends(get_daemon_state),
-) -> GetScheduleResponse:
-    """Get the current tumbler schedule."""
-    if state.current_schedule is None:
-        raise NoWalletFound("No schedule is currently running.")
-
-    return GetScheduleResponse(schedule=state.current_schedule)
 
 
 # ---------------------------------------------------------------------------

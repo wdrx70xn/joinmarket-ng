@@ -247,22 +247,6 @@ class TestStartMaker:
         assert kwargs["stream_isolation"] is False
 
 
-class TestRunSchedule:
-    def test_run_schedule_requires_mnemonic(self, authed_client: tuple[TestClient, str]) -> None:
-        client, token = authed_client
-        state = get_daemon_state()
-        state.wallet_mnemonic = ""
-
-        resp = client.post(
-            "/api/v1/wallet/test_wallet.jmdat/taker/schedule",
-            json={"destination_addresses": ["bcrt1qdest"]},
-            headers=_auth_headers(token),
-        )
-
-        assert resp.status_code == 404
-        assert "Wallet mnemonic not available" in resp.json()["message"]
-
-
 class TestStopMaker:
     def test_stop_maker(self, authed_client: tuple[TestClient, str]) -> None:
         client, token = authed_client

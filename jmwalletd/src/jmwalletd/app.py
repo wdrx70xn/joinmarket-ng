@@ -11,6 +11,8 @@ Creates the ``FastAPI`` app with:
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +21,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from jmwalletd.deps import set_daemon_state
+from jmwalletd.deps import get_daemon_state, set_daemon_state
 from jmwalletd.errors import JMWalletDaemonError
 from jmwalletd.state import DaemonState
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Startup/shutdown hooks.
+
+    Startup reconciles any tumbler plan left in a non-terminal state on disk
+    (RUNNING / PENDING) to FAILED, so a crash-then-restart cannot silently
+    resume with stale backend state. See
+    ``DaemonState.reconcile_stale_tumbler_plans`` for rationale.
+    """
+    try:
+        state = get_daemon_state()
+    except RuntimeError:
+        # App was created without ``create_app`` (e.g. a stripped test harness).
+        yield
+        return
+    try:
+        state.reconcile_stale_tumbler_plans()
+    except Exception:
+        logger.exception("Failed to reconcile tumbler plans on startup")
+    yield
 
 
 def create_app(*, data_dir: Path | None = None) -> FastAPI:
@@ -42,6 +66,7 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
             "appName": "JoinMarket Wallet Daemon",
             "usePkceWithAuthorizationCodeGrant": False,
         },
+        lifespan=_lifespan,
     )
 
     allowed_origins = [
@@ -103,6 +128,7 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
     # ------------------------------------------------------------------
     from jmwalletd.routers.coinjoin import router as coinjoin_router
     from jmwalletd.routers.obwatch import router as obwatch_router
+    from jmwalletd.routers.tumbler import router as tumbler_router
     from jmwalletd.routers.wallet import router as wallet_router
     from jmwalletd.routers.wallet_data import router as wallet_data_router
     from jmwalletd.websocket import router as ws_router
@@ -110,6 +136,7 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
     app.include_router(wallet_router, prefix="/api/v1")
     app.include_router(wallet_data_router, prefix="/api/v1")
     app.include_router(coinjoin_router, prefix="/api/v1")
+    app.include_router(tumbler_router, prefix="/api/v1")
     app.include_router(obwatch_router, prefix="/api/v1")
 
     # JAM also calls /obwatch/* without the /api/v1 prefix.
