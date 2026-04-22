@@ -230,7 +230,7 @@ class TestCreatePlan:
         auth_token: str,
     ) -> None:
         ws = get_daemon_state().wallet_service
-        ws.get_balance_for_mixdepth.return_value = 0
+        ws.get_balance.return_value = 0
         resp = app_with_wallet.post(
             f"/api/v1/wallet/{WALLET}/tumbler/plan",
             json={"destinations": ["bcrt1qdestAaaaaa"]},

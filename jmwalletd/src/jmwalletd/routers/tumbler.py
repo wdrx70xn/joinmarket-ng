@@ -130,12 +130,16 @@ def _plan_to_response(plan: Plan, *, stale: bool = False) -> TumblerPlanResponse
     )
 
 
-def _mixdepth_balances(wallet_service: Any, num_mixdepths: int = 5) -> dict[int, int]:
-    """Return confirmed balance per mixdepth. Uses the wallet's public helper."""
+async def _mixdepth_balances(wallet_service: Any, num_mixdepths: int = 5) -> dict[int, int]:
+    """Return confirmed balance per mixdepth in satoshis.
+
+    :class:`WalletService.get_balance` is ``async`` and returns an ``int`` of
+    sats that already excludes frozen UTXOs.
+    """
     balances: dict[int, int] = {}
     for mixdepth in range(num_mixdepths):
         try:
-            balances[mixdepth] = int(wallet_service.get_balance_for_mixdepth(mixdepth))
+            balances[mixdepth] = int(await wallet_service.get_balance(mixdepth))
         except Exception:
             logger.exception("failed to read balance for mixdepth {}", mixdepth)
             balances[mixdepth] = 0
@@ -210,7 +214,7 @@ async def create_plan(
     if ws is None:
         raise NoWalletFound()
 
-    balances = _mixdepth_balances(ws, num_mixdepths=getattr(ws, "mixdepth_count", 5))
+    balances = await _mixdepth_balances(ws, num_mixdepths=getattr(ws, "mixdepth_count", 5))
     if not any(v > 0 for v in balances.values()):
         raise ActionNotAllowed("Wallet has no confirmed coins to tumble.")
 
