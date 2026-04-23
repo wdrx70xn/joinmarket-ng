@@ -181,11 +181,11 @@ jobs:
       packages: read
     env:
       # Use pre-built images from CI
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
-      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -290,9 +290,9 @@ jobs:
       contents: read
       packages: read
     env:
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      JAM_NG_IMAGE: ghcr.io/${{ github.repository }}/jam-ng:${{ env.CI_TAG }}
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      JAM_NG_IMAGE: ghcr.io/${{ github.repository }}/jam-ng:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
       - uses: actions/checkout@v6
@@ -382,7 +382,7 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -451,7 +451,7 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -557,10 +557,10 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -714,10 +714,10 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -871,10 +871,10 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -993,10 +993,10 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -1115,10 +1115,10 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -1284,10 +1284,10 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
