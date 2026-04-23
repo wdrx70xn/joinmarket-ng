@@ -151,6 +151,19 @@ class DescriptorWalletBackend(BlockchainBackend):
         error_str = str(error)
         return "RPC error -18" in error_str
 
+    @staticmethod
+    def _is_wallet_loading_error(error: ValueError | Exception) -> bool:
+        """Check if an RPC error indicates a transient "wallet already loading" state.
+
+        Bitcoin Core returns ``RPC error -4: Wallet already loading.`` while a
+        prior ``loadwallet``/``createwallet`` call is still in-flight (for
+        example after a previous wallet-info scan timed out mid-load). The
+        condition is transient: polling ``listwallets`` and retrying after a
+        short delay resolves it. See issue #465.
+        """
+        error_str = str(error).lower()
+        return "already loading" in error_str or "wallet is already being loaded" in error_str
+
     async def _ensure_wallet_loaded(self) -> bool:
         """
         Ensure the wallet is loaded in Bitcoin Core.
@@ -306,12 +319,43 @@ class DescriptorWalletBackend(BlockchainBackend):
         reveal transaction history, which would undo the privacy benefits
         of CoinJoin if exposed.
 
+        Handles the transient ``RPC error -4: Wallet already loading`` state
+        (issue #465) by polling ``listwallets`` with exponential backoff;
+        this typically happens when a previous ``loadwallet`` call timed out
+        at the HTTP layer but is still running inside Bitcoin Core.
+
         Args:
             disable_private_keys: If True, creates a watch-only wallet (recommended)
 
         Returns:
             True if wallet was created or already exists
         """
+        # Retry schedule for transient "already loading" errors. Bitcoin Core
+        # load times scale with rescan depth; back off up to ~60s total.
+        loading_backoff_s: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
+
+        async def _poll_until_loaded(max_total_wait: float) -> bool:
+            """Poll listwallets until our wallet appears, up to ``max_total_wait`` seconds."""
+            waited = 0.0
+            delay = 1.0
+            while waited < max_total_wait:
+                await asyncio.sleep(delay)
+                waited += delay
+                try:
+                    wallets = await self._rpc_call("listwallets", use_wallet=False)
+                    if self.wallet_name in wallets:
+                        logger.info(
+                            f"Wallet '{self.wallet_name}' finished loading after "
+                            f"~{waited:.0f}s of waiting"
+                        )
+                        self._wallet_loaded = True
+                        return True
+                except (ValueError, httpx.HTTPError) as poll_err:
+                    # Keep polling; listwallets may also transiently error.
+                    logger.debug(f"listwallets poll failed (will retry): {poll_err}")
+                delay = min(delay * 2, 8.0)
+            return False
+
         try:
             # First check if wallet already exists
             wallets = await self._rpc_call("listwallets", use_wallet=False)
@@ -320,37 +364,70 @@ class DescriptorWalletBackend(BlockchainBackend):
                 self._wallet_loaded = True
                 return True
 
-            # Try to load existing wallet
-            try:
-                await self._rpc_call("loadwallet", [self.wallet_name], use_wallet=False)
-                logger.info(f"Loaded existing wallet '{self.wallet_name}'")
-                self._wallet_loaded = True
-                return True
-            except ValueError as e:
-                error_str = str(e).lower()
-                # RPC error -18 is "Wallet not found" or "Path does not exist"
-                not_found_errs = ("not found", "does not exist", "-18")
-                if not any(err in error_str for err in not_found_errs):
-                    raise
+            # Try to load existing wallet, retrying on transient "already loading"
+            for attempt, delay in enumerate(loading_backoff_s, start=1):
+                try:
+                    await self._rpc_call("loadwallet", [self.wallet_name], use_wallet=False)
+                    logger.info(f"Loaded existing wallet '{self.wallet_name}'")
+                    self._wallet_loaded = True
+                    return True
+                except ValueError as e:
+                    if self._is_wallet_loading_error(e):
+                        logger.warning(
+                            f"Bitcoin Core reports wallet already loading "
+                            f"(attempt {attempt}/{len(loading_backoff_s)}); "
+                            f"waiting {delay:.0f}s and polling listwallets..."
+                        )
+                        if await _poll_until_loaded(delay):
+                            return True
+                        continue
+                    error_str = str(e).lower()
+                    # RPC error -18 is "Wallet not found" or "Path does not exist"
+                    not_found_errs = ("not found", "does not exist", "-18")
+                    if not any(err in error_str for err in not_found_errs):
+                        raise
+                    break  # wallet not found -> fall through to createwallet
+            else:
+                # Exhausted retries and the wallet still reports "already loading".
+                raise ValueError(
+                    f"Wallet '{self.wallet_name}' is still loading in Bitcoin Core "
+                    "after extended retries; please try again in a moment."
+                )
 
             # Create new descriptor wallet (watch-only, no private keys)
             # Params: wallet_name, disable_private_keys, blank, passphrase, avoid_reuse, descriptors
-            result = await self._rpc_call(
-                "createwallet",
-                [
-                    self.wallet_name,  # wallet_name
-                    disable_private_keys,  # disable_private_keys
-                    True,  # blank (no default keys)
-                    "",  # passphrase (empty - not supported for watch-only wallets)
-                    False,  # avoid_reuse
-                    True,  # descriptors (MUST be True for descriptor wallet)
-                ],
-                use_wallet=False,
+            for attempt, delay in enumerate(loading_backoff_s, start=1):
+                try:
+                    result = await self._rpc_call(
+                        "createwallet",
+                        [
+                            self.wallet_name,  # wallet_name
+                            disable_private_keys,  # disable_private_keys
+                            True,  # blank (no default keys)
+                            "",  # passphrase (empty - not supported for watch-only wallets)
+                            False,  # avoid_reuse
+                            True,  # descriptors (MUST be True for descriptor wallet)
+                        ],
+                        use_wallet=False,
+                    )
+                    logger.info(f"Created descriptor wallet '{self.wallet_name}': {result}")
+                    self._wallet_loaded = True
+                    return True
+                except ValueError as e:
+                    if self._is_wallet_loading_error(e):
+                        logger.warning(
+                            f"createwallet hit 'already loading' "
+                            f"(attempt {attempt}/{len(loading_backoff_s)}); "
+                            f"waiting up to {delay:.0f}s for prior load to finish..."
+                        )
+                        if await _poll_until_loaded(delay):
+                            return True
+                        continue
+                    raise
+            raise ValueError(
+                f"Wallet '{self.wallet_name}' is still loading in Bitcoin Core "
+                "after extended retries; please try again in a moment."
             )
-
-            logger.info(f"Created descriptor wallet '{self.wallet_name}': {result}")
-            self._wallet_loaded = True
-            return True
 
         except Exception as e:
             logger.error(f"Failed to create/load wallet: {e}")

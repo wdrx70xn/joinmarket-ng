@@ -145,6 +145,91 @@ class TestDescriptorWalletBackendUnit:
         # Should have called: listwallets, loadwallet (failed), createwallet
         assert call_count == 3
 
+    # ------------------------------------------------------------------
+    # Regression tests for issue #465: RPC error -4 "Wallet already loading"
+    # ------------------------------------------------------------------
+
+    def test_is_wallet_loading_error_detects_rpc_minus_4(self):
+        """Static helper must match the error string Bitcoin Core emits."""
+        # Actual format from Bitcoin Core ("Wallet already loading.")
+        assert DescriptorWalletBackend._is_wallet_loading_error(
+            ValueError("RPC error -4: Wallet already loading.")
+        )
+        # Variant phrasing seen across Core versions
+        assert DescriptorWalletBackend._is_wallet_loading_error(
+            ValueError("Wallet is already being loaded")
+        )
+        # Unrelated errors must not trigger the retry path
+        assert not DescriptorWalletBackend._is_wallet_loading_error(
+            ValueError("RPC error -18: Wallet not found")
+        )
+        assert not DescriptorWalletBackend._is_wallet_loading_error(
+            ValueError("some generic failure")
+        )
+
+    @pytest.mark.asyncio
+    async def test_create_wallet_retries_on_already_loading(self, monkeypatch):
+        """When Bitcoin Core reports ``RPC error -4: Wallet already loading``,
+        create_wallet should poll listwallets with backoff and succeed once
+        the wallet finishes loading, instead of propagating the error and
+        crashing the caller with a traceback (issue #465)."""
+        backend = DescriptorWalletBackend(wallet_name="slow_wallet")
+
+        # Skip real sleeps to keep the test fast.
+        monkeypatch.setattr("asyncio.sleep", AsyncMock(return_value=None))
+
+        call_log: list[str] = []
+        listwallets_calls = {"count": 0}
+
+        async def mock_rpc(method, params=None, client=None, use_wallet=True):
+            call_log.append(method)
+            if method == "listwallets":
+                listwallets_calls["count"] += 1
+                # First call: wallet not loaded yet.
+                # Second call (inside retry poll loop): wallet has finished loading.
+                if listwallets_calls["count"] == 1:
+                    return []
+                return ["slow_wallet"]
+            if method == "loadwallet":
+                # Core is still loading it from the previous (timed-out) request.
+                raise ValueError("RPC error -4: Wallet already loading.")
+            raise AssertionError(f"Unexpected method: {method}")
+
+        backend._rpc_call = mock_rpc
+
+        result = await backend.create_wallet()
+
+        assert result is True
+        assert backend._wallet_loaded is True
+        # We must have polled listwallets at least twice: initial check +
+        # one poll that finds the wallet now loaded.
+        assert listwallets_calls["count"] >= 2
+        # loadwallet must have been attempted.
+        assert "loadwallet" in call_log
+        # createwallet must NOT have been called -- the wallet was already there.
+        assert "createwallet" not in call_log
+
+    @pytest.mark.asyncio
+    async def test_create_wallet_gives_up_after_sustained_already_loading(self, monkeypatch):
+        """If the "already loading" state never clears within the retry
+        schedule, create_wallet must raise a clear error (not silently
+        crash with a traceback deep in Bitcoin Core response parsing).
+        """
+        backend = DescriptorWalletBackend(wallet_name="stuck_wallet")
+        monkeypatch.setattr("asyncio.sleep", AsyncMock(return_value=None))
+
+        async def mock_rpc(method, params=None, client=None, use_wallet=True):
+            if method == "listwallets":
+                return []  # never appears
+            if method == "loadwallet":
+                raise ValueError("RPC error -4: Wallet already loading.")
+            raise AssertionError(f"Unexpected method: {method}")
+
+        backend._rpc_call = mock_rpc
+
+        with pytest.raises(ValueError, match="still loading"):
+            await backend.create_wallet()
+
     @pytest.mark.asyncio
     async def test_import_descriptors(self, mock_backend: DescriptorWalletBackend):
         """Test importing descriptors into wallet."""
