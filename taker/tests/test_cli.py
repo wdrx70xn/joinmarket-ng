@@ -59,6 +59,7 @@ class TestBuildTakerConfig:
         settings.taker.counterparty_count = 4
         settings.taker.max_cj_fee_abs = 1000
         settings.taker.max_cj_fee_rel = "0.002"
+        settings.taker.fee_rate = None  # Not set in config
         settings.taker.fee_block_target = None  # Not set in config
         settings.taker.bondless_makers_allowance = 0.1
         settings.taker.bond_value_exponent = 1.3
@@ -139,6 +140,45 @@ class TestBuildTakerConfig:
 
         assert config.fee_rate is None
         assert config.fee_block_target == 6
+
+    def test_taker_fee_rate_setting_honored_without_cli_flag(
+        self, sample_mnemonic: str, mock_settings: MagicMock
+    ) -> None:
+        """Regression: taker.fee_rate from config.toml must be honored when no CLI
+        flag is passed, and must suppress the fee_block_target fallback."""
+        mock_settings.taker.fee_rate = 1.1  # Set in config.toml
+        mock_settings.taker.fee_block_target = None
+
+        config = build_taker_config(
+            settings=mock_settings,
+            mnemonic=sample_mnemonic,
+            passphrase="",
+            destination="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+            amount=100000,
+            mixdepth=0,
+        )
+
+        assert config.fee_rate == 1.1
+        assert config.fee_block_target is None
+
+    def test_cli_fee_rate_overrides_taker_fee_rate_setting(
+        self, sample_mnemonic: str, mock_settings: MagicMock
+    ) -> None:
+        """CLI --fee-rate must take precedence over taker.fee_rate from settings."""
+        mock_settings.taker.fee_rate = 1.1
+
+        config = build_taker_config(
+            settings=mock_settings,
+            mnemonic=sample_mnemonic,
+            passphrase="",
+            destination="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+            amount=100000,
+            mixdepth=0,
+            fee_rate=7.5,
+        )
+
+        assert config.fee_rate == 7.5
+        assert config.fee_block_target is None
 
     def test_taker_fee_block_target_setting_overrides_wallet_default(
         self, sample_mnemonic: str, mock_settings: MagicMock

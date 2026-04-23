@@ -647,11 +647,16 @@ class TakerSettings(BaseModel):
         ge=1.0,
         description="Multiply estimated fee by this factor",
     )
+    fee_rate: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Manual fee rate in sat/vB (mutually exclusive with fee_block_target)",
+    )
     fee_block_target: int | None = Field(
         default=None,
         ge=1,
         le=1008,
-        description="Target blocks for fee estimation",
+        description="Target blocks for fee estimation (mutually exclusive with fee_rate)",
     )
     bondless_makers_allowance: float = Field(
         default=0.2,

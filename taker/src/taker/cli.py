@@ -152,8 +152,9 @@ def build_taker_config(
         max_rel_fee if max_rel_fee is not None else settings.taker.max_cj_fee_rel
     )
     # Only set fee_block_target when fee_rate is not provided (they are mutually exclusive)
+    effective_fee_rate = fee_rate if fee_rate is not None else settings.taker.fee_rate
     effective_block_target: int | None = None
-    if fee_rate is None:
+    if effective_fee_rate is None:
         effective_block_target = (
             block_target
             if block_target is not None
@@ -213,7 +214,7 @@ def build_taker_config(
         counterparty_count=effective_counterparties,
         max_cj_fee=MaxCjFee(abs_fee=effective_max_abs_fee, rel_fee=effective_max_rel_fee),
         tx_fee_factor=settings.taker.tx_fee_factor,
-        fee_rate=fee_rate,  # CLI only, no settings equivalent
+        fee_rate=effective_fee_rate,
         fee_block_target=effective_block_target,
         bondless_makers_allowance=effective_bondless,
         bond_value_exponent=effective_bond_exp,
