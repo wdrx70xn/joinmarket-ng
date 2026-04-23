@@ -4,14 +4,12 @@ on:
   push:
     branches:
       - main
-  pull_request_target:
-    # pull_request_target runs from the base branch context and has write permissions,
-    # which allows pushing to GHCR even for fork PRs.
-    # GitHub's built-in "Fork pull request workflows" approval setting gates external
-    # contributors (first-time contributors require maintainer approval before running).
-    # Organization members can run CI without approval.
-    # The workflow files themselves always run from the base branch (not the fork), so
-    # malicious workflow changes in a fork PR cannot affect the privileged execution.
+  workflow_run:
+    # Fork PRs are first gated by the Prek checks pull_request workflow.
+    # After approval, rerun CI in the trusted base-repository context so it can
+    # reuse shared GHCR images across jobs.
+    workflows: ["Prek checks"]
+    types: [completed]
   workflow_dispatch:
   workflow_call:
 
@@ -20,8 +18,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  # Unique tag for this CI run - used to pass images between jobs
-  CI_TAG: ci-${{ github.sha }}
+  # Internal CI tag used only to share prebuilt images between CI jobs.
+  CI_TAG: ci-unsafe-do-not-run-${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   # ==========================================================================
@@ -34,6 +32,12 @@ jobs:
     permissions:
       contents: read
       packages: write
+    if: |
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'
+      )
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
 
       - name: Get Git commit timestamp for reproducible builds
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
@@ -120,6 +125,12 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    if: |
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'
+      )
     strategy:
       fail-fast: false
       matrix:
@@ -127,7 +138,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           python-version: ${{ matrix.python-version }}
@@ -169,15 +181,16 @@ jobs:
       packages: read
     env:
       # Use pre-built images from CI
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
-      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
+      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd
@@ -277,14 +290,15 @@ jobs:
       contents: read
       packages: read
     env:
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      JAM_NG_IMAGE: ghcr.io/${{ github.repository }}/jam-ng:ci-${{ github.sha }}
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      JAM_NG_IMAGE: ghcr.io/${{ github.repository }}/jam-ng:${{ env.CI_TAG }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
 
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -368,11 +382,12 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet
@@ -436,11 +451,12 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,maker
@@ -502,10 +518,17 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    if: |
+      github.event_name != 'workflow_run' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'
+      )
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,directory_server
@@ -534,14 +557,15 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -690,14 +714,15 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -846,14 +871,15 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -967,14 +993,15 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -1088,14 +1115,15 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
@@ -1256,14 +1284,15 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-${{ github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-${{ github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-${{ github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-${{ github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:${{ env.CI_TAG }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:${{ env.CI_TAG }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:${{ env.CI_TAG }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:${{ env.CI_TAG }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-python-deps
         with:
           components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker

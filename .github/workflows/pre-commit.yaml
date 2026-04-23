@@ -22,8 +22,10 @@ jobs:
         with:
           python-version: '3.14'
 
+      - uses: j178/prek-action@v1
+
       - name: Validate commit messages
-        if: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
           resolve_fallback_range() {
             local base_ref="${1:-main}"
@@ -63,5 +65,3 @@ jobs:
 
           echo "Validating commit range: ${RANGE}"
           python scripts/validate_commit_message.py --rev-range "${RANGE}"
-
-      - uses: j178/prek-action@v1
