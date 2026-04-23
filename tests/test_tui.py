@@ -182,6 +182,13 @@ def test_tui_script_new_wallet_offers_word_count_choice() -> None:
     assert 'jm-wallet generate --words "$WORDS"' in content
 
 
+def test_tui_script_wallet_menu_labels_new_wallet_word_support() -> None:
+    """The Wallet Management menu should advertise 12- and 24-word
+    wallet creation support so the menu matches the implemented flow."""
+    content = SCRIPT_PATH.read_text()
+    assert "Create New Wallet (12 or 24-word seed)" in content
+
+
 def test_tui_script_select_wallet_offers_password_storage() -> None:
     """Selecting an active wallet must offer to store the new wallet's
     password, otherwise the config ends up with a cleared password that

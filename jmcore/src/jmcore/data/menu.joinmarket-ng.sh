@@ -767,7 +767,7 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
  $WALLET_INFO
 
          " 20 64 11 \
-          "NEW"      "Create New Wallet (24-word seed)" \
+          "NEW"      "Create New Wallet (12 or 24-word seed)" \
           "IMP"      "Import Existing Wallet (from seed)" \
           "VAL"      "Validate a Seed Phrase" \
           "BAL"      "View Wallet Info / Balance" \

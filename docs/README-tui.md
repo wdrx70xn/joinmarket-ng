@@ -59,7 +59,7 @@ Manage wallets through this submenu. Create new wallets, import from seed, valid
 
 | Option | Description |
 |--------|-------------|
-| **NEW** | Create a new wallet with a 24-word BIP39 seed |
+| **NEW** | Create a new wallet with a 12- or 24-word BIP39 seed |
 | **IMP** | Import an existing wallet (12 or 24 words) |
 | **VAL** | Validate a seed phrase before importing |
 | **BAL** | View wallet info / balance (basic or extended) |
