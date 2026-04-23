@@ -180,6 +180,25 @@ class TestBuildTakerConfig:
         assert config.fee_rate == 7.5
         assert config.fee_block_target is None
 
+    def test_cli_block_target_overrides_taker_fee_rate_setting(
+        self, sample_mnemonic: str, mock_settings: MagicMock
+    ) -> None:
+        """CLI --block-target must override taker.fee_rate from settings."""
+        mock_settings.taker.fee_rate = 1.1
+
+        config = build_taker_config(
+            settings=mock_settings,
+            mnemonic=sample_mnemonic,
+            passphrase="",
+            destination="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+            amount=100000,
+            mixdepth=0,
+            block_target=8,
+        )
+
+        assert config.fee_rate is None
+        assert config.fee_block_target == 8
+
     def test_taker_fee_block_target_setting_overrides_wallet_default(
         self, sample_mnemonic: str, mock_settings: MagicMock
     ) -> None:

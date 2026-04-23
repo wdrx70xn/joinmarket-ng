@@ -151,18 +151,21 @@ def build_taker_config(
     effective_max_rel_fee = (
         max_rel_fee if max_rel_fee is not None else settings.taker.max_cj_fee_rel
     )
-    # Only set fee_block_target when fee_rate is not provided (they are mutually exclusive)
-    effective_fee_rate = fee_rate if fee_rate is not None else settings.taker.fee_rate
+    # Resolve fee settings together so CLI overrides can switch modes cleanly:
+    # CLI fee_rate > CLI block_target > config fee_rate > config/default block_target.
+    effective_fee_rate: float | None = None
     effective_block_target: int | None = None
-    if effective_fee_rate is None:
+    if fee_rate is not None:
+        effective_fee_rate = fee_rate
+    elif block_target is not None:
+        effective_block_target = block_target
+    elif settings.taker.fee_rate is not None:
+        effective_fee_rate = settings.taker.fee_rate
+    else:
         effective_block_target = (
-            block_target
-            if block_target is not None
-            else (
-                settings.taker.fee_block_target
-                if settings.taker.fee_block_target is not None
-                else settings.wallet.default_fee_block_target
-            )
+            settings.taker.fee_block_target
+            if settings.taker.fee_block_target is not None
+            else settings.wallet.default_fee_block_target
         )
     effective_bondless = (
         bondless_makers_allowance

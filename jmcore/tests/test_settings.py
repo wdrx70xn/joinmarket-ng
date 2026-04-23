@@ -306,6 +306,20 @@ neutrino_scan_lookback_blocks = 75000
         assert settings.bitcoin.neutrino_prefetch_lookback_blocks == 50000
         assert settings.bitcoin.neutrino_scan_lookback_blocks == 75000
 
+    def test_toml_taker_fee_rate_setting(
+        self, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that taker.fee_rate is loaded from TOML config."""
+        config_path = temp_data_dir / "config.toml"
+        config_path.write_text("""
+[taker]
+fee_rate = 1.1
+""")
+
+        settings = JoinMarketSettings()
+
+        assert settings.taker.fee_rate == 1.1
+
     def test_env_overrides_toml(self, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that environment variables override TOML config."""
         config_path = temp_data_dir / "config.toml"
