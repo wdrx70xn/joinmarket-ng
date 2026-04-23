@@ -1088,6 +1088,7 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
     # ------------------------------------------------------------------
     M)
       # Maker submenu
+      while true; do
       MCHOICE=$(whiptail --title " Maker Bot (${MAKER_STATUS}) " --menu "Choose option:" 18 64 8 \
         "START"   "Start Maker Bot" \
         "STOP"    "Stop Maker Bot" \
@@ -1096,6 +1097,8 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
         "LOG"     "Follow Maker Logs (Ctrl+C to stop)" \
         "STATUS"  "Show Service Status" \
         "BACK"    "Back to Main Menu" 3>&1 1>&2 2>&3)
+
+      [ $? -ne 0 ] && break
 
       case $MCHOICE in
           START)
@@ -1151,6 +1154,9 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               echo ""
               maker_status
               pause
+              ;;
+          BACK)
+              break
               ;;
           BONDS)
               # Fidelity bond submenu
@@ -1226,6 +1232,7 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               done
               ;;
       esac
+      done
       ;;
 
     U)

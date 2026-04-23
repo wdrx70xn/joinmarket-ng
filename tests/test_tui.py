@@ -189,6 +189,17 @@ def test_tui_script_wallet_menu_labels_new_wallet_word_support() -> None:
     assert "Create New Wallet (12 or 24-word seed)" in content
 
 
+def test_tui_script_maker_menu_loops_until_back() -> None:
+    """The Maker submenu must have its own loop so leaving Fidelity Bonds
+    returns to Maker Bot Control instead of falling back to the main menu
+    (issue #460)."""
+    content = SCRIPT_PATH.read_text()
+    maker_block = content.split("    M)\n", 1)[1].split("\n    U)\n", 1)[0]
+    assert "while true; do" in maker_block
+    assert "[ $? -ne 0 ] && break" in maker_block
+    assert "BACK)\n              break" in maker_block
+
+
 def test_tui_script_select_wallet_offers_password_storage() -> None:
     """Selecting an active wallet must offer to store the new wallet's
     password, otherwise the config ends up with a cleared password that
