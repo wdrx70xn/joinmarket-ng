@@ -71,10 +71,10 @@ class TestSetupCli:
         with patch.object(logger, "remove"), patch.object(logger, "add") as mock_add:
             setup_cli(log_level="TRACE")
 
-            # Should use CLI value, not settings
-            mock_add.assert_called_once()
-            call_kwargs = mock_add.call_args[1]
-            assert call_kwargs["level"] == "TRACE"
+            # setup_cli now performs two passes (early + final). The final
+            # pass reflects the resolved level.
+            assert mock_add.call_count >= 1
+            assert mock_add.call_args_list[-1][1]["level"] == "TRACE"
 
     def test_setup_cli_uses_settings_when_no_cli_arg(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that setup_cli uses settings.logging.level when no CLI arg."""
@@ -84,19 +84,56 @@ class TestSetupCli:
         with patch.object(logger, "remove"), patch.object(logger, "add") as mock_add:
             setup_cli(log_level=None)
 
-            # Should use settings value
-            mock_add.assert_called_once()
-            call_kwargs = mock_add.call_args[1]
-            assert call_kwargs["level"] == "TRACE"
+            assert mock_add.call_count >= 1
+            assert mock_add.call_args_list[-1][1]["level"] == "TRACE"
 
     def test_setup_cli_defaults_to_info(self) -> None:
         """Test that setup_cli defaults to INFO when no CLI arg and no settings."""
         with patch.object(logger, "remove"), patch.object(logger, "add") as mock_add:
             setup_cli(log_level=None)
 
-            mock_add.assert_called_once()
-            call_kwargs = mock_add.call_args[1]
-            assert call_kwargs["level"] == "INFO"
+            assert mock_add.call_count >= 1
+            assert mock_add.call_args_list[-1][1]["level"] == "INFO"
+
+    def test_setup_cli_early_logging_honors_env_level(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression test for issue #459.
+
+        The early ``setup_logging`` call inside ``setup_cli`` must honor
+        ``LOGGING__LEVEL`` from the environment *before* settings are
+        loaded, so that informational messages emitted during settings
+        loading (e.g. "Loaded config from ...") are suppressed when the
+        user requests a quieter log level (as the TUI does).
+        """
+        monkeypatch.setenv("LOGGING__LEVEL", "WARNING")
+
+        with patch.object(logger, "remove"), patch.object(logger, "add") as mock_add:
+            setup_cli(log_level=None)
+
+            # setup_cli performs TWO configurations: an early one (before
+            # settings load) and a final one (after). Both must use
+            # WARNING given the env var. The first call is what matters
+            # for #459 -- if it uses INFO, the "Loaded config from ..."
+            # line leaks into TUI output.
+            assert mock_add.call_count == 2
+            assert mock_add.call_args_list[0][1]["level"] == "WARNING"
+            assert mock_add.call_args_list[1][1]["level"] == "WARNING"
+
+    def test_setup_cli_early_logging_cli_arg_wins_over_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit CLI --log-level must still override LOGGING__LEVEL
+        during the early-logging pass."""
+        monkeypatch.setenv("LOGGING__LEVEL", "WARNING")
+
+        with patch.object(logger, "remove"), patch.object(logger, "add") as mock_add:
+            setup_cli(log_level="DEBUG")
+
+            assert mock_add.call_count == 2
+            # CLI arg overrides env in both passes.
+            assert mock_add.call_args_list[0][1]["level"] == "DEBUG"
+            assert mock_add.call_args_list[1][1]["level"] == "DEBUG"
 
 
 class TestLoadMnemonicFromFile:

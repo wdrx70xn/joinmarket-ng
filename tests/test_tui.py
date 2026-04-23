@@ -179,7 +179,8 @@ def test_tui_script_new_wallet_offers_word_count_choice() -> None:
     assert '"24" "24 words' in content
     assert '"12" "12 words' in content
     # generate must honour the chosen word count.
-    assert 'jm-wallet generate --words "$WORDS"' in content
+    assert "jm-wallet generate \\" in content
+    assert '--words "$WORDS"' in content
 
 
 def test_tui_script_wallet_menu_labels_new_wallet_word_support() -> None:
@@ -350,3 +351,64 @@ def test_tui_main_exits_without_whiptail() -> None:
     with patch("shutil.which", return_value=None):
         with pytest.raises(SystemExit, match="1"):
             main()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for bug fixes (see GitHub issues #459, #461, #462)
+# ---------------------------------------------------------------------------
+
+
+def test_tui_exports_quiet_log_level_by_default() -> None:
+    """Child jm-* commands launched from the TUI must default to WARNING so
+    loguru INFO messages from jmcore.settings/jmwallet do not pollute the
+    whiptail output panes (issue #459). The user can still override by
+    pre-setting LOGGING__LEVEL before launching jm-ng."""
+    content = SCRIPT_PATH.read_text()
+    assert 'if [ -z "${LOGGING__LEVEL:-}"' in content
+    assert 'export LOGGING__LEVEL="WARNING"' in content
+
+
+def test_tui_clears_stale_mnemonic_file_entry() -> None:
+    """If config.toml points at a mnemonic file that no longer exists (e.g.
+    the user deleted it outside the TUI), every subsequent wallet action
+    would blow up with ``Mnemonic file not found`` (issue #461). The main
+    loop must detect that and clear the dangling config values."""
+    content = SCRIPT_PATH.read_text()
+    main_loop = content.split("while true; do", 1)[1]
+    # Both detection and cleanup must happen before we compute WALLET_INFO.
+    assert '[ ! -f "$CURRENT_WALLET" ]' in main_loop
+    assert 'clear_config_value "mnemonic_file"' in main_loop
+    assert 'clear_config_value "mnemonic_password"' in main_loop
+    # And the stale-config path must surface a warning so the user knows
+    # why their "active wallet" suddenly went away.
+    assert "Stale Wallet Config" in main_loop
+
+
+def test_tui_no_second_password_prompt_when_storing_in_config() -> None:
+    """After creating/importing a wallet and choosing to store the password
+    in config.toml, the TUI must reuse the password the user already
+    entered instead of asking a third time (issue #462)."""
+    content = SCRIPT_PATH.read_text()
+
+    # A helper that collects the new-wallet password via whiptail must exist.
+    assert "prompt_new_wallet_password()" in content
+
+    # post_wallet_create must accept and honor the known password.
+    assert 'local known_password="${2:-}"' in content
+    assert 'if [ -n "$known_password" ]; then' in content
+    assert 'store_password "$known_password"' in content
+
+    # The NEW and IMP flows must capture the password and pass it to
+    # post_wallet_create AND to jm-wallet via MNEMONIC_PASSWORD, with
+    # --no-prompt-password so jm-wallet does not ask again.
+    new_block = content.split("          NEW)\n", 1)[1].split("          IMP)\n", 1)[0]
+    assert "NEW_PWD=$(prompt_new_wallet_password)" in new_block
+    assert 'MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet generate' in new_block
+    assert "--no-prompt-password" in new_block
+    assert 'post_wallet_create "$WALLET_PATH" "$NEW_PWD"' in new_block
+
+    imp_block = content.split("          IMP)\n", 1)[1].split("          VAL)\n", 1)[0]
+    assert "NEW_PWD=$(prompt_new_wallet_password)" in imp_block
+    assert 'MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet import' in imp_block
+    assert "--no-prompt-password" in imp_block
+    assert 'post_wallet_create "$WALLET_PATH" "$NEW_PWD"' in imp_block

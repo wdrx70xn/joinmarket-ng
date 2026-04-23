@@ -134,6 +134,13 @@ def setup_cli(log_level: str | None = None) -> JoinMarketSettings:
     Returns:
         JoinMarketSettings instance with all sources loaded
     """
+    # Apply an early logging configuration before loading settings so that
+    # informational messages emitted while parsing config.toml (e.g.
+    # "Loaded config from ...") honor the caller's intended log level.
+    # Priority for this early pass: CLI arg > LOGGING__LEVEL env > INFO default.
+    early_level = log_level or os.environ.get("LOGGING__LEVEL") or "INFO"
+    setup_logging(early_level)
+
     reset_settings()
     settings = get_settings()
 

@@ -5,6 +5,7 @@ Wallet management commands: import, generate, info, validate.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -121,7 +122,13 @@ def import_mnemonic(
 
     # Get password for encryption
     password: str | None = None
-    if prompt_password:
+    # Allow callers (typically the TUI) to pre-provide the password via
+    # MNEMONIC_PASSWORD so the user isn't prompted again after already
+    # entering it in a whiptail dialog (issue #462).
+    env_password = os.environ.get("MNEMONIC_PASSWORD")
+    if env_password:
+        password = env_password
+    elif prompt_password:
         password = prompt_password_with_confirmation()
 
     # Save the mnemonic
@@ -199,7 +206,14 @@ def generate(
         if should_save:
             # Prompt for password if requested
             password: str | None = None
-            if prompt_password:
+            # Allow callers (typically the TUI) to pre-provide the password
+            # via MNEMONIC_PASSWORD so the user isn't asked for it again
+            # after having already entered it in a whiptail dialog
+            # (issue #462). An empty env value is treated as "no password".
+            env_password = os.environ.get("MNEMONIC_PASSWORD")
+            if env_password:
+                password = env_password
+            elif prompt_password:
                 password = prompt_password_with_confirmation()
 
             save_mnemonic_file(mnemonic, output_file, password)
@@ -541,31 +555,45 @@ def _print_branch_addresses(
     pending_addresses: set[str],
     frozen_addresses: set[str],
     show_empty: bool = False,
+    new_address_limit: int = 6,
 ) -> tuple[int, int]:
     """Print addresses for one wallet branch and return (total_balance, hidden_count).
 
     When ``show_empty`` is False, addresses with zero balance are skipped
-    except for the first unused "new" address, which is always shown so
-    the user still has a fresh receive address to copy. Total balance is
-    computed over all addresses (even skipped ones) so balance display
-    remains accurate. ``hidden_count`` counts addresses that were
-    omitted from the output because they were empty.
+    with two exceptions:
+
+    * Up to ``new_address_limit`` unused ``new`` addresses are displayed so
+      users (especially in the TUI) can pick multiple fresh receive
+      addresses without dropping to ``--show-empty`` (see issue #463).
+    * ``used-empty`` and ``flagged`` entries are always hidden in this mode
+      because they are not safe to reuse and only add noise.
+
+    Total balance is computed over all addresses (even skipped ones) so
+    balance display remains accurate. ``hidden_count`` counts addresses
+    that were omitted from the output because they were empty.
     """
     from jmcore.bitcoin import sats_to_btc
 
     total_balance = 0
     hidden = 0
-    first_empty_new_shown = False
+    empty_new_shown = 0
+    # Statuses that are unsafe to reuse; hide them entirely when not in
+    # show-empty mode to keep the output actionable.
+    _always_hide_when_empty = {"used-empty", "flagged"}
 
     for addr_info in addresses:
         total_balance += addr_info.balance
 
         # Filter empty addresses unless explicitly requested.
         if not show_empty and addr_info.balance == 0:
-            # Always surface the first "new" (unused) address so the user
-            # still has a receive address in the output.
-            if addr_info.status == "new" and not first_empty_new_shown:
-                first_empty_new_shown = True
+            if addr_info.status == "new" and empty_new_shown < new_address_limit:
+                empty_new_shown += 1
+            elif addr_info.status in _always_hide_when_empty:
+                # Unsafe-to-reuse empty addresses are never surfaced in the
+                # default view; still count them so the "hidden" summary
+                # stays accurate.
+                hidden += 1
+                continue
             else:
                 hidden += 1
                 continue

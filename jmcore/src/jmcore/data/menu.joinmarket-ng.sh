@@ -34,6 +34,15 @@ CONFIG_FILE="${DATA_DIR}/config.toml"
 LOG_DIR="${DATA_DIR}/logs"
 MAKER_ENV="${DATA_DIR}/.maker.env"
 
+# ---- Quiet CLI logging inside the TUI ---------------------------------------
+# jm-wallet / jm-* commands use loguru and log INFO-level messages to stderr
+# (e.g. "Loaded config from ..."). In a menu UI those logs pollute the output
+# panes (issue #459). Default to WARNING-only logging for child commands; the
+# user can still override by setting LOGGING__LEVEL before launching jm-ng.
+if [ -z "${LOGGING__LEVEL:-}" ]; then
+    export LOGGING__LEVEL="WARNING"
+fi
+
 # ---- Defaults for send/coinjoin parameters ----------------------------------
 DEFAULT_AMOUNT="0"
 DEFAULT_MIXDEPTH="0"
@@ -429,6 +438,45 @@ ensure_wallet_password() {
     return 1
 }
 
+# Helper: Prompt the user for a *new* wallet encryption password (with
+# confirmation). Prints the resulting password to stdout -- empty string
+# means the user explicitly opted for no encryption. Returns non-zero if
+# the user cancelled the dialog (the caller should abort the flow).
+#
+# This keeps the wallet-create/import flow entirely inside whiptail so the
+# user never drops back to the bare CLI prompt (which would break the
+# menu UX) and so the captured password can be reused by downstream steps
+# such as post_wallet_create (issue #462).
+prompt_new_wallet_password() {
+    local pwd1 pwd2
+    while true; do
+        pwd1=$(whiptail --title " Wallet Password " \
+            --passwordbox "Enter a password to encrypt the wallet file.\n\nLeave empty for an UNENCRYPTED wallet (not recommended)." \
+            12 64 3>&1 1>&2 2>&3) || return 1
+        if [ -z "$pwd1" ]; then
+            if whiptail --title " No Encryption " \
+                --yesno "Create the wallet WITHOUT encryption?\n\nAnyone with read access to the file can spend your coins." \
+                10 64 --defaultno 3>&1 1>&2 2>&3; then
+                echo ""
+                return 0
+            fi
+            continue
+        fi
+        pwd2=$(whiptail --title " Wallet Password " \
+            --passwordbox "Re-enter the password to confirm." \
+            9 64 3>&1 1>&2 2>&3) || return 1
+        if [ "$pwd1" = "$pwd2" ]; then
+            # Print password on stdout. Use printf to avoid echo mangling
+            # leading dashes or backslashes.
+            printf '%s' "$pwd1"
+            unset pwd1 pwd2
+            return 0
+        fi
+        whiptail --title " Password Mismatch " \
+            --msgbox "The passwords do not match. Please try again." 8 55
+    done
+}
+
 # Helper: Post-wallet-create prompts (set active wallet + store password)
 # Called after a successful wallet generate or import.
 #
@@ -442,9 +490,14 @@ ensure_wallet_password() {
 #   - The store-password prompt (issue #452) now validates the entered
 #     password against the wallet file before writing it to config.toml.
 #
-# Usage: post_wallet_create "/path/to/wallet.mnemonic"
+# An optional second argument supplies the password that was just used to
+# encrypt the wallet (issue #462). When provided, the "store password in
+# config.toml" flow uses it directly instead of asking the user again.
+#
+# Usage: post_wallet_create "/path/to/wallet.mnemonic" [known_password]
 post_wallet_create() {
     local wallet_path="$1"
+    local known_password="${2:-}"
     local set_active=0
 
     # Ask to set as active wallet (default: Yes)
@@ -469,8 +522,25 @@ post_wallet_create() {
     if whiptail --title " Store Password " \
         --yesno "Store the wallet password in config.toml?\n\nThis lets all commands (including the maker) work without\nprompting. If you choose No, the maker will ask each time." \
         12 64 --defaultno 3>&1 1>&2 2>&3; then
-        prompt_and_store_password "$wallet_path" || \
+        # Show the same security warning the interactive path uses so the
+        # user explicitly opts into plain-text storage (#453).
+        if whiptail --title " Security Warning " \
+            --yesno "Storing the wallet password in config.toml saves it in PLAIN TEXT.\n\nAnyone with read access to:\n  $CONFIG_FILE\ncan decrypt your wallet. This effectively defeats the\nwallet encryption.\n\nOnly store the password if the maker bot needs to start\nunattended and you trust the security of this machine.\n\nContinue and store the password?" \
+            18 70 --defaultno 3>&1 1>&2 2>&3; then
+            if [ -n "$known_password" ]; then
+                # Password came from the just-completed wallet creation, so
+                # it trivially matches the wallet -- no need to re-prompt or
+                # re-verify (issue #462).
+                store_password "$known_password"
+                whiptail --title " Password Stored " \
+                    --msgbox "Password saved to config.toml." 8 55
+            else
+                prompt_and_store_password "$wallet_path" || \
+                    echo "Password not stored."
+            fi
+        else
             echo "Password not stored."
+        fi
     fi
 }
 
@@ -588,6 +658,18 @@ while true; do
 
   # Check if a wallet is configured
   CURRENT_WALLET=$(get_mnemonic_file)
+  # If config points at a mnemonic file that no longer exists (e.g. user
+  # deleted it via CLI/file manager), clear the stale entries so the TUI
+  # doesn't keep advertising a broken wallet and every wallet operation
+  # bubbles up a "Mnemonic file not found" traceback (issue #461).
+  if [ -n "$CURRENT_WALLET" ] && [ ! -f "$CURRENT_WALLET" ]; then
+    whiptail --title " Stale Wallet Config " \
+        --msgbox "The configured wallet file no longer exists:\n\n$CURRENT_WALLET\n\nThis usually means the .mnemonic file was deleted\noutside the TUI. Clearing mnemonic_file and\nmnemonic_password from config.toml.\n\nUse 'Wallet Management' to select or create a\nnew active wallet." \
+        16 70 3>&1 1>&2 2>&3 || true
+    clear_config_value "mnemonic_file"
+    clear_config_value "mnemonic_password"
+    CURRENT_WALLET=""
+  fi
   if [ -n "$CURRENT_WALLET" ]; then
     WALLET_INFO="Active Wallet: $(basename "$CURRENT_WALLET")"
   else
@@ -756,6 +838,12 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
       while true; do
         # Refresh wallet info at the START of each W submenu iteration
         CURRENT_WALLET=$(get_mnemonic_file)
+        # Drop stale config if the file is gone (issue #461).
+        if [ -n "$CURRENT_WALLET" ] && [ ! -f "$CURRENT_WALLET" ]; then
+            clear_config_value "mnemonic_file"
+            clear_config_value "mnemonic_password"
+            CURRENT_WALLET=""
+        fi
         if [ -n "$CURRENT_WALLET" ]; then
           WALLET_INFO="Wallet: $(basename "$CURRENT_WALLET")"
         else
@@ -808,6 +896,12 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
               mkdir -p "$DATA_DIR/wallets"
 
+              # Collect the encryption password via whiptail so the user
+              # does not get dropped into the CLI prompt and does not get
+              # asked a second time when storing it in config.toml later
+              # (issue #462). An empty password disables encryption.
+              NEW_PWD=$(prompt_new_wallet_password) || continue
+
               clear
               echo "=== Create New Wallet ==="
               echo ""
@@ -815,16 +909,20 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               echo "IMPORTANT: Write down the seed words! They are your backup."
               echo ""
               echo "Generating wallet..."
-              jm-wallet generate --words "$WORDS" --prompt-password -o "$WALLET_PATH"
+              MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet generate \
+                  --words "$WORDS" --no-prompt-password -o "$WALLET_PATH"
               RESULT=$?
 
               if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
                   echo ""
                   echo "Wallet saved to: $WALLET_PATH"
-                  post_wallet_create "$WALLET_PATH"
+                  # Pass the captured password to post_wallet_create so the
+                  # "store in config" branch can reuse it directly.
+                  post_wallet_create "$WALLET_PATH" "$NEW_PWD"
               else
                   echo "Wallet creation may have failed. Check output above."
               fi
+              unset NEW_PWD
               pause
               ;;
 
@@ -855,21 +953,26 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
               WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
               mkdir -p "$DATA_DIR/wallets"
 
+              # Collect the encryption password upfront (issue #462).
+              NEW_PWD=$(prompt_new_wallet_password) || continue
+
               clear
               echo "=== Import Wallet from Seed ==="
               echo ""
               echo "You will be prompted to enter your BIP39 seed words."
               echo ""
-              jm-wallet import --words "$WORDS" --prompt-password -o "$WALLET_PATH"
+              MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet import \
+                  --words "$WORDS" --no-prompt-password -o "$WALLET_PATH"
               RESULT=$?
 
               if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
                   echo ""
                   echo "Wallet imported to: $WALLET_PATH"
-                  post_wallet_create "$WALLET_PATH"
+                  post_wallet_create "$WALLET_PATH" "$NEW_PWD"
               else
                   echo "Import may have failed. Check output above."
               fi
+              unset NEW_PWD
               pause
               ;;
 
