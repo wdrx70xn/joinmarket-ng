@@ -21,6 +21,10 @@ from jmtumbler.plan import Plan
 runner = CliRunner()
 
 
+def _unused_balances(*args: object, **kwargs: object) -> None:
+    return None
+
+
 def _build_plan(wallet_name: str) -> Plan:
     params = TumbleParameters(
         destinations=["bcrt1qdest0000000000000000000000000000000000abc"],
@@ -252,19 +256,15 @@ class TestPlanDefaultsCounterpartyFromSettings:
             patch("jmtumbler.cli.ensure_config_file"),
             patch("jmtumbler.cli.resolve_mnemonic", return_value=_Resolved()),
             patch("jmtumbler.cli._wallet_name_from_mnemonic", return_value="w"),
-            patch(
-                "jmtumbler.cli._balances_for_mnemonic",
-                return_value=None,
-            ) as m_bal,
+            patch("jmtumbler.cli._balances_for_mnemonic", new=_unused_balances),
             patch("jmtumbler.cli.PlanBuilder", _FakeBuilder),
         ):
-            # _balances_for_mnemonic is awaited inside asyncio.run; return a
-            # coroutine-compatible result by patching asyncio.run itself.
+            # _balances_for_mnemonic is executed inside asyncio.run; stub the
+            # run result directly so the CLI sees the expected balance map.
             with patch(
                 "jmtumbler.cli.asyncio.run",
                 return_value={0: 1_000_000, 1: 0},
             ):
-                m_bal.return_value = {0: 1_000_000, 1: 0}
                 result = runner.invoke(
                     app,
                     [
@@ -279,3 +279,47 @@ class TestPlanDefaultsCounterpartyFromSettings:
         params = captured["params"]
         assert params.maker_count_min == 4
         assert params.maker_count_max == 4
+
+
+class TestPlanSingleFundedMixdepth:
+    def test_accepts_two_destinations_when_only_one_mixdepth_is_funded(
+        self, tmp_path: Path
+    ) -> None:
+        settings = _FakeSettings(tmp_path, network="signet")
+
+        class _Taker:
+            counterparty_count = 4
+
+        settings.taker = _Taker()  # type: ignore[attr-defined]
+
+        class _Resolved:
+            mnemonic = "abandon " * 11 + "about"
+            bip39_passphrase = ""
+            creation_height = None
+
+        with (
+            patch("jmtumbler.cli.setup_cli", return_value=settings),
+            patch("jmtumbler.cli.ensure_config_file"),
+            patch("jmtumbler.cli.resolve_mnemonic", return_value=_Resolved()),
+            patch("jmtumbler.cli._wallet_name_from_mnemonic", return_value="default"),
+            patch("jmtumbler.cli._balances_for_mnemonic", new=_unused_balances),
+            patch(
+                "jmtumbler.cli.asyncio.run",
+                return_value={0: 0, 1: 23_430_165, 2: 0, 3: 0, 4: 0},
+            ),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "plan",
+                    "-w",
+                    "default",
+                    "-d",
+                    "tb1qcfyfz4z5nwq0fk6qqjh6h74rsfghqtn5mgn2fj",
+                    "-d",
+                    "tb1qc60pcxcupzw589hwq0fcjamatsvg39k5q2el82",
+                ],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        assert "Plan written to" in result.stdout
