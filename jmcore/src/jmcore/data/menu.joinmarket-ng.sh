@@ -142,7 +142,7 @@ set_config_value() {
 
 # Helper: List .mnemonic files in wallets dir
 list_wallets() {
-    find "$DATA_DIR/wallets" -maxdepth 1 -name '*.mnemonic' -type f -printf '%f\n' 2>/dev/null
+    find "$DATA_DIR/wallets" -maxdepth 1 -name '*.mnemonic' -type f -printf '%f\n' 2>/dev/null | sort
 }
 
 # Helper: Prompt for a parameter using whiptail inputbox.
