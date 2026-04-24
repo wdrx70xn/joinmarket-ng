@@ -23,6 +23,7 @@ from loguru import logger
 
 from jmwalletd.deps import get_daemon_state, set_daemon_state
 from jmwalletd.errors import JMWalletDaemonError
+from jmwalletd.log_buffer import install_log_sink
 from jmwalletd.state import DaemonState
 
 
@@ -93,6 +94,11 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
     set_daemon_state(state)
 
     # ------------------------------------------------------------------
+    # In-memory log ring buffer so jam's Logs page can fetch recent output.
+    # ------------------------------------------------------------------
+    install_log_sink()
+
+    # ------------------------------------------------------------------
     # Cache-busting response headers (matching reference).
     # ------------------------------------------------------------------
     @app.middleware("http")
@@ -127,6 +133,7 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
     # Register routers.
     # ------------------------------------------------------------------
     from jmwalletd.routers.coinjoin import router as coinjoin_router
+    from jmwalletd.routers.logs import router as logs_router
     from jmwalletd.routers.obwatch import router as obwatch_router
     from jmwalletd.routers.tumbler import router as tumbler_router
     from jmwalletd.routers.wallet import router as wallet_router
@@ -138,6 +145,7 @@ def create_app(*, data_dir: Path | None = None) -> FastAPI:
     app.include_router(coinjoin_router, prefix="/api/v1")
     app.include_router(tumbler_router, prefix="/api/v1")
     app.include_router(obwatch_router, prefix="/api/v1")
+    app.include_router(logs_router, prefix="/api/v1")
 
     # JAM also calls /obwatch/* without the /api/v1 prefix.
     app.include_router(obwatch_router)
