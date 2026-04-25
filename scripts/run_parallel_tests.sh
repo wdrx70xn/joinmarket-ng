@@ -86,6 +86,7 @@ declare -A PORT_OFFSETS=(
     [neutrino-coinjoin]=8008
     [neutrino-reference]=9009
     [reference-maker]=10010
+    [tumbler]=11011
 )
 
 # =============================================================================
@@ -607,11 +608,12 @@ run_suite_e2e() {
         BITCOIN_RPC_URL="http://127.0.0.1:${btc_rpc}" \
         BITCOIN_RPC_USER=test \
         BITCOIN_RPC_PASSWORD=test \
+        JMWALLETD_URL="https://127.0.0.1:$((28183 + offset))" \
         DIRECTORY_PORT="${dir_port}" \
         JM_CONTAINER_PREFIX="${prefix}" \
         COMPOSE_PROJECT_NAME="jmpt-${suite}" \
         COVERAGE_FILE=".coverage.${suite}" \
-        pytest -c pytest.ini -m e2e --fail-on-skip \
+        pytest -c pytest.ini -m "e2e and not tumbler_e2e" --fail-on-skip \
             -lv --timeout=300 --reruns=1 --reruns-delay=10 \
             --cov --cov-report=term-missing \
             tests/
@@ -629,6 +631,69 @@ run_suite_e2e() {
             --cov --cov-report=term-missing \
             maker/tests/integration/ jmwallet/tests/ directory_server/tests/
     } > "$log" 2>&1 || rc=$?
+    cleanup_suite "$suite"
+    return $rc
+}
+
+run_suite_tumbler() {
+    local suite="tumbler"
+    local log="${PARALLEL_DIR}/${suite}.log"
+    local offset=${PORT_OFFSETS[$suite]}
+    local btc_rpc=$((18443 + offset))
+    local dir_port=$((5222 + offset))
+    local walletd_port=$((28183 + offset))
+    local prefix="jm-${suite}"
+
+    log_suite "Starting: Tumbler E2E Tests ($suite)"
+    local rc=0
+    {
+        generate_override "$suite"
+        cleanup_suite "$suite"
+        JMWALLETD_IMAGE="joinmarket-ng-jmwalletd:latest" \
+        MAKER_IMAGE="joinmarket-ng-maker1:latest" \
+        DIRECTORY_IMAGE="joinmarket-ng-directory:latest" \
+        ORDERBOOK_WATCHER_IMAGE="joinmarket-ng-orderbook-watcher:latest" \
+        compose_cmd "$suite" --profile e2e up -d \
+            bitcoin miner directory directory2 orderbook-watcher tor tor-init wallet-funder \
+            jmwalletd maker1 maker2 maker3
+
+        wait_for_bitcoin_rpc "$suite" "$btc_rpc"
+        wait_for_port "$dir_port" "Directory ($suite)"
+        wait_for_wallet_funder "$suite"
+
+        sleep 20
+
+        BITCOIN_RPC_URL="http://127.0.0.1:${btc_rpc}" \
+        BITCOIN_RPC_USER=test \
+        BITCOIN_RPC_PASSWORD=test \
+        JMWALLETD_URL="https://127.0.0.1:${walletd_port}" \
+        DIRECTORY_PORT="${dir_port}" \
+        JM_CONTAINER_PREFIX="${prefix}" \
+        COMPOSE_PROJECT_NAME="jmpt-${suite}" \
+        COVERAGE_FILE=".coverage.${suite}" \
+        pytest -c pytest.ini -m tumbler_e2e --fail-on-skip \
+            -lv --timeout=1800 \
+            --tb=long -rA \
+            --cov --cov-report=term-missing \
+            tests/e2e/test_tumbler_*.py
+    } > "$log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        # On failure, dump container logs for the most relevant services
+        # (walletd + makers + bitcoin) so we can diagnose tumbler stalls
+        # without re-running the whole suite.
+        {
+            echo
+            echo "=========================================================="
+            echo "Container logs for diagnostics (suite=${suite}, rc=${rc})"
+            echo "=========================================================="
+            for svc in jmwalletd maker1 maker2 maker3 bitcoin miner directory directory2; do
+                echo
+                echo "----- ${svc} -----"
+                COMPOSE_PROJECT_NAME="jmpt-${suite}" \
+                    compose_cmd "$suite" logs --tail=200 "$svc" 2>&1 || true
+            done
+        } >> "$log" 2>&1 || true
+    fi
     cleanup_suite "$suite"
     return $rc
 }
@@ -1126,6 +1191,7 @@ main() {
     launch_suite "neutrino-coinjoin" run_suite_neutrino_coinjoin
     launch_suite "neutrino-reference" run_suite_neutrino_reference
     launch_suite "reference-maker" run_suite_reference_maker
+    launch_suite "tumbler" run_suite_tumbler
     launch_suite "playwright" run_suite_playwright
 
     echo
@@ -1175,6 +1241,11 @@ case "${1:-}" in
         export BITCOIN_RPC_USER="test"
         export BITCOIN_RPC_PASSWORD="test"
 
+        # Keep single-suite reruns aligned with the full runner so they do not
+        # accidentally exercise stale Docker images.
+        build_images
+        setup_reference_implementation
+
         # Map suite name to runner function
         case "$suite" in
             unit)                  run_suite_unit ;;
@@ -1189,6 +1260,7 @@ case "${1:-}" in
             neutrino-coinjoin)     run_suite_neutrino_coinjoin ;;
             neutrino-reference)    run_suite_neutrino_reference ;;
             reference-maker)       run_suite_reference_maker ;;
+            tumbler)               run_suite_tumbler ;;
             *)
                 log_error "Unknown suite: $suite"
                 log_info "Available suites: ${!PORT_OFFSETS[*]}"
@@ -1224,6 +1296,7 @@ Available suites:
   neutrino-coinjoin     Neutrino CoinJoin tests
   neutrino-reference    Neutrino + reference combined tests
   reference-maker       Reference maker tests (JAM makers + our taker)
+  tumbler               Tumbler end-to-end tests
 
 Logs are written to: tmp/parallel-tests/<suite>.log
 
