@@ -28,6 +28,7 @@ from jmwallet.wallet.service import WalletService
 from loguru import logger
 
 from tumbler.builder import PlanBuilder, TumbleParameters
+from tumbler.maker_policy import apply_tumbler_maker_policy
 from tumbler.persistence import (
     PlanCorruptError,
     PlanNotFoundError,
@@ -729,6 +730,12 @@ async def _run_plan(
             tor_socks_host=tor_socks_host,
             tor_socks_port=tor_socks_port,
         )
+        # Tumbler maker sessions must run as 0-fee sw0absoffer with no
+        # fidelity bond; otherwise the offer is unlikely to be picked
+        # (bondless + non-zero fee) or, if a bond is reused, the session
+        # links every phase under the same identity. See
+        # ``apply_tumbler_maker_policy`` for the full rationale.
+        apply_tumbler_maker_policy(config)
         _ = SecretStr  # re-export guard for linter (SecretStr is used via config)
         _ = create_maker_wallet  # silence unused-import; reserved for future fork
         return MakerBot(wallet=wallet, backend=backend, config=config)

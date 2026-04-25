@@ -387,6 +387,11 @@ async def start_plan(
             socks_port=jm_settings.tor.socks_port,
             stream_isolation=jm_settings.tor.stream_isolation,
         )
+        # Tumbler maker sessions must run as 0-fee sw0absoffer with no
+        # fidelity bond. See ``tumbler.maker_policy`` for the rationale.
+        from tumbler.maker_policy import apply_tumbler_maker_policy
+
+        apply_tumbler_maker_policy(config)
         return MakerBot(wallet=ws, backend=backend, config=config)
 
     def _on_state_changed(p: Plan) -> None:
