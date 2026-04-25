@@ -60,7 +60,19 @@ class TumbleParameters:
     """Current confirmed balance per mixdepth, in satoshis."""
     maker_count_min: int = 5
     maker_count_max: int = 9
-    time_lambda_seconds: float = 30.0
+    time_lambda_seconds: float = 60.0 * 60.0
+    """Average wait between phases (mean of an exponential distribution).
+
+    Default is 60 minutes, matching the reference implementation's
+    ``--timelambda=60`` option. Anything shorter risks defeating the
+    timing-correlation defence; values are clamped per-sample at 10x mean.
+    """
+    stage1_wait_multiplier: float = 3.0
+    """Multiplier on ``time_lambda_seconds`` for stage-1 (cleavage) sweeps.
+
+    Reference default is 3x: stage-1 cuts the link to the pre-tumble coin
+    history, so longer waits there are particularly important.
+    """
     include_maker_sessions: bool = True
     mincjamount_sats: int = 100_000
     maker_session_seconds: float = 20.0 * 60.0
@@ -239,7 +251,9 @@ class PlanBuilder:
         return max(lo, min(hi, value))
 
     def _sample_wait(self, rng: random.Random, stage1: bool = False) -> float:
-        lam = self.params.time_lambda_seconds * (1.5 if stage1 else 1.0)
+        lam = self.params.time_lambda_seconds * (
+            self.params.stage1_wait_multiplier if stage1 else 1.0
+        )
         # Exponential with mean ``lam``. Clamp to avoid pathological pauses.
         u = rng.random()
         # rng.random() can return 0; guard against log(0).
