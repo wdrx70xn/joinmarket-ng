@@ -317,9 +317,10 @@ total cost before the plan runs. The estimate covers:
 
 - **Counterparty fees** per taker phase, taken as `max(abs, rel*amount)
   * counterparty_count`, summed across all taker phases (sweeps included).
-- **Miner fees** per taker phase, computed from a coarse vsize model
-  (1 input + (N+1) outputs, ~130 vB per p2wpkh I/O) at the resolved
-  sat/vB.
+- **Miner fees** per taker phase, computed from the same coarse fee
+  model the taker uses for its own operator prompts: ~68 vB per P2WPKH
+  input, ~31 vB per P2WPKH output, plus ~11 vB fixed overhead, at the
+  resolved sat/vB.
 - **Fee-rate source labelling**: `configured` if the user passed
   `--fee-rate`, `estimated` if the runner queried `estimatesmartfee`,
   `fallback` if neither was available (default 10 sat/vB).

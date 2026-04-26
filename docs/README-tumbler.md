@@ -185,9 +185,10 @@ Three cost components contribute to the worst case:
    amount (`max_cj_fee_rel`), whichever is larger. The plan estimator
    uses these caps as an upper bound; actual fees depend on the orders
    selected at runtime.
-2. **Miner fees.** Estimated per phase from a roughly accurate vsize
-   model (1 input, N+1 outputs at ~130 vB per p2wpkh I/O) at the resolved
-   sat/vB. If `--block-target` is set the runner asks the backend for an
+2. **Miner fees.** Estimated per phase from the same coarse vsize
+   model the taker uses for its own prompts: ~68 vB per P2WPKH input,
+   ~31 vB per P2WPKH output, plus ~11 vB fixed overhead. If `--block-target`
+   is set the runner asks the backend for an
    estimate; otherwise `--fee-rate` applies; otherwise the estimator
    falls back to 10 sat/vB and labels the source as `fallback`.
 3. **Tumbler-internal CJs.** Stage 1 doesn't reach an external
