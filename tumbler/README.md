@@ -1,26 +1,63 @@
 # JoinMarket Tumbler
 
-High-level CoinJoin scheduler for joinmarket-ng. Plans a role-mixed tumble
-across destinations and persists progress to a human-readable YAML file so
-that long-running schedules survive restarts.
+High-level CoinJoin scheduler for joinmarket-ng.
 
-## Features
+This README is the short practical entry point. For user-facing concepts and
+privacy rationale, see [`docs/README-tumbler.md`](../docs/README-tumbler.md).
+For implementation details, see
+[`docs/technical/tumbler-redesign.md`](../docs/technical/tumbler-redesign.md).
 
-- **Role-mixed schedules**: interleaves taker CoinJoins with optional maker
-  sessions to diversify on-chain signatures.
-- **YAML persistence**: each plan is stored as a readable `plan.yaml` that can
-  be inspected, resumed, or cancelled.
-- **Concurrency-safe**: the runner coordinates with `jmwalletd` so manual
-  taker/maker operations are blocked while a tumble is in progress.
-- **Idle-timeout fallback**: maker phases exit gracefully when no CoinJoin is
-  served within a configurable window, preventing indefinite waits.
-- **CLI and HTTP**: drive the scheduler standalone via `jm-tumbler`, or through
-  the tumbler endpoints exposed by `jmwalletd`.
+## Quick Start
 
-## Documentation
+Build a plan:
 
-For full documentation, see
-[tumbler Documentation](https://joinmarket-ng.github.io/joinmarket-ng/README-tumbler/).
+```bash
+jm-tumbler plan \
+  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
+  --destination bc1qdest1... \
+  --destination bc1qdest2... \
+  --destination bc1qdest3...
+```
+
+Inspect it:
+
+```bash
+jm-tumbler status --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
+```
+
+Run it:
+
+```bash
+jm-tumbler run --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
+```
+
+Delete it:
+
+```bash
+jm-tumbler delete --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
+```
+
+Notes:
+
+- Use at least three destination addresses for real tumbles.
+- Progress is persisted to `plan.yaml`, so `jm-tumbler run` can resume.
+- While a tumble is active, `jmwalletd` blocks manual taker/maker operations on
+  the same wallet.
+
+## Development
+
+Install editable packages:
+
+```bash
+pip install -e jmcore -e jmwallet -e taker -e maker
+pip install -e tumbler[dev]
+```
+
+Run tests:
+
+```bash
+pytest tumbler/tests
+```
 
 <!-- AUTO-GENERATED HELP START: jm-tumbler -->
 
@@ -264,21 +301,3 @@ For full documentation, see
 
 
 <!-- AUTO-GENERATED HELP END: jm-tumbler -->
-
-## Install (editable)
-
-```
-pip install -e jmcore -e jmwallet -e taker -e maker
-pip install -e tumbler[dev]
-```
-
-## Tests
-
-```
-pytest tumbler/tests
-```
-
-## Design notes
-
-See [`docs/technical/tumbler-redesign.md`](../docs/technical/tumbler-redesign.md)
-for the full design.
