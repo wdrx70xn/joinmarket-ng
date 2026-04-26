@@ -121,6 +121,19 @@ def test_tui_script_post_wallet_create_clears_password_on_activate() -> None:
     assert 'clear_config_value "mnemonic_password"' in post_create_block
 
 
+def test_tui_script_fidelity_bonds_list_uses_msgbox_when_empty() -> None:
+    """Fidelity Bonds LIST should surface the "no bonds" case via a TUI
+    msgbox instead of leaving raw CLI output behind (issue #459)."""
+    content = SCRIPT_PATH.read_text()
+    list_block = content.split("LIST)", 1)[1].split("CREATE)", 1)[0]
+    assert "whiptail" in list_block
+    assert "No fidelity bonds" in list_block
+    # Must capture jm-wallet output so it can be inspected before deciding
+    # which TUI element to show.
+    assert "jm-wallet list-bonds" in list_block
+    assert "BONDS_OUT" in list_block
+
+
 def test_tui_script_maker_start_has_wallet_picker() -> None:
     """Maker START must offer wallet selection before password prompts
     when multiple wallets exist (issue #454)."""

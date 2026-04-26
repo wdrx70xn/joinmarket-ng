@@ -1280,20 +1280,47 @@ $WALLET_INFO | Maker Bot: $MAKER_STATUS
                 [ $? -ne 0 ] && break
                 case $BCHOICE in
                     LIST)
-                        clear
-                        echo "=== Fidelity Bonds ==="
-                        echo ""
                         if [ -z "$CURRENT_WALLET" ]; then
-                            echo "ERROR: No wallet configured. Set up a wallet first (W -> SEL or NEW)."
-                        else
-                            echo "Scanning for fidelity bonds (this may take a moment)..."
-                            echo ""
-                            (
-                                ensure_wallet_password "$CURRENT_WALLET" || exit 1
-                                jm-wallet list-bonds
-                            )
+                            whiptail --title " Fidelity Bonds " --msgbox \
+                                "No wallet configured.\n\nSet up a wallet first (W -> SEL or NEW)." 9 60
+                            continue
                         fi
-                        pause
+                        # Capture the output so we can show a clean TUI msgbox
+                        # when there are no bonds (issue #459) instead of leaving
+                        # the user staring at CLI output. The scan touches the
+                        # network and can take several seconds; we run it in a
+                        # subshell that prints a "scanning" notice on the bare
+                        # terminal so the user has feedback during the wait.
+                        BONDS_OUT_FILE=$(mktemp)
+                        clear
+                        echo "Scanning for fidelity bonds (this may take a moment)..."
+                        (
+                            ensure_wallet_password "$CURRENT_WALLET" || exit 1
+                            jm-wallet list-bonds 2>&1
+                        ) > "$BONDS_OUT_FILE"
+                        BONDS_RC=$?
+                        BONDS_OUT=$(cat "$BONDS_OUT_FILE")
+                        rm -f "$BONDS_OUT_FILE"
+                        if [ "$BONDS_RC" -ne 0 ]; then
+                            # Surface failures as a TUI error rather than
+                            # silently leaving raw stderr behind.
+                            whiptail --title " Fidelity Bonds -- Error " --msgbox \
+                                "Failed to list fidelity bonds.\n\n${BONDS_OUT:-(no output)}" \
+                                20 76
+                        elif printf '%s' "$BONDS_OUT" | grep -qi "No fidelity bonds"; then
+                            whiptail --title " Fidelity Bonds " --msgbox \
+                                "No fidelity bonds found for this wallet.\n\nUse 'CREATE' to generate a bond address, or send\ncoins to an existing one to fund it." \
+                                12 64
+                        else
+                            # Normal listing: keep the tabular output on the
+                            # terminal because whiptail's msgbox is too narrow
+                            # for the bond table.
+                            clear
+                            echo "=== Fidelity Bonds ==="
+                            echo ""
+                            printf '%s\n' "$BONDS_OUT"
+                            pause
+                        fi
                         ;;
                     CREATE)
                         if [ -z "$CURRENT_WALLET" ]; then
