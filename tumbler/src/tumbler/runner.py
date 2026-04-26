@@ -42,6 +42,13 @@ from tumbler.plan import (
     TakerCoinjoinPhase,
 )
 
+_LOW_CONFIRMATION_HINTS = (
+    "No eligible UTXOs in mixdepth",
+    "No suitable UTXOs for PoDLE",
+    "Wait for more confirmations",
+    "confirmation(s)",
+)
+
 
 class _BackendFactory(Protocol):
     """Awaitable that returns a fresh blockchain backend."""
@@ -95,6 +102,9 @@ class RunnerContext:
     # Polling interval for ``get_confirmations``. Tests override this to
     # keep runs fast.
     confirmation_poll_interval: float = 5.0
+    # Delay before retrying a failed taker phase. Applied with a simple
+    # linear backoff: ``retry_delay_seconds * attempt_count``.
+    retry_delay_seconds: float = 30.0
 
 
 class TumbleRunner:
@@ -138,7 +148,7 @@ class TumbleRunner:
                     return self.plan
                 await self._run_one_phase(phase)
                 if phase.status == PhaseStatus.FAILED:
-                    if self._try_tweak_for_retry(phase):
+                    if await self._try_tweak_for_retry(phase):
                         # Re-run the same phase index; bookkeeping
                         # (attempt_count, PENDING reset) has been applied.
                         self._persist()
@@ -228,22 +238,17 @@ class TumbleRunner:
 
     # ---------------------------------------------- retry / tweak (taker) ---
 
-    def _try_tweak_for_retry(self, phase: Phase) -> bool:
-        """
-        Mirror the reference tumbler's ``tweak_tumble_schedule``: after a
-        failed taker-coinjoin phase, try to make the next attempt more
-        likely to succeed by
+    async def _try_tweak_for_retry(self, phase: Phase) -> bool:
+        """Rearm a failed taker phase for retry.
 
-        * lowering ``counterparty_count`` toward ``maker_count_min``
-          (reference uses ``minimum_makers``),
-        * swapping the destination to the ``INTERNAL`` sentinel if it was
-          an externally-supplied address (so we don't keep retrying the
-          same final output, mirroring the reference behaviour of only
-          keeping external destinations on successful sweeps).
+        The runner no longer mutates ``counterparty_count``: taker-side maker
+        selection and replacement logic already adapts to the live orderbook,
+        while runner-side lowering was actively wrong for unrelated failures
+        like insufficient confirmations on the source mixdepth.
 
-        Returns ``True`` if the phase was rearmed for a retry, ``False``
-        if the retry budget is exhausted or the phase is not retryable.
-        Maker-session phases are currently not retried.
+        The only retained schedule tweak is swapping an external destination
+        to ``INTERNAL`` before retrying, mirroring the reference tumbler's
+        preference to only keep external destinations on successful sweeps.
         """
         if not isinstance(phase, TakerCoinjoinPhase):
             return False
@@ -261,19 +266,6 @@ class TumbleRunner:
             return False
 
         phase.attempt_count += 1
-
-        # Lower counterparty_count toward the configured minimum.
-        minimum_makers = self.plan.parameters.maker_count_min
-        if phase.counterparty_count > minimum_makers:
-            new_cp = max(minimum_makers, phase.counterparty_count - 1)
-            logger.info(
-                "tumbler phase {} retry {}: lowering counterparty_count {} -> {}",
-                phase.index,
-                phase.attempt_count,
-                phase.counterparty_count,
-                new_cp,
-            )
-            phase.counterparty_count = new_cp
 
         # If the destination is an externally-supplied address, swap it
         # to the INTERNAL sentinel for the retry. The operator can still
@@ -293,7 +285,27 @@ class TumbleRunner:
         phase.status = PhaseStatus.PENDING
         phase.started_at = None
         phase.finished_at = None
+        previous_error = phase.error or ""
         phase.error = None
+
+        retry_delay = max(float(self.ctx.retry_delay_seconds), 0.0)
+        if retry_delay > 0:
+            wait_seconds = retry_delay * phase.attempt_count
+            if any(hint in previous_error for hint in _LOW_CONFIRMATION_HINTS):
+                logger.info(
+                    "tumbler phase {} retry {}: waiting {:.1f}s for confirmations/UTXO age",
+                    phase.index,
+                    phase.attempt_count,
+                    wait_seconds,
+                )
+            else:
+                logger.info(
+                    "tumbler phase {} retry {}: waiting {:.1f}s before retry",
+                    phase.index,
+                    phase.attempt_count,
+                    wait_seconds,
+                )
+            await self._wait_interruptibly(wait_seconds)
         return True
 
     # -------------------------------------- taker (single CJ) ---------------
@@ -328,9 +340,14 @@ class TumbleRunner:
                 do_coinjoin_kwargs.pop("exclude_nicks", None)
                 result = await taker.do_coinjoin(**do_coinjoin_kwargs)
             if result is None:
+                taker_reason = getattr(taker, "last_failure_reason", None)
+                taker_state = getattr(taker, "state", None)
+                detail = (
+                    f": {taker_reason}" if isinstance(taker_reason, str) and taker_reason else ""
+                )
                 raise TakerPhaseError(
                     "CoinJoin did not broadcast: taker returned no txid "
-                    "(see taker logs above for the cause, e.g. not enough compatible makers)"
+                    f"(state={taker_state!s}; see taker logs above for the cause{detail})"
                 )
             if isinstance(result, str):
                 phase.txid = result
@@ -506,11 +523,19 @@ class TumbleRunner:
     async def _wait_interruptibly(self, seconds: float) -> None:
         if seconds <= 0:
             return
-        try:
-            await asyncio.wait_for(self._stop_requested.wait(), timeout=seconds)
-        except TimeoutError:
-            return
-        raise _StopRequestedError()
+        sleep_task: asyncio.Future[None] = asyncio.ensure_future(self.ctx.sleep(seconds))
+        stop_task: asyncio.Task[bool] = asyncio.create_task(self._stop_requested.wait())
+        waitables: set[asyncio.Future[Any]] = {sleep_task, stop_task}
+        done, pending = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        if stop_task in done and self._stop_requested.is_set():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await sleep_task
+            raise _StopRequestedError()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stop_task
+        await sleep_task
 
     async def _wait_for_phase_confirmations(self, phase: Phase) -> None:
         """Wait for the phase's broadcast txid(s) to reach the confirmation gate.
