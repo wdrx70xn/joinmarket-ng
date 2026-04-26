@@ -85,6 +85,8 @@ class FakeTaker:
         self.started = False
         self.stopped_with: dict[str, Any] | None = None
         self.do_coinjoin_kwargs: dict[str, Any] | None = None
+        self.state = "idle"
+        self.last_failure_reason: str | None = None
         # Default last_used_nicks: the runner reads this to populate the
         # exclusion set for the next phase. Tests override per-instance.
         self.last_used_nicks: set[str] = set()
@@ -167,6 +169,8 @@ def _ctx(
     *,
     taker_factory: Any,
     maker_factory: Any | None = None,
+    sleep: Any | None = None,
+    retry_delay_seconds: float = 0.0,
 ) -> RunnerContext:
     async def zero_sleep(_: float) -> None:
         return None
@@ -177,7 +181,8 @@ def _ctx(
         data_dir=tmp_path,
         taker_factory=taker_factory,
         maker_factory=maker_factory,
-        sleep=zero_sleep,
+        sleep=sleep or zero_sleep,
+        retry_delay_seconds=retry_delay_seconds,
     )
 
 
@@ -277,8 +282,8 @@ class TestRunnerFailure:
 class TestRunnerRetry:
     """
     Exercise the ``tweak_tumble_schedule`` equivalent: on a failed
-    taker-coinjoin phase the runner should rearm the same phase with a
-    lower ``counterparty_count`` and an ``INTERNAL`` destination, up to
+    taker-coinjoin phase the runner should rearm the same phase (with an
+    optional retry delay, and possibly an ``INTERNAL`` destination), up to
     ``max_phase_retries`` times before failing the whole plan.
     """
 
@@ -308,6 +313,8 @@ class TestRunnerRetry:
                 )
                 # Fail the first attempt of phase 0, succeed afterwards.
                 if phase.index == 0 and phase.attempt_count == 0:
+                    t.state = "failed"
+                    t.last_failure_reason = "No eligible UTXOs in mixdepth 1"
                     return None  # signals TakerPhaseError inside runner
                 return f"txid-{phase.index}-{phase.attempt_count}"
 
@@ -350,6 +357,8 @@ class TestRunnerRetry:
                 if phase.index == target_index:
                     observed.append(destination)
                     if phase.attempt_count == 0:
+                        t.state = "failed"
+                        t.last_failure_reason = "maker negotiation failed"
                         return None
                 return f"txid-{phase.index}"
 
@@ -368,10 +377,8 @@ class TestRunnerRetry:
         # The phase record itself now carries the INTERNAL sentinel.
         assert result.phases[target_index].destination == "INTERNAL"
 
-    async def test_retry_lowers_counterparty_count_toward_minimum(self, tmp_path: Path) -> None:
+    async def test_retry_keeps_counterparty_count_unchanged(self, tmp_path: Path) -> None:
         plan = _plan(tmp_path)
-        # Force-set the first phase's counterparty_count above the floor
-        # so the tweak has room to reduce it.
         stage1 = plan.phases[0]
         assert isinstance(stage1, TakerCoinjoinPhase)
         stage1.counterparty_count = plan.parameters.maker_count_min + 2
@@ -390,6 +397,8 @@ class TestRunnerRetry:
                 if phase.index == 0:
                     seen_cp.append(counterparty_count)
                     if phase.attempt_count == 0:
+                        t.state = "failed"
+                        t.last_failure_reason = "temporary maker failure"
                         return None
                 return "tx"
 
@@ -400,10 +409,93 @@ class TestRunnerRetry:
         result = await runner.run()
 
         assert result.status == PlanStatus.COMPLETED
-        # Two calls: first at the original count, second one lower.
+        # Two calls: first at the original count, second one unchanged.
         assert len(seen_cp) == 2
         assert seen_cp[0] == plan.parameters.maker_count_min + 2
-        assert seen_cp[1] == plan.parameters.maker_count_min + 1
+        assert seen_cp[1] == plan.parameters.maker_count_min + 2
+
+    async def test_retry_waits_before_rearming_phase(self, tmp_path: Path) -> None:
+        plan = _plan(tmp_path)
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        async def make_taker(phase: Any) -> FakeTaker:
+            t = FakeTaker(phase)
+
+            async def flaky(
+                amount: int,
+                destination: str,
+                mixdepth: int = 0,
+                counterparty_count: int | None = None,
+            ) -> str | None:
+                if phase.index == 0 and phase.attempt_count == 0:
+                    t.state = "failed"
+                    t.last_failure_reason = (
+                        "No eligible UTXOs in mixdepth 1; wait for more confirmations"
+                    )
+                    return None
+                return "tx"
+
+            t.do_coinjoin = flaky  # type: ignore[assignment]
+            return t
+
+        runner = TumbleRunner(
+            plan,
+            _ctx(
+                tmp_path,
+                taker_factory=make_taker,
+                sleep=fake_sleep,
+                retry_delay_seconds=7.0,
+            ),
+        )
+        result = await runner.run()
+
+        assert result.status == PlanStatus.COMPLETED
+        # One retry after the first failure -> 7s backoff logged through sleep.
+        assert 7.0 in sleeps
+
+    async def test_retry_waits_for_low_confirmation_failures(self, tmp_path: Path) -> None:
+        plan = _plan(tmp_path)
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        async def make_taker(phase: Any) -> FakeTaker:
+            t = FakeTaker(phase)
+
+            async def flaky(
+                amount: int,
+                destination: str,
+                mixdepth: int = 0,
+                counterparty_count: int | None = None,
+            ) -> str | None:
+                if phase.index == 0 and phase.attempt_count == 0:
+                    t.state = "failed"
+                    t.last_failure_reason = (
+                        "No eligible UTXOs in mixdepth 1; wait for more confirmations"
+                    )
+                    return None
+                return "tx"
+
+            t.do_coinjoin = flaky  # type: ignore[assignment]
+            return t
+
+        runner = TumbleRunner(
+            plan,
+            _ctx(
+                tmp_path,
+                taker_factory=make_taker,
+                sleep=fake_sleep,
+                retry_delay_seconds=11.0,
+            ),
+        )
+        result = await runner.run()
+
+        assert result.status == PlanStatus.COMPLETED
+        assert 11.0 in sleeps
 
     async def test_retry_budget_exhaustion_fails_plan(self, tmp_path: Path) -> None:
         plan = _plan(tmp_path)
@@ -422,6 +514,8 @@ class TestRunnerRetry:
                 counterparty_count: int | None = None,
             ) -> str | None:
                 call_counter["n"] += 1
+                t.state = "failed"
+                t.last_failure_reason = "persistent failure"
                 return None  # always fails → TakerPhaseError
 
             t.do_coinjoin = always_fail  # type: ignore[assignment]
@@ -454,6 +548,8 @@ class TestRunnerRetry:
                 counterparty_count: int | None = None,
             ) -> str | None:
                 calls["n"] += 1
+                t.state = "failed"
+                t.last_failure_reason = "persistent failure"
                 return None
 
             t.do_coinjoin = always_fail  # type: ignore[assignment]

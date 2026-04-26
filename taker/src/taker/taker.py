@@ -149,6 +149,7 @@ class Taker(TakerMonitoringMixin):
         # honest-default fallback are added incrementally, so the set always
         # reflects every counterparty that ended up in the final tx.
         self.last_used_nicks: set[str] = set()
+        self.last_failure_reason: str | None = None
         self.cj_destination: str = ""  # Taker's CJ destination address for broadcast verification
         self.taker_change_address: str = ""  # Taker's change address for broadcast verification
         # For sweeps: store the tx_fee budget calculated at order selection time
@@ -414,6 +415,7 @@ class Taker(TakerMonitoringMixin):
             # Reset per-call state so callers reading ``last_used_nicks`` after
             # a failure don't pick up nicks from a previous successful round.
             self.last_used_nicks = set()
+            self.last_failure_reason = None
             n_makers = counterparty_count or self.config.counterparty_count
 
             # Determine destination address
@@ -431,6 +433,7 @@ class Taker(TakerMonitoringMixin):
                 await self._resolve_fee_rate()
             except ValueError as e:
                 logger.error(str(e))
+                self.last_failure_reason = str(e)
                 self.state = TakerState.FAILED
                 return None
 
@@ -459,7 +462,9 @@ class Taker(TakerMonitoringMixin):
                         u for u in available_utxos if u.confirmations >= min_age or u.frozen
                     ]
                     if not available_utxos:
-                        logger.error(f"No UTXOs in mixdepth {mixdepth}")
+                        reason = f"No UTXOs in mixdepth {mixdepth}"
+                        logger.error(reason)
+                        self.last_failure_reason = reason
                         self.state = TakerState.FAILED
                         return None
 
@@ -470,10 +475,12 @@ class Taker(TakerMonitoringMixin):
                         if not u.frozen and not (u.is_fidelity_bond and u.is_locked)
                     ]
                     if not selectable:
-                        logger.error(
+                        reason = (
                             f"No eligible UTXOs in mixdepth {mixdepth} "
                             f"(all {len(available_utxos)} UTXOs are frozen or locked)"
                         )
+                        logger.error(reason)
+                        self.last_failure_reason = reason
                         self.state = TakerState.FAILED
                         return None
 
@@ -564,13 +571,15 @@ class Taker(TakerMonitoringMixin):
                 # If even the most optimistic count (compatible + unknown) can't meet
                 # the requirement, fail immediately before bond verification.
                 if known_compatible + unknown < n_makers:
-                    logger.error(
+                    reason = (
                         f"Not enough potentially compatible makers for neutrino taker: "
                         f"need {n_makers}, but only {known_compatible} known compatible + "
                         f"{unknown} unknown = {known_compatible + unknown} possible. "
                         f"{known_incompatible} offers filtered as incompatible (no "
                         f"neutrino_compat). Bond verification skipped."
                     )
+                    logger.error(reason)
+                    self.last_failure_reason = reason
                     self.state = TakerState.FAILED
                     return None
 
@@ -588,7 +597,9 @@ class Taker(TakerMonitoringMixin):
             self.orderbook_manager.update_offers(offers)
 
             if len(offers) < n_makers:
-                logger.error(f"Not enough offers: need {n_makers}, found {len(offers)}")
+                reason = f"Not enough offers: need {n_makers}, found {len(offers)}"
+                logger.error(reason)
+                self.last_failure_reason = reason
                 self.state = TakerState.FAILED
                 return None
 
@@ -622,7 +633,9 @@ class Taker(TakerMonitoringMixin):
                     )
 
                 if not self.preselected_utxos:
-                    logger.error(f"No eligible UTXOs in mixdepth {mixdepth}")
+                    reason = f"No eligible UTXOs in mixdepth {mixdepth}"
+                    logger.error(reason)
+                    self.last_failure_reason = reason
                     self.state = TakerState.FAILED
                     return None
 
@@ -671,7 +684,9 @@ class Taker(TakerMonitoringMixin):
                 )
 
                 if len(selected_offers) < self.config.minimum_makers:
-                    logger.error(f"Not enough makers for sweep: {len(selected_offers)}")
+                    reason = f"Not enough makers for sweep: {len(selected_offers)}"
+                    logger.error(reason)
+                    self.last_failure_reason = reason
                     self.state = TakerState.FAILED
                     return None
 
@@ -694,7 +709,9 @@ class Taker(TakerMonitoringMixin):
                 )
 
                 if len(selected_offers) < self.config.minimum_makers:
-                    logger.error(f"Not enough makers selected: {len(selected_offers)}")
+                    reason = f"Not enough makers selected: {len(selected_offers)}"
+                    logger.error(reason)
+                    self.last_failure_reason = reason
                     self.state = TakerState.FAILED
                     return None
 
@@ -732,6 +749,12 @@ class Taker(TakerMonitoringMixin):
                             f"(total: {sum(u.value for u in self.preselected_utxos):,} sats)"
                         )
                     except ValueError as e:
+                        reason = (
+                            f"{e}. CoinJoin requires UTXOs with at least "
+                            f"{self.config.taker_utxo_age} confirmation(s) "
+                            f"(taker_utxo_age setting). Wait for more confirmations or "
+                            f"lower taker_utxo_age in your config."
+                        )
                         logger.error(str(e))
                         logger.error(
                             f"CoinJoin requires UTXOs with at least "
@@ -739,6 +762,7 @@ class Taker(TakerMonitoringMixin):
                             f"(taker_utxo_age setting). Wait for more confirmations or "
                             f"lower taker_utxo_age in your config."
                         )
+                        self.last_failure_reason = reason
                         self.state = TakerState.FAILED
                         return None
 
@@ -826,7 +850,9 @@ class Taker(TakerMonitoringMixin):
             )
 
             if not self.podle_commitment:
-                logger.error("Failed to generate PoDLE commitment")
+                reason = "Failed to generate PoDLE commitment"
+                logger.error(reason)
+                self.last_failure_reason = reason
                 self.state = TakerState.FAILED
                 return None
 
