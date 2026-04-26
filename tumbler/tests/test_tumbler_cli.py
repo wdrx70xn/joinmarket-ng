@@ -52,6 +52,7 @@ class _FakeSettings:
                 value = network
 
             self.network = _N()
+            self.bitcoin_network = None
 
     class _Bitcoin:
         def __init__(self, backend_type: str) -> None:
