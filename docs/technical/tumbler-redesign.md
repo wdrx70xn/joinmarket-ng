@@ -31,16 +31,20 @@ bounded maker sessions inside a single plan, and persists the plan as
 human-readable YAML so a crashed daemon (or a curious operator) can
 resume from a known state.
 
+The user-facing privacy rationale, operational guidance, and fee overview live
+in [`../README-tumbler.md`](../README-tumbler.md). This document focuses on the
+data model and runtime behavior.
+
 ## Architecture
 
 `tumbler` exposes three public symbols:
 
 - `Plan` — a Pydantic model describing the full tumble: parameters,
   destinations, an ordered list of phases, and per-phase state.
-- `PlanBuilder` — builds a `Plan` from per-mixdepth balances, a
-  destination list, and `PlanParameters`.
-- `TumbleRunner` — consumes a `Plan` and drives it to completion,
-  persisting after every state transition.
+- `PlanBuilder` — builds a `Plan` from per-mixdepth balances, a destination
+  list, and `PlanParameters`.
+- `TumbleRunner` — consumes a `Plan` and drives it to completion, persisting
+  after every state transition.
 
 ```
 caller (CLI, jmwalletd, library user)
@@ -93,15 +97,17 @@ A typical plan has two stages:
   destination address; every other sweep targets `INTERNAL`.
 
 Maker sessions are inserted only when `include_maker_sessions=True`.
-Without them the plan reduces to a pure taker chain similar in spirit
-to the reference tumbler.
+Without them the plan reduces to a pure taker chain similar in spirit to the
+reference tumbler.
 
 ### Subset-sum mitigation
 
 A maker session sits between two taker phases. The session consumes
 UTXOs selected by *other* takers — subsets we did not control — and
-creates new CoinJoin output and change outputs matched to other
-participants' amounts. By the time the next taker phase fires, the
+creates a maker-side CoinJoin output plus whatever maker-side change is
+implied by our inputs and the taker-chosen equal amount. We do not get to
+choose a change amount that "matches the taker"; only the equal CoinJoin
+amount is shared across participants. By the time the next taker phase fires, the
 wallet's UTXO graph has new points whose linkage back to the pre-maker
 set is mediated by taker-chosen subsets, which raises the cost of
 subset-sum recovery from "off-the-shelf solver" to "simulate or
@@ -181,19 +187,22 @@ records with heterogeneous schemas per `kind`.
 
 ### Failure handling and retries
 
-Each taker phase has a retry budget given by
-`PlanParameters.max_phase_retries` (default 3, range 0–20). When a
-taker phase fails the runner increments `attempt_count`, applies a
-tweak inspired by the reference `tweak_tumble_schedule`, persists, and
-retries:
+Each taker phase has a retry budget given by `PlanParameters.max_phase_retries`
+(default 3, range 0-20). When a taker phase fails the runner increments
+`attempt_count`, persists, and rearms the same phase for retry.
 
-- `counterparty_count` is reduced by one toward
-  `parameters.maker_count_min`. The minimum is honoured; the runner
-  will not retry below it.
-- If the phase originally targeted an external destination, the
-  destination is rewritten to `"INTERNAL"`. The retry happens at the
-  same mixdepth and a later phase is responsible for actually paying
-  the destination — typically the next per-mixdepth block.
+Current retry behavior is intentionally narrow:
+
+- The runner does not lower `counterparty_count` on retry. Maker selection,
+  replacement, and any reduction to available offers are handled inside the
+  taker against the live orderbook.
+- If the phase originally targeted an external destination, the destination is
+  rewritten to `"INTERNAL"`. The retry still happens at the same mixdepth and a
+  later phase is responsible for actually paying the external address.
+- A configurable retry delay is applied before the next attempt. Confirmation-
+  age style failures such as `No eligible UTXOs in mixdepth` and PoDLE age
+  failures are surfaced through taker failure text so the operator can tell the
+  difference between UTXO-age problems and maker-availability problems.
 
 When `attempt_count` reaches `max_phase_retries` the phase remains
 `failed` and the whole plan transitions to `failed`. A failed maker
@@ -204,15 +213,19 @@ single phase is attempted twice, which for a taker phase means a
 duplicate CoinJoin (extra fee cost only) and for a maker phase means a
 short double-maker window.
 
-## Toy example
+## Library example
 
 ```python
 from pathlib import Path
+
 from tumbler import Plan, PlanBuilder, PlanParameters, TumbleRunner
 
-# Wallet has 2 BTC in mixdepth 0; everything else is empty.
 balances = {0: 200_000_000, 1: 0, 2: 0, 3: 0, 4: 0}
-destinations = ["bcrt1qexample..."]
+destinations = [
+    "bcrt1qdest0000000000000000000000000000000000aaa",
+    "bcrt1qdest0000000000000000000000000000000000bbb",
+    "bcrt1qdest0000000000000000000000000000000000ccc",
+]
 
 params = PlanParameters(
     maker_count_min=5,
@@ -231,29 +244,15 @@ plan: Plan = PlanBuilder(
     parameters=params,
 ).build()
 
-# Persist and run. The runner is responsible for executing real CoinJoins
-# and maker sessions through your taker / maker / wallet adapters.
 runner = TumbleRunner(plan=plan, data_dir=Path("/tmp/jm-tumbler"), ...)
 await runner.run()
 ```
 
-For a 5-mixdepth wallet with funds only in mixdepth 0, no maker
-sessions, and a single destination, the resulting plan has nine phases:
-one stage-1 sweep and four stage-2 blocks (one fractional taker phase
-plus one taker sweep per mixdepth).
-
-The CLI `tumbler` driver is a thin wrapper around the same library
-calls. It enforces a recommended minimum of three destinations to keep
-the final-mixdepth payout from collapsing onto a single address; tests
-and library callers can opt out via `--allow-few-destinations` (CLI)
-or by passing a single destination directly to `PlanBuilder`.
-
 ## Privacy invariants
 
 The plan builder is constrained to satisfy a fixed set of
-privacy/safety properties for *every* seed. These are not aspirational;
-they are pinned by `tumbler/tests/test_privacy_invariants.py` over 20
-seeds across 4 balance scenarios:
+privacy/safety properties for every seed. These are pinned by the tumbler test
+suite over many seeds and balance scenarios:
 
 - Every external destination receives at least one payout.
 - Per-phase amount fractions are bounded in `[0.05, 1.0)` and the
@@ -306,9 +305,8 @@ mixing-motivated one. The `cjfee_r` field is left at the configured
 value to keep relative-offer-only takers from rejecting our offer
 outright (the reference taker implementation refuses `cjfee_r=0`).
 
-The mutator lives in `tumbler/src/tumbler/maker_policy.py` and is wired
-into both maker factories. Tests in
-`tumbler/tests/test_maker_policy.py` pin the behavior.
+The mutator lives in `tumbler.maker_policy` and is wired into both maker
+factories. Tests in `tumbler/tests/test_maker_policy.py` pin the behavior.
 
 ## Fee estimator
 

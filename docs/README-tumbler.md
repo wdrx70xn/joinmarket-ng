@@ -5,17 +5,15 @@ destinations by interleaving taker CoinJoins with optional maker sessions.
 Each plan is persisted as YAML so long-running schedules can be inspected,
 paused, or resumed.
 
-## Installation
+Three or more destination addresses are crucial for privacy. If coins enter
+the tumbler as X sats and leave to only one or two destinations as roughly
+X minus fees, that final amount pattern becomes a strong fingerprint that can
+undo much of the privacy gained inside the tumble. The CLI therefore treats
+fewer than three destinations as a development/testing-only mode.
 
-Install JoinMarket-NG with the tumbler component (it depends on `taker` and
-`maker`):
-
-```bash
-curl -sSL https://raw.githubusercontent.com/joinmarket-ng/joinmarket-ng/main/install.sh | bash -s -- --tumbler
-```
-
-See [Installation](install.md) for backend setup, Tor configuration, and
-manual install.
+See [Installation](install.md) for backend setup, Tor configuration, and manual
+install. For a short command-oriented guide, see
+[`../tumbler/README.md`](../tumbler/README.md).
 
 ## Concepts
 
@@ -24,7 +22,11 @@ A **plan** is a list of ordered **phases**. Each phase is one of:
 - `TakerCoinjoinPhase`: a single CoinJoin that advances funds across mixdepths
   or toward a destination address.
 - `MakerSessionPhase`: runs a maker bot for a bounded window, so the wallet
-  alternates between "taker" and "maker" signatures on-chain.
+  alternates between "taker" and "maker" signatures on-chain. The taker still
+  chooses the equal CoinJoin amount for that transaction; as a maker we do not
+  get to force our change to match the taker's change, we simply receive
+  whatever maker-side change falls out from our selected inputs and the taker-
+  chosen CoinJoin amount.
 
 Plans are stored under `$JOINMARKET_DATA_DIR/tumbler/<wallet>/plan.yaml`. The
 same file is shared with `jmwalletd`, so a plan started from the CLI can be
@@ -36,15 +38,16 @@ inspected (and vice versa) via the `/tumbler` HTTP endpoints.
 - A working Bitcoin backend (`descriptor_wallet` or `neutrino`).
 - Tor for production use (maker phases rely on it).
 
-## Quick Start
+## Using the tumbler
 
-### 1) Build a plan
+### Build a plan
 
 ```bash
 jm-tumbler plan \
   --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
   --destination bc1qdest1... \
-  --destination bc1qdest2...
+  --destination bc1qdest2... \
+  --destination bc1qdest3...
 ```
 
 This inspects the wallet, picks reasonable defaults for maker counts and
@@ -54,7 +57,7 @@ timings, and writes `plan.yaml`. Inspect it:
 jm-tumbler status --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
 ```
 
-### 2) Run the plan
+### Run the plan
 
 ```bash
 jm-tumbler run --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
@@ -64,7 +67,7 @@ The runner executes phases in order, persists progress after every transition,
 and exits cleanly on `SIGINT`/`SIGTERM` (progress is kept; resume by calling
 `run` again).
 
-### 3) Cancel or restart
+### Cancel or restart
 
 ```bash
 jm-tumbler delete --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
@@ -91,10 +94,9 @@ funds by following amount, timing, and address-reuse heuristics. A tumbler
 defeats those heuristics by spreading the wallet's exit across many
 CoinJoins, several mixdepths, and at least three external destinations.
 
-The defaults are chosen to mirror the reference implementation's
-[Tumbler Guide](https://github.com/JoinMarket-Org/joinmarket-clientserver/blob/master/docs/tumblerguide.md)
-so that joinmarket-ng plans are statistically indistinguishable from
-reference plans on-chain. Concretely:
+The defaults are chosen to mirror the reference implementation's tumbler guide
+so that joinmarket-ng plans are statistically indistinguishable from reference
+plans on-chain. Concretely:
 
 - **At least three destinations.** Two destinations let an observer
   pair-match outputs by elimination; three or more force genuine ambiguity.
@@ -136,45 +138,37 @@ disabled maker sessions, disabled rounding) you trade real privacy for
 speed. The plan estimator (`jm-tumbler plan` output) prints the resulting
 worst-case fees so you can see what you are paying for.
 
-## Worked example
+## What a plan looks like
 
-A typical mainnet tumble with three destinations, a wallet holding
-0.50 BTC across two mixdepths, on a node with `estimatesmartfee` available:
+A typical tumble has two stages:
 
-```bash
-jm-tumbler plan \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --backend descriptor_wallet \
-  --rpc-url http://user:pass@127.0.0.1:8332 \
-  --destination bc1qdest1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-  --destination bc1qdest2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-  --destination bc1qdest3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+- Stage 1 sweeps each funded mixdepth internally first. This is the step that
+  breaks the direct link to the wallet's original UTXO set.
+- Stage 2 alternates optional maker sessions with taker CoinJoins that move
+  funds toward the final destinations.
 
-The output summarises the plan and an upfront fee estimate:
+For a wallet funded in two mixdepths and three destinations, a plan often looks
+roughly like this:
 
-```
-plan: 18 phases (12 taker CJs, 6 maker sessions)
-balance: 0.50000000 BTC across mixdepths {0: 30000000, 1: 20000000}
-fee rate: 18 sat/vB (estimated)
-worst-case maker fees: 0.00071400 BTC (0.14%)
-worst-case miner fees: 0.00194400 BTC (0.39%)
-worst-case total cost: 0.00265800 BTC (0.53%)
-estimated runtime: 14h - 36h (mean, 90th percentile)
-```
+| Phase | Kind | Mixdepth | Destination | Purpose |
+| --- | --- | --- | --- | --- |
+| 0 | taker | 1 | INTERNAL | Stage-1 sweep |
+| 1 | taker | 0 | INTERNAL | Stage-1 sweep |
+| 2 | maker | 1 | n/a | Role mixing |
+| 3 | taker | 1 | INTERNAL | Fractional payout |
+| 4 | taker | 1 | INTERNAL | Sweep forward |
+| 5 | maker | 2 | n/a | Role mixing |
+| 6 | taker | 2 | INTERNAL | Fractional payout |
+| 7 | taker | 2 | bc1qdest1... | Final payout |
+| 8 | maker | 3 | n/a | Role mixing |
+| 9 | taker | 3 | INTERNAL | Fractional payout |
+| 10 | taker | 3 | bc1qdest2... | Final payout |
+| 11 | maker | 4 | n/a | Role mixing |
+| 12 | taker | 4 | INTERNAL | Fractional payout |
+| 13 | taker | 4 | bc1qdest3... | Final payout |
 
-Then run it (this blocks the terminal; safe to `Ctrl-C` and resume):
-
-```bash
-jm-tumbler run \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --backend descriptor_wallet \
-  --rpc-url http://user:pass@127.0.0.1:8332 \
-  --directory <directory-onion-1>,<directory-onion-2>,<directory-onion-3>
-```
-
-While the tumble is in progress, `jmwalletd` returns `409 Conflict` for
-manual taker/maker calls on the same wallet (see "Concurrency" above).
+The exact shape varies with wallet balances, destination count, seed, and
+whether maker sessions are enabled.
 
 ## Fees and safety
 
@@ -196,8 +190,7 @@ Three cost components contribute to the worst case:
    still cost both maker and miner fees. They are included in the
    estimate.
 
-Built-in safety properties (verified by the test suite, see
-`tumbler/tests/test_privacy_invariants.py`):
+Built-in safety properties:
 
 - The estimator's reported total balance equals the configured per-
   mixdepth balance map (no silent field drift).
@@ -215,258 +208,13 @@ process can be resumed by re-running `jm-tumbler run`.
 
 ## Configuration
 
-Tumbler defaults live in `config.toml` under the `[tumbler]` section.
-Run `jm-tumbler config-init` to write a copy of `config.toml.template`
-to your data directory; relevant keys are documented inline there.
-Per-plan knobs (`--maker-count-min`, `--mincjamount-sats`,
-`--maker-sessions/--no-maker-sessions`, `--seed`, ...) override the
-config for one invocation only.
-
-<!-- AUTO-GENERATED HELP START: jm-tumbler -->
-
-<details>
-<summary><code>jm-tumbler --help</code></summary>
-
-```
-
- Usage: jm-tumbler [OPTIONS] COMMAND [ARGS]...
-
- JoinMarket tumbler - role-mixed CoinJoin schedules with YAML-persisted state
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --install-completion          Install completion for the current shell.      │
-│ --show-completion             Show completion for the current shell, to copy │
-│                               it or customize the installation.              │
-│ --help                        Show this message and exit.                    │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│ plan         Build a tumbler plan for the given destinations and persist it. │
-│ status       Print the current plan for the given wallet.                    │
-│ delete       Delete the on-disk plan for ``wallet_name``.                    │
-│ run          Execute the saved plan for a wallet to completion.              │
-│ config-init  Initialize the config file with default settings.               │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-</details>
-
-<details>
-<summary><code>jm-tumbler plan --help</code></summary>
-
-```
-
- Usage: jm-tumbler plan [OPTIONS]
-
- Build a tumbler plan for the given destinations and persist it.
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ *  --destination    -d                     TEXT             External         │
-│                                                             destination      │
-│                                                             address          │
-│                                                             (repeatable)     │
-│                                                             [required]       │
-│    --mnemonic-file  -f                     PATH             Path to mnemonic │
-│                                                             file             │
-│    --prompt-bip39…                                          Prompt for BIP39 │
-│                                                             passphrase       │
-│                                                             interactively    │
-│    --wallet-name    -w                     TEXT             Wallet           │
-│                                                             identifier for   │
-│                                                             the plan file;   │
-│                                                             defaults to the  │
-│                                                             mnemonic         │
-│                                                             fingerprint      │
-│    --network                               [mainnet|testne  Bitcoin network  │
-│                                            t|signet|regtes                   │
-│                                            t]                                │
-│    --backend        -b                     TEXT             Backend type:    │
-│                                                             scantxoutset |   │
-│                                                             descriptor_wall… │
-│                                                             | neutrino       │
-│    --rpc-url                               TEXT             Bitcoin full     │
-│                                                             node RPC URL     │
-│                                                             [env var:        │
-│                                                             BITCOIN_RPC_URL] │
-│    --neutrino-url                          TEXT             Neutrino REST    │
-│                                                             API URL          │
-│                                                             [env var:        │
-│                                                             NEUTRINO_URL]    │
-│    --force                                                  Overwrite an     │
-│                                                             existing pending │
-│                                                             plan             │
-│    --seed                                  INTEGER          Seed the plan    │
-│                                                             builder RNG for  │
-│                                                             reproducible     │
-│                                                             schedules        │
-│    --maker-count-…                         INTEGER          Minimum          │
-│                                                             counterparty     │
-│                                                             count per CJ;    │
-│                                                             defaults to      │
-│                                                             settings.taker.… │
-│    --maker-count-…                         INTEGER          Maximum          │
-│                                                             counterparty     │
-│                                                             count per CJ;    │
-│                                                             defaults to      │
-│                                                             settings.taker.… │
-│    --mincjamount-…                         INTEGER          Minimum CJ       │
-│                                                             amount in sats   │
-│                                                             [default:        │
-│                                                             100000]          │
-│    --maker-sessio…      --no-maker-ses…                     [default:        │
-│                                                             maker-sessions]  │
-│    --allow-few-de…                                          Override the     │
-│                                                             recommended      │
-│                                                             minimum of 3     │
-│                                                             destinations.    │
-│                                                             Intended for     │
-│                                                             development and  │
-│                                                             automated        │
-│                                                             testing only:    │
-│                                                             fewer            │
-│                                                             destinations     │
-│                                                             expose users to  │
-│                                                             pairwise         │
-│                                                             re-aggregation   │
-│                                                             heuristics.      │
-│    --log-level      -l                     TEXT                              │
-│    --help                                                   Show this        │
-│                                                             message and      │
-│                                                             exit.            │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-</details>
-
-<details>
-<summary><code>jm-tumbler status --help</code></summary>
-
-```
-
- Usage: jm-tumbler status [OPTIONS]
-
- Print the current plan for the given wallet.
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --wallet-name              -w      TEXT  Wallet identifier; defaults to the  │
-│                                          mnemonic fingerprint                │
-│ --mnemonic-file            -f      PATH  Path to mnemonic file               │
-│ --prompt-bip39-passphrase                Prompt for BIP39 passphrase         │
-│                                          interactively                       │
-│ --log-level                -l      TEXT                                      │
-│ --help                                   Show this message and exit.         │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-</details>
-
-<details>
-<summary><code>jm-tumbler delete --help</code></summary>
-
-```
-
- Usage: jm-tumbler delete [OPTIONS]
-
- Delete the on-disk plan for ``wallet_name``.
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --wallet-name              -w      TEXT  Wallet identifier; defaults to the  │
-│                                          mnemonic fingerprint                │
-│ --mnemonic-file            -f      PATH  Path to mnemonic file               │
-│ --prompt-bip39-passphrase                Prompt for BIP39 passphrase         │
-│                                          interactively                       │
-│ --yes                      -y            Skip confirmation prompt            │
-│ --log-level                -l      TEXT                                      │
-│ --help                                   Show this message and exit.         │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-</details>
-
-<details>
-<summary><code>jm-tumbler run --help</code></summary>
-
-```
-
- Usage: jm-tumbler run [OPTIONS]
-
- Execute the saved plan for a wallet to completion.
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --mnemonic-file         -f      PATH                  Path to mnemonic file  │
-│ --prompt-bip39-passph…                                Prompt for BIP39       │
-│                                                       passphrase             │
-│                                                       interactively          │
-│ --wallet-name           -w      TEXT                  Wallet identifier;     │
-│                                                       defaults to the        │
-│                                                       mnemonic fingerprint   │
-│ --network                       [mainnet|testnet|sig                         │
-│                                 net|regtest]                                 │
-│ --backend               -b      TEXT                                         │
-│ --rpc-url                       TEXT                  [env var:              │
-│                                                       BITCOIN_RPC_URL]       │
-│ --neutrino-url                  TEXT                  [env var:              │
-│                                                       NEUTRINO_URL]          │
-│ --directory             -D      TEXT                  [env var:              │
-│                                                       DIRECTORY_SERVERS]     │
-│ --tor-socks-host                TEXT                  Tor SOCKS host         │
-│                                                       override               │
-│ --tor-socks-port                INTEGER               Tor SOCKS port         │
-│                                                       override               │
-│ --fee-rate                      FLOAT                 Manual fee rate in     │
-│                                                       sat/vB (mutually       │
-│                                                       exclusive with         │
-│                                                       --block-target).       │
-│                                                       Required when the      │
-│                                                       backend is neutrino.   │
-│ --block-target                  INTEGER               Target blocks for fee  │
-│                                                       estimation (mutually   │
-│                                                       exclusive with         │
-│                                                       --fee-rate). Not       │
-│                                                       supported with the     │
-│                                                       neutrino backend.      │
-│ --min-confirmations             INTEGER               Confirmations required │
-│                                                       before the next phase  │
-│                                                       starts (0 disables     │
-│                                                       gating)                │
-│                                                       [default: 5]           │
-│ --counterparties                INTEGER RANGE         Override the           │
-│                                 [1<=x<=20]            counterparty count for │
-│                                                       every phase at         │
-│                                                       runtime. Useful when   │
-│                                                       the configured count   │
-│                                                       is unavailable on the  │
-│                                                       chosen network.        │
-│ --log-level             -l      TEXT                                         │
-│ --help                                                Show this message and  │
-│                                                       exit.                  │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-</details>
-
-<details>
-<summary><code>jm-tumbler config-init --help</code></summary>
-
-```
-
- Usage: jm-tumbler config-init [OPTIONS]
-
- Initialize the config file with default settings.
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ --data-dir  -d      PATH  Data directory for JoinMarket files                │
-│                           [env var: JOINMARKET_DATA_DIR]                     │
-│ --help                    Show this message and exit.                        │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
-
-</details>
-
-
-<!-- AUTO-GENERATED HELP END: jm-tumbler -->
+Tumbler defaults live in `config.toml` under the `[tumbler]` section. Run
+`jm-tumbler config-init` to write a copy of `config.toml.template` to your data
+directory; relevant keys are documented inline there. Per-plan knobs such as
+`--maker-count-min`, `--mincjamount-sats`, `--maker-sessions/--no-maker-sessions`,
+and `--seed` override the config for one invocation only.
 
 ## Design notes
 
-See [`technical/tumbler-redesign.md`](technical/tumbler-redesign.md) for the
-full design document covering phase kinds, persistence format, runner state
-machine, and interop with `taker` and `maker`.
+See [`technical/tumbler-redesign.md`](technical/tumbler-redesign.md) for
+architecture, persistence, retry behavior, and other implementation details.
