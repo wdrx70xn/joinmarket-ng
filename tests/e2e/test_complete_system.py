@@ -349,7 +349,18 @@ async def test_offer_creation(
     if offers:
         offer = offers[0]
         assert offer.minsize <= offer.maxsize
-        assert offer.txfee == maker_config.tx_fee_contribution
+        # Maker randomizes ``txfee`` per announcement by
+        # ``txfee_contribution_factor`` (uniform within
+        # ``[value*(1-factor), value*(1+factor)]``); see
+        # ``maker/src/maker/offers.py::_randomize``.
+        factor = maker_config.txfee_contribution_factor
+        base = maker_config.tx_fee_contribution
+        lo = int(base * (1.0 - factor))
+        hi = int(base * (1.0 + factor)) + 1
+        assert lo <= offer.txfee <= hi, (
+            f"txfee {offer.txfee} outside randomized range [{lo}, {hi}] "
+            f"(base={base}, factor={factor})"
+        )
         assert offer.counterparty == "J5TestMaker"
 
 
@@ -1128,7 +1139,18 @@ async def test_maker_offer_announcement(
 
     # Verify offer parameters match config
     assert offer.minsize >= maker_config.min_size
-    assert offer.txfee == maker_config.tx_fee_contribution
+    # ``OfferManager`` randomizes ``txfee`` per announcement by
+    # ``txfee_contribution_factor`` (uniform within
+    # ``[value*(1-factor), value*(1+factor)]``); see
+    # ``maker/src/maker/offers.py::_randomize``.
+    factor = maker_config.txfee_contribution_factor
+    base = maker_config.tx_fee_contribution
+    lo = int(base * (1.0 - factor))
+    hi = int(base * (1.0 + factor)) + 1
+    assert lo <= offer.txfee <= hi, (
+        f"txfee {offer.txfee} outside randomized range [{lo}, {hi}] "
+        f"(base={base}, factor={factor})"
+    )
 
 
 @pytest.mark.asyncio
