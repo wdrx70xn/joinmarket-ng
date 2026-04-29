@@ -730,9 +730,14 @@ class TakerSettings(BaseModel):
         description="Number of peers for multiple-peers broadcast",
     )
     minimum_makers: int = Field(
-        default=1,
+        default=4,
         ge=1,
-        description="Minimum number of makers required",
+        description=(
+            "Minimum number of makers required for a CoinJoin to proceed. "
+            "Default 4 matches the upstream JoinMarket POLICY default; "
+            "minimum_makers=1 is fingerprintable and degrades the privacy of "
+            "the join."
+        ),
     )
     rescan_interval_sec: int = Field(
         default=600,

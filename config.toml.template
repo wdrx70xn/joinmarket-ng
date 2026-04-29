@@ -362,8 +362,10 @@
 # tx_broadcast = "random-peer"
 # broadcast_peer_count = 3
 
-# Minimum number of makers required
-# minimum_makers = 1
+# Minimum number of makers required for a CoinJoin to proceed.
+# Default: 4 (matches the upstream JoinMarket reference POLICY default; using
+# minimum_makers=1 is fingerprintable and degrades the privacy of the join).
+# minimum_makers = 4
 
 # ============================================================================
 # Directory Server Settings

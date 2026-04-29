@@ -203,7 +203,14 @@ class TakerConfig(WalletConfig):
     preferred_offer_type: OfferType = Field(
         default=OfferType.SW0_RELATIVE, description="Preferred offer type"
     )
-    minimum_makers: int = Field(default=1, ge=1, description="Minimum number of makers required")
+    minimum_makers: int = Field(
+        default=4,
+        ge=1,
+        description=(
+            "Minimum number of makers required for the CoinJoin to proceed. "
+            "Default 4 matches the upstream JoinMarket POLICY default."
+        ),
+    )
     max_maker_replacement_attempts: int = Field(
         default=3,
         ge=0,

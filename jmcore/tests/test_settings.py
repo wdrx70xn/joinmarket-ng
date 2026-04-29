@@ -169,6 +169,8 @@ class TestSettingsDefaults:
         # drawn per CoinJoin (matches upstream sendpayment, avoids
         # fingerprinting via a fixed value -- see issue #468).
         assert settings.taker.counterparty_count is None
+        # minimum_makers default 4 matches the upstream POLICY default.
+        assert settings.taker.minimum_makers == 4
         assert settings.taker.max_cj_fee_abs == 500
         assert settings.taker.max_cj_fee_rel == "0.001"
         assert settings.taker.tx_broadcast == "random-peer"

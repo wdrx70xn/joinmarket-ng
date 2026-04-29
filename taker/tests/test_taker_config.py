@@ -86,6 +86,8 @@ class TestTakerConfig:
         # counterparty_count defaults to None: a random value in [8, 10] is
         # drawn per CoinJoin (matches upstream JoinMarket sendpayment).
         assert config.counterparty_count is None
+        # minimum_makers default 4 matches upstream POLICY default.
+        assert config.minimum_makers == 4
 
     def test_full_config(self, sample_mnemonic: str) -> None:
         """Test full configuration with all options."""
