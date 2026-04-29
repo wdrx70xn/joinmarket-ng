@@ -103,14 +103,19 @@
 #
 # Path to the neutrino-api TLS certificate (PEM).  Enables HTTPS with
 # certificate pinning (trust-on-first-use).
-# neutrino_tls_cert = "~/.joinmarket-ng/neutrino/tls.cert"
+# Relative paths (e.g. "neutrino/tls.cert") are resolved against the data
+# directory ($JOINMARKET_DATA_DIR or --data-dir, default: ~/.joinmarket-ng),
+# so the same config.toml works regardless of where the data dir lives.
+# Absolute paths and paths starting with ~ are used as-is.
+# neutrino_tls_cert = "neutrino/tls.cert"
 #
 # API bearer token for neutrino-api authentication.
 # neutrino_auth_token = ""
 #
 # Path to a file containing the auth token (alternative to neutrino_auth_token).
 # Useful in Docker environments where the token is generated into a shared volume.
-# neutrino_auth_token_file = "~/.joinmarket-ng/neutrino/auth_token"
+# Relative paths are resolved against the data directory (see neutrino_tls_cert).
+# neutrino_auth_token_file = "neutrino/auth_token"
 
 # ============================================================================
 # Network Settings

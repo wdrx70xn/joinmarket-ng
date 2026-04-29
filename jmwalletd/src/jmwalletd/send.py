@@ -28,10 +28,11 @@ async def do_direct_send(
 
     Delegates entirely to :func:`jmwallet.wallet.spend.direct_send`.
     """
+    from jmcore.paths import get_default_data_dir
     from jmwalletd._backend import get_backend
 
-    data_dir: Path = wallet_service.data_dir or Path.home() / ".joinmarket-ng"
-    backend = await get_backend(data_dir)
+    data_dir: Path = wallet_service.data_dir or get_default_data_dir()
+    backend = await get_backend(data_dir, wallet_service=wallet_service)
 
     # Ensure the wallet is synced before sending.
     await wallet_service.sync()

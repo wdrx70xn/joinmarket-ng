@@ -77,6 +77,7 @@ def send(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -86,7 +87,7 @@ def send(
     ] = None,
 ) -> None:
     """Send a simple transaction from wallet to an address."""
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     # Validate mutual exclusivity
 

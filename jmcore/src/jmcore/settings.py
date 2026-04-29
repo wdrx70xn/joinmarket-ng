@@ -288,11 +288,19 @@ class BitcoinSettings(BaseModel):
 
     @model_validator(mode="after")
     def _load_auth_token_from_file(self) -> Self:
-        """Read neutrino_auth_token from file when neutrino_auth_token_file is set."""
+        """Read neutrino_auth_token from file when neutrino_auth_token_file is set.
+
+        Only loads the token at settings-init time when the configured path is
+        absolute or starts with ``~``. Plain relative paths are deferred to the
+        CLI layer (``resolve_backend_settings``) which knows the resolved data
+        directory and can join the path correctly.
+        """
         if self.neutrino_auth_token is None and self.neutrino_auth_token_file is not None:
-            token_path = Path(self.neutrino_auth_token_file).expanduser()
-            if token_path.is_file():
-                self.neutrino_auth_token = token_path.read_text().strip()
+            raw = self.neutrino_auth_token_file
+            if raw.startswith("~") or Path(raw).is_absolute():
+                token_path = Path(raw).expanduser()
+                if token_path.is_file():
+                    self.neutrino_auth_token = token_path.read_text().strip()
         return self
 
 

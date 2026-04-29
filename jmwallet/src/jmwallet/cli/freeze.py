@@ -59,6 +59,7 @@ def freeze(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -74,7 +75,7 @@ def freeze(
     automatic coin selection (taker, maker, and sweep operations).
     Changes take effect immediately on each toggle.
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     try:
         resolved = resolve_mnemonic(

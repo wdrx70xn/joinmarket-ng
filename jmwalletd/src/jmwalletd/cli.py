@@ -25,7 +25,10 @@ def serve(
     ws_port: Annotated[int, typer.Option(help="WebSocket port (0 = same as HTTP)")] = 0,
     data_dir: Annotated[
         Path | None,
-        typer.Option(help="Data directory (default: ~/.joinmarket-ng)"),
+        typer.Option(
+            envvar="JOINMARKET_DATA_DIR",
+            help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
+        ),
     ] = None,
     no_tls: Annotated[
         bool, typer.Option(envvar="JMWALLETD_NO_TLS", help="Disable TLS (plain HTTP)")
@@ -37,9 +40,10 @@ def serve(
     import uvicorn
     from loguru import logger
 
+    from jmcore.paths import get_default_data_dir
     from jmwalletd.app import create_app
 
-    resolved_data_dir = data_dir or Path.home() / ".joinmarket-ng"
+    resolved_data_dir = data_dir or get_default_data_dir()
     resolved_data_dir.mkdir(parents=True, exist_ok=True)
 
     fast_app = create_app(data_dir=resolved_data_dir)

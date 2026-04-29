@@ -25,6 +25,7 @@ def registry_show(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,

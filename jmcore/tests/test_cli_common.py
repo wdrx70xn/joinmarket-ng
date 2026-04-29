@@ -135,6 +135,33 @@ class TestSetupCli:
             assert mock_add.call_args_list[0][1]["level"] == "DEBUG"
             assert mock_add.call_args_list[1][1]["level"] == "DEBUG"
 
+    def test_setup_cli_data_dir_sets_env_var(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """CLI --data-dir should propagate via JOINMARKET_DATA_DIR before settings load."""
+        custom_dir = tmp_path / "custom"
+        custom_dir.mkdir()
+        # Start from an unrelated env value to confirm setup_cli overrides it.
+        monkeypatch.setenv("JOINMARKET_DATA_DIR", str(tmp_path / "other"))
+
+        settings = setup_cli(data_dir=custom_dir)
+
+        assert os.environ["JOINMARKET_DATA_DIR"] == str(custom_dir)
+        assert settings.get_data_dir() == custom_dir
+
+    def test_setup_cli_no_data_dir_keeps_env_var(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When --data-dir is not given, the existing env var must be respected."""
+        env_dir = tmp_path / "env_dir"
+        env_dir.mkdir()
+        monkeypatch.setenv("JOINMARKET_DATA_DIR", str(env_dir))
+
+        settings = setup_cli()
+
+        assert os.environ["JOINMARKET_DATA_DIR"] == str(env_dir)
+        assert settings.get_data_dir() == env_dir
+
 
 class TestLoadMnemonicFromFile:
     """Tests for load_mnemonic_from_file function."""
@@ -426,6 +453,47 @@ class TestResolveBackendSettings:
         settings = JoinMarketSettings()
         result = resolve_backend_settings(settings)
         assert result.neutrino_add_peers == []
+
+    def test_neutrino_tls_cert_relative_resolved_against_data_dir(self, tmp_path: Path) -> None:
+        """Relative TLS cert paths in config join onto the resolved data dir."""
+        from jmcore.cli_common import resolve_backend_settings
+        from jmcore.settings import JoinMarketSettings
+
+        settings = JoinMarketSettings(bitcoin={"neutrino_tls_cert": "neutrino/tls.cert"})
+        result = resolve_backend_settings(settings, data_dir=tmp_path)
+        assert result.neutrino_tls_cert == str(tmp_path / "neutrino" / "tls.cert")
+
+    def test_neutrino_tls_cert_absolute_preserved(self, tmp_path: Path) -> None:
+        """Absolute TLS cert paths are returned unchanged."""
+        from jmcore.cli_common import resolve_backend_settings
+        from jmcore.settings import JoinMarketSettings
+
+        cert = tmp_path / "elsewhere" / "tls.cert"
+        settings = JoinMarketSettings(bitcoin={"neutrino_tls_cert": str(cert)})
+        result = resolve_backend_settings(settings, data_dir=tmp_path)
+        assert result.neutrino_tls_cert == str(cert)
+
+    def test_neutrino_tls_cert_tilde_expanded(self, tmp_path: Path) -> None:
+        """``~``-prefixed TLS cert paths are expanded to home, not data_dir."""
+        from jmcore.cli_common import resolve_backend_settings
+        from jmcore.settings import JoinMarketSettings
+
+        settings = JoinMarketSettings(bitcoin={"neutrino_tls_cert": "~/joinmarket/tls.cert"})
+        result = resolve_backend_settings(settings, data_dir=tmp_path)
+        assert result.neutrino_tls_cert == str(Path("~/joinmarket/tls.cert").expanduser())
+
+    def test_neutrino_auth_token_file_relative_loaded_from_data_dir(self, tmp_path: Path) -> None:
+        """Auth-token file with a relative path is read relative to data_dir."""
+        from jmcore.cli_common import resolve_backend_settings
+        from jmcore.settings import JoinMarketSettings
+
+        token_dir = tmp_path / "neutrino"
+        token_dir.mkdir()
+        (token_dir / "auth_token").write_text("supersecret\n")
+
+        settings = JoinMarketSettings(bitcoin={"neutrino_auth_token_file": "neutrino/auth_token"})
+        result = resolve_backend_settings(settings, data_dir=tmp_path)
+        assert result.neutrino_auth_token == "supersecret"
 
 
 class TestCreateBackend:

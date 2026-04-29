@@ -19,6 +19,7 @@ from jmcore.cli_common import (
     setup_cli,
     setup_logging,
 )
+from jmcore.paths import get_default_data_dir
 from loguru import logger
 
 from jmwallet.cli import app
@@ -54,13 +55,28 @@ def import_mnemonic(
         bool,
         typer.Option("--force", "-f", help="Overwrite existing file without confirmation"),
     ] = False,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
+            help=(
+                "Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR). "
+                "When --output is not given, the wallet is saved under "
+                "<data-dir>/wallets/default.mnemonic."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Import an existing BIP39 mnemonic phrase to create/recover a wallet.
 
     Enter your existing mnemonic interactively with autocomplete support,
     or set the MNEMONIC environment variable.
 
-    By default, saves to ~/.joinmarket-ng/wallets/default.mnemonic with password protection.
+    By default, saves to <data-dir>/wallets/default.mnemonic with password
+    protection. The data directory is taken from --data-dir, the
+    JOINMARKET_DATA_DIR environment variable, or ~/.joinmarket-ng (in that
+    order of precedence).
 
     Examples:
         jm-wallet import                          # Interactive input, 24 words
@@ -68,6 +84,8 @@ def import_mnemonic(
         MNEMONIC="word1 word2 ..." jm-wallet import  # Via env var
         jm-wallet import -o my-wallet.mnemonic    # Custom output file
     """
+    if data_dir is not None:
+        os.environ["JOINMARKET_DATA_DIR"] = str(data_dir)
     setup_logging()
 
     if word_count not in (12, 15, 18, 21, 24):
@@ -75,8 +93,6 @@ def import_mnemonic(
         raise typer.Exit(1)
 
     # Get mnemonic from env var or interactive input
-    import os
-
     env_mnemonic = os.environ.get("MNEMONIC")
     if env_mnemonic:
         mnemonic = env_mnemonic.strip()
@@ -111,7 +127,7 @@ def import_mnemonic(
 
     # Determine output file
     if output_file is None:
-        output_file = Path.home() / ".joinmarket-ng" / "wallets" / "default.mnemonic"
+        output_file = get_default_data_dir() / "wallets" / "default.mnemonic"
 
     # Check if file exists
     if output_file.exists() and not force:
@@ -161,12 +177,29 @@ def generate(
             help="Prompt for password interactively (default: prompt)",
         ),
     ] = True,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
+            help=(
+                "Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR). "
+                "When --output is not given, the wallet is saved under "
+                "<data-dir>/wallets/default.mnemonic."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Generate a new BIP39 mnemonic phrase with secure entropy.
 
-    By default, saves to ~/.joinmarket-ng/wallets/default.mnemonic with password protection.
-    Use --no-save to only display the mnemonic without saving.
+    By default, saves to <data-dir>/wallets/default.mnemonic with password
+    protection. The data directory is taken from --data-dir, the
+    JOINMARKET_DATA_DIR environment variable, or ~/.joinmarket-ng (in that
+    order of precedence). Use --no-save to only display the mnemonic without
+    saving.
     """
+    if data_dir is not None:
+        os.environ["JOINMARKET_DATA_DIR"] = str(data_dir)
     setup_logging()
 
     try:
@@ -175,7 +208,7 @@ def generate(
 
         if should_save:
             if output_file is None:
-                output_file = Path.home() / ".joinmarket-ng" / "wallets" / "default.mnemonic"
+                output_file = get_default_data_dir() / "wallets" / "default.mnemonic"
 
             # Check if file already exists BEFORE generating the seed
             if output_file.exists():
@@ -286,6 +319,7 @@ def info(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -295,7 +329,7 @@ def info(
     ] = None,
 ) -> None:
     """Display wallet information and balances by mixdepth."""
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     try:
         resolved = resolve_mnemonic(

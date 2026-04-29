@@ -38,6 +38,7 @@ def create_bond_address(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -229,6 +230,7 @@ def generate_hot_keypair(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -343,6 +345,7 @@ def prepare_certificate_message(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -398,7 +401,7 @@ def prepare_certificate_message(
     Where cert_expiry is the ABSOLUTE period number (current_period + validity_periods).
     The reference implementation validates that current_block < cert_expiry * 2016.
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir_opt)
 
     from jmcore.paths import get_default_data_dir
 
@@ -757,6 +760,7 @@ def import_certificate(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -814,7 +818,7 @@ def import_certificate(
     The signature should be the base64 output from Sparrow's message signing tool,
     using the 'Standard (Electrum)' format.
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     from coincurve import PrivateKey
     from jmcore.paths import get_default_data_dir
@@ -1098,6 +1102,7 @@ def spend_bond(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,

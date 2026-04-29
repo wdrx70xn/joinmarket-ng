@@ -44,6 +44,7 @@ def list_bonds(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -70,7 +71,7 @@ def list_bonds(
     Without --mnemonic-file: shows bonds from the local registry (offline, fast).
     With --mnemonic-file: scans the blockchain for bonds and updates the registry.
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     # If no mnemonic provided, show bonds from registry (offline mode)
     if mnemonic_file is None and not any(v is not None for v in [rpc_url, backend_type]):
@@ -408,6 +409,7 @@ def generate_bond_address(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -421,7 +423,7 @@ def generate_bond_address(
     ] = None,
 ) -> None:
     """Generate a fidelity bond (timelocked P2WSH) address."""
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     try:
         resolved = resolve_mnemonic(
@@ -596,6 +598,7 @@ def import_bond(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -616,7 +619,7 @@ def import_bond(
         jm-wallet import-bond --path "m/84'/0'/0'/2/73:1740787200"
         jm-wallet import-bond --timenumber 73
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     try:
         resolved = resolve_mnemonic(
@@ -774,6 +777,7 @@ def recover_bonds(
         Path | None,
         typer.Option(
             "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
             help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
         ),
     ] = None,
@@ -793,7 +797,7 @@ def recover_bonds(
     Each timenumber (0-959) maps to exactly one address, matching the
     reference JoinMarket implementation.
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     try:
         resolved = resolve_mnemonic(

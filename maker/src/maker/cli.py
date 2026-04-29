@@ -607,7 +607,7 @@ def start(
     environment variables, and CLI arguments. CLI arguments have the highest priority.
     """
     # Load settings (log_level=None means use settings.logging.level)
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     # Ensure config file exists (creates template if not)
     ensure_config_file(settings.get_data_dir())
@@ -746,6 +746,14 @@ def generate_address(
         ),
     ] = None,
     backend_type: Annotated[str | None, typer.Option(help="Backend type")] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
+            help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
+        ),
+    ] = None,
     log_level: Annotated[
         str | None,
         typer.Option("--log-level", "-l", help="Log level"),
@@ -753,7 +761,7 @@ def generate_address(
 ) -> None:
     """Generate a new receive address."""
     # Load settings (log_level=None means use settings.logging.level)
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     # Load mnemonic using unified resolver
     try:

@@ -405,6 +405,14 @@ def coinjoin(
         ),
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")] = False,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
+            help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
+        ),
+    ] = None,
     log_level: Annotated[
         str | None,
         typer.Option("--log-level", "-l", help="Log level"),
@@ -417,7 +425,7 @@ def coinjoin(
     environment variables, and CLI arguments. CLI arguments have the highest priority.
     """
     # Load settings (log_level=None means use settings.logging.level)
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     # Ensure config file exists
     ensure_config_file(settings.get_data_dir())
@@ -680,6 +688,14 @@ def tumble(
     tor_socks_port: Annotated[
         int | None, typer.Option(help="Tor SOCKS proxy port (overrides TOR__SOCKS_PORT)")
     ] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
+            help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
+        ),
+    ] = None,
     log_level: Annotated[
         str | None,
         typer.Option("--log-level", "-l", help="Log level"),
@@ -692,7 +708,7 @@ def tumble(
     and CLI arguments. CLI arguments have the highest priority.
     """
     # Load settings (log_level=None means use settings.logging.level)
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     # Ensure config file exists
     ensure_config_file(settings.get_data_dir())

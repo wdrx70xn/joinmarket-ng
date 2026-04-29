@@ -29,7 +29,7 @@ Usage:
         rpc_url: Annotated[str | None, typer.Option("--rpc-url")] = None,
         ...
     ):
-        settings = setup_cli(log_level)
+        settings = setup_cli(log_level, data_dir=data_dir)
         backend = resolve_backend_settings(settings, network=network, rpc_url=rpc_url, ...)
 """
 
@@ -122,18 +122,37 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-def setup_cli(log_level: str | None = None) -> JoinMarketSettings:
+def setup_cli(
+    log_level: str | None = None,
+    data_dir: Path | None = None,
+) -> JoinMarketSettings:
     """
     Common CLI setup: reset settings cache, configure logging, return settings.
 
     Log level priority: CLI argument > settings (env/config) > default "INFO"
 
+    When ``data_dir`` is provided (typically from a CLI ``--data-dir`` flag),
+    the ``JOINMARKET_DATA_DIR`` environment variable is set to that path
+    BEFORE settings are loaded. This ensures that ``<data_dir>/config.toml``
+    is read, that ``wallet.mnemonic_file`` defaults resolve to that data
+    directory, and that any other env-driven defaults (paths, etc.) point at
+    the user-specified data directory.
+
     Args:
         log_level: Log level override from CLI (None means use settings)
+        data_dir: Optional CLI override for data directory. When provided,
+            ``JOINMARKET_DATA_DIR`` is set in ``os.environ`` so that all
+            subsequent settings-loading code paths agree on the same data
+            directory.
 
     Returns:
         JoinMarketSettings instance with all sources loaded
     """
+    if data_dir is not None:
+        # Honour the user's CLI choice across every code path that reads
+        # JOINMARKET_DATA_DIR (settings, paths, subprocesses, etc.).
+        os.environ["JOINMARKET_DATA_DIR"] = str(data_dir)
+
     # Apply an early logging configuration before loading settings so that
     # informational messages emitted while parsing config.toml (e.g.
     # "Loaded config from ...") honor the caller's intended log level.
@@ -154,6 +173,44 @@ def setup_cli(log_level: str | None = None) -> JoinMarketSettings:
 # =============================================================================
 # Resolution Functions
 # =============================================================================
+
+
+def _resolve_data_dir_path(value: str | None, data_dir: Path) -> str | None:
+    """Resolve a (possibly relative) filesystem path against the data dir.
+
+    The user-facing rule is simple: anything that lives under the data
+    directory should be writable as a relative path in ``config.toml``
+    (or via env vars), and JoinMarket NG will look for it inside whichever
+    data directory is in effect (``--data-dir`` flag, ``JOINMARKET_DATA_DIR``
+    env var, or the default ``~/.joinmarket-ng``).
+
+    - ``None`` / empty string: passed through unchanged.
+    - Absolute paths (``/foo/bar``): returned as-is.
+    - ``~``/``~user`` paths: expanded with ``Path.expanduser`` only.
+    - Relative paths (``neutrino/tls.cert``): joined onto ``data_dir``.
+
+    Args:
+        value: Configured path string, or None.
+        data_dir: Resolved JoinMarket data directory.
+
+    Returns:
+        Resolved absolute path string, or ``None`` if input was falsy.
+    """
+    if not value:
+        return None
+
+    # Honour explicit ``~`` expansion before doing anything else: users who
+    # write ``~/something`` clearly meant their home directory, not the data
+    # directory.
+    if value.startswith("~"):
+        return str(Path(value).expanduser())
+
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+
+    # Relative path -> resolve against the data directory.
+    return str(data_dir / path)
 
 
 def resolve_backend_settings(
@@ -229,20 +286,37 @@ def resolve_backend_settings(
     # Resolve Neutrino add peers
     resolved_neutrino_add_peers = settings.get_neutrino_add_peers()
 
-    # Resolve Neutrino TLS cert path
-    resolved_neutrino_tls_cert = (
-        neutrino_tls_cert if neutrino_tls_cert is not None else settings.bitcoin.neutrino_tls_cert
+    # Resolve data directory (used both as the resolved value AND as a base
+    # for resolving relative neutrino paths below).
+    resolved_data_dir = data_dir if data_dir is not None else settings.get_data_dir()
+
+    # Resolve Neutrino TLS cert path. Relative paths (e.g. "neutrino/tls.cert")
+    # are resolved against the data directory so a single config.toml works
+    # regardless of where the data dir lives.
+    resolved_neutrino_tls_cert = _resolve_data_dir_path(
+        neutrino_tls_cert if neutrino_tls_cert is not None else settings.bitcoin.neutrino_tls_cert,
+        resolved_data_dir,
     )
 
-    # Resolve Neutrino auth token
+    # Resolve Neutrino auth token (string, not a path).
     resolved_neutrino_auth_token = (
         neutrino_auth_token
         if neutrino_auth_token is not None
         else settings.bitcoin.neutrino_auth_token
     )
 
-    # Resolve data directory
-    resolved_data_dir = data_dir if data_dir is not None else settings.get_data_dir()
+    # If only an auth token *file* is configured, read it now so the backend
+    # never has to know where the data dir lives. Relative paths are resolved
+    # against the data directory.
+    if not resolved_neutrino_auth_token and settings.bitcoin.neutrino_auth_token_file:
+        token_path_str = _resolve_data_dir_path(
+            settings.bitcoin.neutrino_auth_token_file, resolved_data_dir
+        )
+        if token_path_str is not None:
+            try:
+                resolved_neutrino_auth_token = Path(token_path_str).read_text().strip() or None
+            except OSError as exc:
+                logger.warning(f"Could not read neutrino auth token from {token_path_str}: {exc}")
 
     return ResolvedBackendSettings(
         network=resolved_network,

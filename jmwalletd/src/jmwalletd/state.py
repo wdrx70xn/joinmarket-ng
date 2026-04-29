@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger
 
+from jmcore.paths import get_default_data_dir
 from jmwalletd.auth import JMTokenAuthority
 
 
@@ -71,7 +72,7 @@ class DaemonState:
         self.config_overrides: dict[str, dict[str, str]] = {}
 
         # Data directory for wallet files, SSL certs, etc.
-        self.data_dir = data_dir or Path.home() / ".joinmarket-ng"
+        self.data_dir = data_dir or get_default_data_dir()
 
         # WebSocket notification hub
         self._ws_clients: set[asyncio.Queue[str]] = set()

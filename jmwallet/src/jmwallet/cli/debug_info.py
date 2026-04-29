@@ -13,6 +13,7 @@ import platform
 import shutil
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -398,6 +399,14 @@ def debug_info(
         str | None,
         typer.Option("--neutrino-url", envvar="NEUTRINO_URL"),
     ] = None,
+    data_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--data-dir",
+            envvar="JOINMARKET_DATA_DIR",
+            help="Data directory (default: ~/.joinmarket-ng or $JOINMARKET_DATA_DIR)",
+        ),
+    ] = None,
     log_level: Annotated[
         str | None,
         typer.Option("--log-level", "-l", help="Log level"),
@@ -408,13 +417,14 @@ def debug_info(
     Outputs system details, package versions, and backend status.
     No wallet keys, addresses, balances, or transaction data is included.
     """
-    settings = setup_cli(log_level)
+    settings = setup_cli(log_level, data_dir=data_dir)
 
     backend = resolve_backend_settings(
         settings,
         network=network,
         backend_type=backend_type,
         neutrino_url=neutrino_url,
+        data_dir=data_dir,
     )
 
     sections: list[str] = []

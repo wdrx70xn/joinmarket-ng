@@ -56,7 +56,9 @@ def _find_menu_script() -> Path | None:
         return candidate
 
     # 4. Standard standalone install location
-    home_script = Path.home() / ".joinmarket-ng" / "menu.sh"
+    from jmcore.paths import get_default_data_dir
+
+    home_script = get_default_data_dir() / "menu.sh"
     if home_script.is_file():
         return home_script
 
