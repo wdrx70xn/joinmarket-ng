@@ -547,6 +547,34 @@ class MakerSettings(BaseModel):
         ge=0,
         description="Transaction fee contribution in satoshis",
     )
+    cjfee_factor: float = Field(
+        default=0.1,
+        ge=0.0,
+        description=(
+            "Randomization factor applied to the CoinJoin fee on each offer "
+            "announcement. The advertised fee is sampled from "
+            "[cjfee*(1-f), cjfee*(1+f)]. Default 0.1 matches the upstream "
+            "JoinMarket reference (yg-privacyenhanced)."
+        ),
+    )
+    txfee_contribution_factor: float = Field(
+        default=0.3,
+        ge=0.0,
+        description=(
+            "Randomization factor applied to the tx fee contribution on each "
+            "offer announcement. Default 0.3 matches the upstream JoinMarket "
+            "reference."
+        ),
+    )
+    size_factor: float = Field(
+        default=0.1,
+        ge=0.0,
+        description=(
+            "Randomization factor applied to minsize and maxsize on each "
+            "offer announcement. Default 0.1 matches the upstream JoinMarket "
+            "reference."
+        ),
+    )
     min_confirmations: int = Field(
         default=1,
         ge=0,
@@ -632,10 +660,10 @@ class TakerSettings(BaseModel):
         ge=1,
         le=20,
         description=(
-            "Number of makers to select for CoinJoin. When unset, a random "
-            "value in [8, 10] is drawn for every CoinJoin (matches upstream "
-            "JoinMarket sendpayment and avoids fingerprinting via a fixed "
-            "counterparty count). Set explicitly to override."
+            "Number of makers to select for CoinJoin. When unset (the default), "
+            "the taker picks a random value in [8, 10] for each CoinJoin. This "
+            "matches the upstream JoinMarket sendpayment behaviour and prevents "
+            "fingerprinting jm-ng takers via a fixed maker count."
         ),
     )
     max_cj_fee_abs: int = Field(
@@ -739,10 +767,8 @@ class TakerSettings(BaseModel):
         default=4,
         ge=1,
         description=(
-            "Minimum number of makers required for a CoinJoin to proceed. "
-            "Default 4 matches the upstream JoinMarket POLICY default; "
-            "minimum_makers=1 is fingerprintable and degrades the privacy of "
-            "the join."
+            "Minimum number of makers required for a CoinJoin. Default 4 "
+            "matches the upstream JoinMarket reference (POLICY.n)."
         ),
     )
     rescan_interval_sec: int = Field(

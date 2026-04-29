@@ -74,6 +74,34 @@ class OfferConfig(BaseModel):
         ge=0,
         description="Transaction fee contribution in satoshis",
     )
+    cjfee_factor: float = Field(
+        default=0.1,
+        ge=0.0,
+        description=(
+            "Randomization factor applied to the CoinJoin fee on each offer "
+            "announcement. The advertised fee is sampled uniformly from "
+            "[cjfee*(1-f), cjfee*(1+f)]. Set to 0 to disable. "
+            "Default 0.1 matches the upstream JoinMarket yg-privacyenhanced."
+        ),
+    )
+    txfee_contribution_factor: float = Field(
+        default=0.3,
+        ge=0.0,
+        description=(
+            "Randomization factor applied to tx_fee_contribution on each offer "
+            "announcement. Set to 0 to disable. Default 0.3 matches the "
+            "upstream JoinMarket reference."
+        ),
+    )
+    size_factor: float = Field(
+        default=0.1,
+        ge=0.0,
+        description=(
+            "Randomization factor applied to minsize and maxsize on each offer "
+            "announcement. Set to 0 to disable. Default 0.1 matches the "
+            "upstream JoinMarket reference."
+        ),
+    )
 
     @field_validator("cj_fee_relative", mode="before")
     @classmethod
@@ -205,6 +233,30 @@ class MakerConfig(WalletConfig):
     cj_fee_absolute: int = Field(default=500, ge=0, description="Absolute CJ fee in satoshis")
     tx_fee_contribution: int = Field(
         default=0, ge=0, description="Transaction fee contribution in satoshis"
+    )
+    cjfee_factor: float = Field(
+        default=0.1,
+        ge=0.0,
+        description=(
+            "Randomization factor for the CoinJoin fee in legacy single-offer mode. "
+            "See OfferConfig.cjfee_factor."
+        ),
+    )
+    txfee_contribution_factor: float = Field(
+        default=0.3,
+        ge=0.0,
+        description=(
+            "Randomization factor for the tx fee contribution in legacy "
+            "single-offer mode. See OfferConfig.txfee_contribution_factor."
+        ),
+    )
+    size_factor: float = Field(
+        default=0.1,
+        ge=0.0,
+        description=(
+            "Randomization factor for minsize/maxsize in legacy single-offer mode. "
+            "See OfferConfig.size_factor."
+        ),
     )
 
     # Minimum confirmations for UTXOs
@@ -418,5 +470,8 @@ class MakerConfig(WalletConfig):
                 cj_fee_relative=self.cj_fee_relative,
                 cj_fee_absolute=self.cj_fee_absolute,
                 tx_fee_contribution=self.tx_fee_contribution,
+                cjfee_factor=self.cjfee_factor,
+                txfee_contribution_factor=self.txfee_contribution_factor,
+                size_factor=self.size_factor,
             )
         ]

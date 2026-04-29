@@ -260,7 +260,8 @@
 # Minimum CoinJoin amount (in satoshis) that this maker will offer.
 #
 # Lower min_size lets you serve takers requesting smaller mixes at the cost of
-# producing smaller UTXOs.
+# producing smaller UTXOs. Note: the *advertised* minsize is randomized on each
+# offer announcement (see size_factor below) and clamped to the dust threshold.
 #
 # Default: 100000 (matches the upstream JoinMarket reference; using a different
 # value may make jm-ng makers fingerprintable).
@@ -281,11 +282,20 @@
 # offer_type = "sw0reloffer"
 
 # Fee settings (only one is used based on offer_type above)
-# Defaults match the upstream JoinMarket reference so that jm-ng makers are
-# not trivially distinguishable from reference makers.
+# Defaults match the upstream JoinMarket reference (yg-privacyenhanced) so that
+# jm-ng makers are not trivially distinguishable from reference makers.
 # cj_fee_relative = "0.00002"  # 0.00002 = 0.002% relative fee (for sw0reloffer)
 # cj_fee_absolute = 500        # Absolute fee in satoshis (for sw0absoffer)
 # tx_fee_contribution = 0      # Mining fee contribution in satoshis
+
+# Offer randomization factors. Each advertised offer is sampled uniformly from
+# [value*(1-factor), value*(1+factor)] (size is sampled downward only) on every
+# announcement so observers cannot correlate balance changes with exact values.
+# Set any factor to 0 to disable randomization for that field.
+# Defaults match the upstream JoinMarket yg-privacyenhanced reference.
+# cjfee_factor = 0.1
+# txfee_contribution_factor = 0.3
+# size_factor = 0.1
 
 # Minimum confirmations for UTXOs
 # min_confirmations = 1

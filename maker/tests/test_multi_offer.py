@@ -24,11 +24,14 @@ class TestOfferConfig:
         """Test default OfferConfig values match upstream JoinMarket reference."""
         cfg = OfferConfig()
         assert cfg.offer_type == OfferType.SW0_RELATIVE
-        # Defaults aligned with upstream JoinMarket reference (issue #468).
+        # Defaults aligned with upstream yg-privacyenhanced (issue #468)
         assert cfg.min_size == 100_000
         assert cfg.cj_fee_relative == "0.00002"
         assert cfg.cj_fee_absolute == 500
         assert cfg.tx_fee_contribution == 0
+        assert cfg.cjfee_factor == 0.1
+        assert cfg.txfee_contribution_factor == 0.3
+        assert cfg.size_factor == 0.1
 
     def test_relative_offer_config(self):
         """Test relative fee offer configuration."""
@@ -167,7 +170,10 @@ class TestOfferManagerMultiOffer:
 
     @pytest.fixture
     def config_single_offer(self):
-        """Config with single offer (legacy mode)."""
+        """Config with single offer (legacy mode).
+
+        Disables offer randomization so the test can assert exact cjfee values.
+        """
         return MakerConfig(
             mnemonic="test " * 12,
             directory_servers=["localhost:5222"],
@@ -175,11 +181,17 @@ class TestOfferManagerMultiOffer:
             offer_type=OfferType.SW0_RELATIVE,
             min_size=100_000,
             cj_fee_relative="0.001",
+            cjfee_factor=0.0,
+            txfee_contribution_factor=0.0,
+            size_factor=0.0,
         )
 
     @pytest.fixture
     def config_dual_offers(self):
-        """Config with dual offers."""
+        """Config with dual offers.
+
+        Disables offer randomization so the test can assert exact cjfee values.
+        """
         return MakerConfig(
             mnemonic="test " * 12,
             directory_servers=["localhost:5222"],
@@ -189,11 +201,17 @@ class TestOfferManagerMultiOffer:
                     offer_type=OfferType.SW0_RELATIVE,
                     min_size=100_000,
                     cj_fee_relative="0.001",
+                    cjfee_factor=0.0,
+                    txfee_contribution_factor=0.0,
+                    size_factor=0.0,
                 ),
                 OfferConfig(
                     offer_type=OfferType.SW0_ABSOLUTE,
                     min_size=50_000,
                     cj_fee_absolute=500,
+                    cjfee_factor=0.0,
+                    txfee_contribution_factor=0.0,
+                    size_factor=0.0,
                 ),
             ],
         )
@@ -635,3 +653,131 @@ class TestMakerBotOfferAnnouncement:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestOfferRandomization:
+    """Tests for the maker offer randomization (issue #468).
+
+    Defaults match the upstream JoinMarket yg-privacyenhanced reference so
+    jm-ng makers cannot be distinguished from reference makers by their
+    advertised values alone.
+    """
+
+    @pytest.fixture
+    def randomized_wallet(self):
+        wallet = MagicMock()
+        wallet.mixdepth_count = 5
+        wallet.utxo_cache = {}
+        wallet.get_balance = AsyncMock(return_value=10_000_000)
+        wallet.get_balance_for_offers = AsyncMock(return_value=10_000_000)
+        return wallet
+
+    @pytest.fixture
+    def randomized_config(self):
+        # Use upstream-aligned defaults; tx_fee_contribution=0 so the
+        # profitability-floor doesn't push minsize past max_balance for the
+        # tiny default cj_fee_relative.
+        return MakerConfig(
+            mnemonic="test " * 12,
+            directory_servers=["localhost:5222"],
+            network=NetworkType.REGTEST,
+            offer_type=OfferType.SW0_RELATIVE,
+            min_size=100_000,
+            cj_fee_relative="0.00002",
+            tx_fee_contribution=0,
+            cjfee_factor=0.1,
+            txfee_contribution_factor=0.3,
+            size_factor=0.1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_relative_cjfee_randomized_within_factor(
+        self, randomized_wallet, randomized_config
+    ):
+        """Advertised cjfee must stay within +/- cjfee_factor of the configured value."""
+        base = 0.00002
+        factor = 0.1
+        seen: set[str] = set()
+        for _ in range(50):
+            manager = OfferManager(randomized_wallet, randomized_config, "J5TestMaker")
+            with patch("maker.offers.get_best_fidelity_bond", new=AsyncMock(return_value=None)):
+                offers = await manager.create_offers()
+            assert len(offers) == 1
+            cjfee_str = offers[0].cjfee
+            assert isinstance(cjfee_str, str)
+            seen.add(cjfee_str)
+            value = float(cjfee_str)
+            assert base * (1 - factor) <= value <= base * (1 + factor), cjfee_str
+            # No scientific notation on the wire.
+            assert "e" not in cjfee_str.lower()
+
+        # We expect *some* variation across 50 draws.
+        assert len(seen) > 1, "cjfee was never randomized"
+
+    @pytest.mark.asyncio
+    async def test_minsize_clamped_to_dust(self, randomized_wallet):
+        """Randomized minsize must never drop below the dust threshold."""
+        from jmcore.constants import DUST_THRESHOLD
+
+        cfg = MakerConfig(
+            mnemonic="test " * 12,
+            directory_servers=["localhost:5222"],
+            network=NetworkType.REGTEST,
+            offer_type=OfferType.SW0_RELATIVE,
+            min_size=DUST_THRESHOLD,  # at the floor
+            cj_fee_relative="0.00002",
+            size_factor=0.5,  # aggressive
+        )
+        for _ in range(20):
+            manager = OfferManager(randomized_wallet, cfg, "J5TestMaker")
+            with patch("maker.offers.get_best_fidelity_bond", new=AsyncMock(return_value=None)):
+                offers = await manager.create_offers()
+            assert len(offers) == 1
+            assert offers[0].minsize >= DUST_THRESHOLD
+
+    @pytest.mark.asyncio
+    async def test_txfee_zero_stays_zero(self, randomized_wallet):
+        """A zero tx_fee_contribution must remain zero regardless of factor."""
+        cfg = MakerConfig(
+            mnemonic="test " * 12,
+            directory_servers=["localhost:5222"],
+            network=NetworkType.REGTEST,
+            offer_type=OfferType.SW0_RELATIVE,
+            min_size=100_000,
+            cj_fee_relative="0.00002",
+            tx_fee_contribution=0,
+            txfee_contribution_factor=0.3,
+        )
+        for _ in range(10):
+            manager = OfferManager(randomized_wallet, cfg, "J5TestMaker")
+            with patch("maker.offers.get_best_fidelity_bond", new=AsyncMock(return_value=None)):
+                offers = await manager.create_offers()
+            assert offers[0].txfee == 0
+
+    @pytest.mark.asyncio
+    async def test_factor_zero_disables_randomization(self, randomized_wallet):
+        """All factors set to zero produce stable, deterministic offer values."""
+        cfg = MakerConfig(
+            mnemonic="test " * 12,
+            directory_servers=["localhost:5222"],
+            network=NetworkType.REGTEST,
+            offer_type=OfferType.SW0_RELATIVE,
+            min_size=100_000,
+            cj_fee_relative="0.001",  # larger fee so tx_fee_contribution>0 stays profitable
+            tx_fee_contribution=1000,
+            cjfee_factor=0.0,
+            txfee_contribution_factor=0.0,
+            size_factor=0.0,
+        )
+        first: tuple[str | int, int, int] | None = None
+        for _ in range(5):
+            manager = OfferManager(randomized_wallet, cfg, "J5TestMaker")
+            with patch("maker.offers.get_best_fidelity_bond", new=AsyncMock(return_value=None)):
+                offers = await manager.create_offers()
+            snap = (offers[0].cjfee, offers[0].txfee, offers[0].minsize)
+            if first is None:
+                first = snap
+            assert snap == first
+        assert first is not None
+        assert first[0] == "0.001"
+        assert first[1] == 1000

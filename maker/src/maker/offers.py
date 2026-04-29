@@ -7,12 +7,43 @@ Supports multiple simultaneous offers with different fee structures (relative/ab
 
 from __future__ import annotations
 
+import random
+
+from jmcore.constants import DUST_THRESHOLD
 from jmcore.models import Offer, OfferType
 from jmwallet.wallet.service import WalletService
 from loguru import logger
 
 from maker.config import MakerConfig, OfferConfig
 from maker.fidelity import get_best_fidelity_bond
+
+
+def _randomize(value: float, factor: float, low: float | None = None) -> float:
+    """Sample uniformly from ``[value*(1-factor), value*(1+factor)]``.
+
+    When ``factor`` is 0 the input value is returned unchanged.  When ``low``
+    is provided the result is clamped from below to that value (e.g. the dust
+    threshold for sizes).  Returning a float lets callers cast to int where
+    appropriate so we do not lose precision for relative fees.
+    """
+    if factor <= 0:
+        result = float(value)
+    else:
+        result = random.uniform(value * (1.0 - factor), value * (1.0 + factor))
+    if low is not None and result < low:
+        return float(low)
+    return result
+
+
+def _format_relative_cjfee(value: float) -> str:
+    """Format a relative CJ fee without scientific notation or trailing zeros.
+
+    Mirrors the canonicalization performed by
+    :meth:`maker.config.OfferConfig.normalize_cj_fee_relative` so that wire
+    values stay compact and round-trip through the validator.
+    """
+    formatted = f"{value:.10f}".rstrip("0").rstrip(".")
+    return formatted if formatted else "0"
 
 
 def _round_maxsize_to_power_of_2(value: int) -> int:
@@ -144,10 +175,17 @@ class OfferManager:
             Offer object or None if creation failed
         """
         try:
-            # Reserve dust threshold + tx fee contribution
-            max_available = max_balance - max(
-                self.config.dust_threshold, offer_cfg.tx_fee_contribution
+            # Randomize tx fee contribution per offer announcement (mirrors
+            # upstream yg-privacyenhanced).  When txfee_contribution is 0 the
+            # randomized value is also 0 regardless of the factor.
+            randomized_txfee = int(
+                _randomize(
+                    offer_cfg.tx_fee_contribution, offer_cfg.txfee_contribution_factor, low=0
+                )
             )
+
+            # Reserve dust threshold + (randomized) tx fee contribution
+            max_available = max_balance - max(self.config.dust_threshold, randomized_txfee)
 
             if max_available <= offer_cfg.min_size:
                 logger.warning(
@@ -157,33 +195,66 @@ class OfferManager:
                 )
                 return None
 
-            # Calculate min_size based on offer type
+            # Calculate min_size based on offer type and randomize cjfee/min_size
             if offer_cfg.offer_type in (OfferType.SW0_RELATIVE, OfferType.SWA_RELATIVE):
-                cjfee = offer_cfg.cj_fee_relative
-
-                # Validate cj_fee_relative to prevent division by zero
                 cj_fee_float = float(offer_cfg.cj_fee_relative)
                 if cj_fee_float <= 0:
                     logger.error(
-                        f"Offer {offer_id}: Invalid cj_fee_relative: {offer_cfg.cj_fee_relative}. "
-                        "Must be > 0 for relative offer types."
+                        f"Offer {offer_id}: Invalid cj_fee_relative: "
+                        f"{offer_cfg.cj_fee_relative}. Must be > 0 for relative offer types."
                     )
                     return None
 
-                # Calculate minimum size for profitability
-                min_size_for_profit = int(1.5 * offer_cfg.tx_fee_contribution / cj_fee_float)
-                min_size = max(min_size_for_profit, offer_cfg.min_size)
+                # Randomize the relative fee.  Use a string format that drops
+                # trailing zeros and avoids scientific notation so the wire
+                # value stays compact for both 0.001 and 0.00002 defaults.
+                randomized_cj_fee_float = _randomize(cj_fee_float, offer_cfg.cjfee_factor)
+                if randomized_cj_fee_float <= 0:
+                    randomized_cj_fee_float = cj_fee_float
+                cjfee = _format_relative_cjfee(randomized_cj_fee_float)
+
+                # Calculate minimum size for profitability using the
+                # *advertised* (randomized) values to avoid quoting an offer
+                # that cannot cover its own tx fee contribution.
+                min_size_for_profit = (
+                    int(1.5 * randomized_txfee / randomized_cj_fee_float)
+                    if randomized_cj_fee_float > 0
+                    else 0
+                )
+                base_min_size = max(min_size_for_profit, offer_cfg.min_size)
             else:
-                cjfee = str(offer_cfg.cj_fee_absolute)
-                min_size = offer_cfg.min_size
+                # Absolute offer.  Randomize cjfee around cj_fee_absolute and
+                # add the randomized txfee contribution (matches reference).
+                randomized_cj_fee_int = int(
+                    _randomize(offer_cfg.cj_fee_absolute, offer_cfg.cjfee_factor)
+                )
+                if randomized_cj_fee_int < 0:
+                    randomized_cj_fee_int = 0
+                cjfee = str(randomized_cj_fee_int + randomized_txfee)
+                base_min_size = offer_cfg.min_size
 
+            # Randomize min_size (clamped to dust threshold to keep offers
+            # spendable).
+            randomized_min_size = int(
+                _randomize(base_min_size, offer_cfg.size_factor, low=DUST_THRESHOLD)
+            )
+
+            # Round max-side to a power of 2 to hide exact balance, then
+            # randomize *downwards* (upstream randomizes downward to stay
+            # within available balance).
             rounded_max = _round_maxsize_to_power_of_2(max_available)
+            if offer_cfg.size_factor > 0 and rounded_max > 0:
+                randomized_max_size = int(
+                    random.uniform(rounded_max * (1.0 - offer_cfg.size_factor), rounded_max)
+                )
+            else:
+                randomized_max_size = rounded_max
 
-            if rounded_max <= min_size:
+            if randomized_max_size <= randomized_min_size:
                 logger.warning(
-                    f"Offer {offer_id}: Rounded maxsize too small: "
-                    f"rounded_max={rounded_max} <= min_size={min_size} "
-                    f"(exact max_available={max_available})"
+                    f"Offer {offer_id}: Randomized maxsize too small: "
+                    f"max_size={randomized_max_size} <= min_size={randomized_min_size} "
+                    f"(rounded_max={rounded_max}, exact max_available={max_available})"
                 )
                 return None
 
@@ -191,17 +262,18 @@ class OfferManager:
                 counterparty=self.maker_nick,
                 oid=offer_id,
                 ordertype=offer_cfg.offer_type,
-                minsize=min_size,
-                maxsize=rounded_max,
-                txfee=offer_cfg.tx_fee_contribution,
+                minsize=randomized_min_size,
+                maxsize=randomized_max_size,
+                txfee=randomized_txfee,
                 cjfee=cjfee,
                 fidelity_bond_value=fidelity_bond_value,
             )
 
             logger.info(
                 f"Created offer {offer_id}: type={offer.ordertype.value}, "
-                f"size={min_size}-{rounded_max} (exact={max_available}), "
-                f"cjfee={cjfee}, txfee={offer_cfg.tx_fee_contribution}, "
+                f"size={randomized_min_size}-{randomized_max_size} "
+                f"(rounded_max={rounded_max}, exact={max_available}), "
+                f"cjfee={cjfee}, txfee={randomized_txfee}, "
                 f"bond_value={fidelity_bond_value}"
             )
 

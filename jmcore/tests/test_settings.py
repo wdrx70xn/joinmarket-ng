@@ -154,21 +154,23 @@ class TestSettingsDefaults:
         """Test default maker settings."""
         settings = JoinMarketSettings()
 
-        # Defaults track the upstream JoinMarket reference to avoid making
-        # jm-ng makers fingerprintable via different defaults (issue #468).
+        # Defaults track the upstream JoinMarket reference (yg-privacyenhanced)
+        # to avoid making jm-ng makers fingerprintable. See issue #468.
         assert settings.maker.min_size == 100_000
         assert settings.maker.offer_type == "sw0reloffer"
         assert settings.maker.cj_fee_relative == "0.00002"
         assert settings.maker.cj_fee_absolute == 500
         assert settings.maker.merge_algorithm == "default"
+        assert settings.maker.cjfee_factor == 0.1
+        assert settings.maker.txfee_contribution_factor == 0.3
+        assert settings.maker.size_factor == 0.1
 
     def test_default_taker_settings(self) -> None:
         """Test default taker settings."""
         settings = JoinMarketSettings()
 
         # counterparty_count defaults to None: a random value in [8, 10] is
-        # drawn per CoinJoin (matches upstream sendpayment, avoids
-        # fingerprinting via a fixed value -- see issue #468).
+        # drawn per CoinJoin (matches upstream sendpayment).
         assert settings.taker.counterparty_count is None
         # minimum_makers default 4 matches the upstream POLICY default.
         assert settings.taker.minimum_makers == 4
