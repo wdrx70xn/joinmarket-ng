@@ -261,9 +261,20 @@ class TestSessionResponse:
             nickname="J5abc",
             rescanning=False,
             block_height=800_000,
+            descriptor_wallet_name="jm_abcdef12_regtest",
         )
         assert resp.maker_running is True
         assert resp.block_height == 800_000
+        assert resp.descriptor_wallet_name == "jm_abcdef12_regtest"
+
+    def test_descriptor_wallet_name_optional(self) -> None:
+        resp = SessionResponse(
+            session=True,
+            maker_running=False,
+            coinjoin_in_process=False,
+            wallet_name="w.jmdat",
+        )
+        assert resp.descriptor_wallet_name is None
 
 
 class TestMiscModels:

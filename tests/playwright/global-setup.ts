@@ -62,46 +62,57 @@ async function triggerUtxoRefresh(token: string): Promise<void> {
 }
 
 /**
- * Poll Bitcoin Core until the descriptor wallet has finished its rescan.
- * After `importdescriptors` with background_full_rescan=True, Bitcoin Core
- * does a background rescan that can take several minutes for ~5000 blocks.
- * During this time listunspent returns 0 UTXOs.
+ * Poll jmwalletd's /session endpoint until it reports the wallet is no
+ * longer rescanning. After `createwallet`/`unlockwallet`, jmwalletd may
+ * trigger a Bitcoin Core background rescan (importdescriptors with
+ * background_full_rescan=True) which can take several minutes on slow
+ * hosts. While it runs, listunspent returns 0 UTXOs and any funding
+ * attempt is invisible to the wallet.
+ *
+ * We deliberately query jmwalletd rather than Bitcoin Core directly so
+ * that we don't need to know the (deterministic, mnemonic-derived)
+ * bitcoind wallet name client-side.
  */
-async function waitForRescan(
-  descriptorWalletName: string,
-  timeoutMs = 600_000,
-): Promise<void> {
+async function waitForRescan(token: string, timeoutMs = 600_000): Promise<void> {
   const start = Date.now();
-  console.log(
-    `[global-setup] Waiting for Bitcoin Core descriptor wallet '${descriptorWalletName}' rescan...`,
-  );
+  console.log("[global-setup] Waiting for jmwalletd rescan to finish...");
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${BITCOIN_RPC_URL}/wallet/${descriptorWalletName}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Basic ${Buffer.from(`${BITCOIN_RPC_USER}:${BITCOIN_RPC_PASS}`).toString("base64")}`,
-        },
-        body: JSON.stringify({ method: "getwalletinfo", params: [], id: 1 }),
+      const res = await fetch(`${JMWALLETD_URL}/api/v1/session`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      const scanning = data?.result?.scanning;
-      if (scanning === false) {
+      if (data?.rescanning === false) {
         console.log("[global-setup] Rescan complete.");
         return;
       }
-      const progress =
-        typeof scanning === "object" ? ` (${Math.round(scanning.progress * 100)}%)` : "";
-      console.log(`[global-setup] Rescan in progress${progress}, waiting...`);
+      console.log("[global-setup] Rescan in progress, waiting...");
     } catch (err) {
-      console.warn("[global-setup] getwalletinfo failed, retrying:", err);
+      console.warn("[global-setup] /session probe failed, retrying:", err);
     }
     await new Promise((r) => setTimeout(r, 5_000));
   }
-  throw new Error(
-    `Bitcoin Core descriptor wallet '${descriptorWalletName}' rescan did not complete in time`,
-  );
+  throw new Error("jmwalletd rescan did not complete in time");
+}
+
+/**
+ * Look up the bitcoind descriptor wallet name backing the currently
+ * active jmwalletd wallet. The name is derived deterministically from
+ * the wallet's mnemonic+network on the server side; we just read it
+ * back from /session so we don't have to recompute it client-side.
+ */
+async function getDescriptorWalletName(token: string): Promise<string> {
+  const res = await fetch(`${JMWALLETD_URL}/api/v1/session`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  const name = data?.descriptor_wallet_name;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error(
+      "jmwalletd /session did not return a descriptor_wallet_name; backend may not be descriptor_wallet",
+    );
+  }
+  return name;
 }
 
 async function waitForBalance(
@@ -233,8 +244,13 @@ export default async function globalSetup(): Promise<void> {
 
   // The descriptor import may trigger a background Bitcoin Core rescan.
   // Wait for it to complete before checking/funding the balance.
-  const DESCRIPTOR_WALLET_NAME = "jm_playwright_regtest";
-  await waitForRescan(DESCRIPTOR_WALLET_NAME);
+  await waitForRescan(token);
+
+  // Discover the bitcoind descriptor wallet name (derived from the JM
+  // wallet's mnemonic) so we can issue the consolidation RPCs against
+  // the correct wallet endpoint.
+  const DESCRIPTOR_WALLET_NAME = await getDescriptorWalletName(token);
+  console.log(`[global-setup] Backing descriptor wallet: ${DESCRIPTOR_WALLET_NAME}`);
 
   // Consolidate UTXOs from prior test runs to avoid "tx-size" errors.
   await consolidateUtxos(token, DESCRIPTOR_WALLET_NAME);

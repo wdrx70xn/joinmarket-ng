@@ -68,6 +68,38 @@ class TestGetSession:
         assert data["session"] is True
         assert data["wallet_name"] == "test_wallet.jmdat"
 
+    def test_descriptor_wallet_name_exposed_when_authed(
+        self,
+        daemon_state_with_wallet: DaemonState,
+    ) -> None:
+        """When the active backend is a descriptor wallet, /session must
+        expose its bitcoind wallet name to authenticated clients so they
+        can address Bitcoin Core RPC endpoints (used by Playwright setup
+        to issue listunspent / sendall against the right wallet)."""
+        daemon_state_with_wallet.wallet_service.backend.wallet_name = "jm_deadbeef_regtest"
+        application = create_app(data_dir=daemon_state_with_wallet.data_dir)
+        set_daemon_state(daemon_state_with_wallet)
+        pair = daemon_state_with_wallet.token_authority.issue("test_wallet.jmdat")
+        client = TestClient(application)
+        resp = client.get(
+            "/api/v1/session",
+            headers={"Authorization": f"Bearer {pair.token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["descriptor_wallet_name"] == "jm_deadbeef_regtest"
+
+    def test_descriptor_wallet_name_absent_when_unauth(
+        self,
+        authed_client: tuple[TestClient, str],
+    ) -> None:
+        """Unauthenticated /session must not leak the bitcoind wallet name."""
+        client, _ = authed_client
+        resp = client.get("/api/v1/session")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("descriptor_wallet_name") is None
+
 
 class TestListWallets:
     def test_empty(self, client: TestClient, daemon_state: DaemonState) -> None:

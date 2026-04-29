@@ -129,6 +129,7 @@ class SessionResponse(BaseModel):
     nickname: str | None = None
     rescanning: bool = False
     block_height: int | None = None
+    descriptor_wallet_name: str | None = None
 
 
 class WalletDisplayEntry(BaseModel):

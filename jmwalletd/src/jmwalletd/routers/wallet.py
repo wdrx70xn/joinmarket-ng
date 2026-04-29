@@ -170,6 +170,18 @@ async def get_session(
         except Exception:
             resp.block_height = None
 
+        # Expose the underlying bitcoind descriptor wallet name for clients
+        # (e.g. test setup / debugging tools) that need to query Bitcoin Core
+        # directly. Only present when the active backend is a descriptor
+        # wallet — other backends (Neutrino, scantxoutset) leave this unset.
+        try:
+            backend = state.wallet_service.backend
+            wallet_name_attr = getattr(backend, "wallet_name", None)
+            if isinstance(wallet_name_attr, str) and wallet_name_attr:
+                resp.descriptor_wallet_name = wallet_name_attr
+        except Exception:
+            resp.descriptor_wallet_name = None
+
     return resp
 
 
