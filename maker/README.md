@@ -15,6 +15,37 @@ Earn fees by providing liquidity for CoinJoin transactions. Makers passively ear
 
 For full documentation, see [maker Documentation](https://joinmarket-ng.github.io/joinmarket-ng/README-maker/).
 
+## Multiple Local Instances
+
+If you want to run more than one maker on the same machine, give each maker
+its own data directory. The simplest pattern is to pass `--data-dir` (or set
+`JOINMARKET_DATA_DIR`) on every `jm-maker` and `jm-wallet` command so each
+instance gets its own `config.toml`, wallet files, logs, and local runtime
+state.
+
+```bash
+mkdir -p ~/jm-maker-a ~/jm-maker-b
+
+jm-maker config-init --data-dir ~/jm-maker-a
+jm-maker config-init --data-dir ~/jm-maker-b
+
+jm-wallet generate --data-dir ~/jm-maker-a
+jm-wallet generate --data-dir ~/jm-maker-b
+
+jm-maker start \
+  --data-dir ~/jm-maker-a \
+  --mnemonic-file ~/jm-maker-a/wallets/default.mnemonic
+
+jm-maker start \
+  --data-dir ~/jm-maker-b \
+  --mnemonic-file ~/jm-maker-b/wallets/default.mnemonic
+```
+
+For takers, separate installations are usually unnecessary. One installation
+can manage multiple wallet mnemonic files, and you can switch between them
+with `--mnemonic-file`. Use separate `--data-dir` values for takers only when
+you specifically want isolated config and runtime state.
+
 <!-- AUTO-GENERATED HELP START: jm-maker -->
 
 <details>
