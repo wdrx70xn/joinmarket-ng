@@ -8,10 +8,18 @@ These tests are marked with @pytest.mark.docker so they are excluded by default.
 Run with: pytest -m docker maker/tests/integration/
 """
 
+import os
+
 import httpx
 import pytest
 from jmwallet.backends.bitcoin_core import BitcoinCoreBackend
 from jmwallet.wallet.service import WalletService
+
+# Connection parameters honor the same env vars used by the parallel test
+# runner so the suite can target an isolated bitcoind on a non-default port.
+RPC_URL = os.environ.get("BITCOIN_RPC_URL", "http://127.0.0.1:18443")
+RPC_USER = os.environ.get("BITCOIN_RPC_USER", "test")
+RPC_PASSWORD = os.environ.get("BITCOIN_RPC_PASSWORD", "test")
 
 
 def check_bitcoin_available():
@@ -19,8 +27,8 @@ def check_bitcoin_available():
     try:
         client = httpx.Client(timeout=2.0)
         response = client.post(
-            "http://127.0.0.1:18443",
-            auth=("test", "test"),
+            RPC_URL,
+            auth=(RPC_USER, RPC_PASSWORD),
             json={"jsonrpc": "1.0", "id": "test", "method": "getblockchaininfo", "params": []},
         )
         client.close()
@@ -45,7 +53,8 @@ def require_bitcoin():
     """
     if not check_bitcoin_available():
         pytest.fail(
-            "Bitcoin Core regtest node not running. Start with: docker-compose up -d bitcoin"
+            f"Bitcoin Core regtest node not running at {RPC_URL}. "
+            "Start with: docker-compose up -d bitcoin"
         )
 
 
@@ -53,9 +62,9 @@ def require_bitcoin():
 def bitcoin_backend():
     """Bitcoin Core backend connected to regtest"""
     return BitcoinCoreBackend(
-        rpc_url="http://127.0.0.1:18443",
-        rpc_user="test",
-        rpc_password="test",
+        rpc_url=RPC_URL,
+        rpc_user=RPC_USER,
+        rpc_password=RPC_PASSWORD,
     )
 
 
