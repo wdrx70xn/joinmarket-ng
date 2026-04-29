@@ -33,14 +33,7 @@ from jmwallet.wallet.service import WalletService
 from loguru import logger
 
 from tumbler.persistence import save_plan
-from tumbler.plan import (
-    MakerSessionPhase,
-    Phase,
-    PhaseStatus,
-    Plan,
-    PlanStatus,
-    TakerCoinjoinPhase,
-)
+from tumbler.plan import MakerSessionPhase, Phase, PhaseStatus, Plan, PlanStatus, TakerCoinjoinPhase
 
 _LOW_CONFIRMATION_HINTS = (
     "No eligible UTXOs in mixdepth",
@@ -94,14 +87,14 @@ class RunnerContext:
     # reference tumbler's ``restart_waiter`` and prevents the next phase
     # from hitting the Taker's ``taker_utxo_age`` wall when it tries to
     # spend an unconfirmed output. Set to ``0`` to disable.
-    min_confirmations_between_phases: int = 5
+    min_confirmations_between_phases: int = 6
     # Optional callback returning the current confirmation count of a txid,
     # or ``None`` if the transaction is not (yet) visible to the backend.
     # Required when ``min_confirmations_between_phases > 0``.
     get_confirmations: Callable[[str], Awaitable[int | None]] | None = None
     # Polling interval for ``get_confirmations``. Tests override this to
     # keep runs fast.
-    confirmation_poll_interval: float = 5.0
+    confirmation_poll_interval: float = 30.0
     # How often to emit a "still waiting" progress log while the
     # confirmation gate polls. Independent of ``confirmation_poll_interval``
     # so we can poll often (cheap) but log sparingly. Set to ``0`` to log
@@ -122,7 +115,7 @@ class RunnerContext:
     confirmation_unknown_timeout: float = 1800.0
     # Delay before retrying a failed taker phase. Applied with a simple
     # linear backoff: ``retry_delay_seconds * attempt_count``.
-    retry_delay_seconds: float = 30.0
+    retry_delay_seconds: float = 1800.0
 
 
 class TumbleRunner:
