@@ -849,141 +849,21 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
 
         WCHOICE=$(whiptail --title " Wallet Management " \
          --menu "\n$WALLET_INFO | Maker Bot: $MAKER_STATUS" \
-         20 64 8 \
-          "NEW"      "Create New Wallet (12 or 24-word seed)" \
-          "IMP"      "Import Existing Wallet (from seed)" \
-          "VAL"      "Validate a Seed Phrase" \
+         20 64 9 \
           "BAL"      "View Wallet Info / Balance" \
           "HIST"     "CoinJoin History" \
           "FREEZE"   "Freeze / Unfreeze UTXOs" \
+          "NEW"      "Create New Wallet (12 or 24-word seed)" \
+          "IMP"      "Import Existing Wallet (from seed)" \
           "SEL"      "Select Active Wallet" \
-          "BACK"     "Back to Main Menu" 3>&1 1>&2 2>&3)
+          "VAL"      "Validate a Seed Phrase" \
+          "SEED"     "Show Seed Words" \
+          "BACK"     "Back to Main Menu" 3>&1 1>&2 2>&3)  
 
         # Handle ESC/Cancel - exit W submenu
         [ $? -ne 0 ] && break
 
         case $WCHOICE in
-          # --------------------------------------------------------------
-          # NEW - Create New Wallet
-          # --------------------------------------------------------------
-          NEW)
-              WNAME=$(whiptail --title " Create New Wallet " \
-                  --inputbox "Enter wallet name (leave empty for 'default'):" \
-                  10 55 "" 3>&1 1>&2 2>&3) || continue
-              # Use 'default' if empty
-              WNAME="${WNAME:-default}"
-              # Strip extension if provided, we add .mnemonic
-              WNAME="${WNAME%.mnemonic}"
-              # Validate: only safe characters, no path separators
-              if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-                  whiptail --title " Error " --msgbox "Invalid wallet name.\nUse only letters, numbers, dot, underscore, and hyphen." 9 55
-                  continue
-              fi
-
-              # Ask for seed word count (default 24; 12 is also widely supported)
-              WORDS_CHOICE=$(whiptail --title " Create New Wallet " --notags \
-                  --menu "How many seed words should the new wallet have?" 12 55 2 \
-                  "24" "24 words (recommended, 256-bit entropy)" \
-                  "12" "12 words (128-bit entropy)" \
-                  3>&1 1>&2 2>&3) || continue
-              WORDS="${WORDS_CHOICE:-24}"
-
-              WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
-              mkdir -p "$DATA_DIR/wallets"
-
-              # Collect the encryption password via whiptail so the user
-              # does not get dropped into the CLI prompt and does not get
-              # asked a second time when storing it in config.toml later
-              # (issue #462). An empty password disables encryption.
-              NEW_PWD=$(prompt_new_wallet_password) || continue
-
-              clear
-              echo "=== Create New Wallet ==="
-              echo ""
-              echo "This will generate a new ${WORDS}-word BIP39 mnemonic."
-              echo "IMPORTANT: Write down the seed words! They are your backup."
-              echo ""
-              echo "Generating wallet..."
-              MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet generate \
-                  --words "$WORDS" --no-prompt-password -o "$WALLET_PATH"
-              RESULT=$?
-
-              if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
-                  echo ""
-                  echo "Wallet saved to: $WALLET_PATH"
-                  # Pass the captured password to post_wallet_create so the
-                  # "store in config" branch can reuse it directly.
-                  post_wallet_create "$WALLET_PATH" "$NEW_PWD"
-              else
-                  echo "Wallet creation may have failed. Check output above."
-              fi
-              unset NEW_PWD
-              pause
-              ;;
-
-          # --------------------------------------------------------------
-          # IMP - Import Wallet
-          # --------------------------------------------------------------
-          IMP)
-              WNAME=$(whiptail --title " Import Wallet " \
-                  --inputbox "Enter wallet name (leave empty for 'imported'):" \
-                  10 55 "" 3>&1 1>&2 2>&3) || continue
-              # Use 'imported' if empty
-              WNAME="${WNAME:-imported}"
-              WNAME="${WNAME%.mnemonic}"
-              # Validate: only safe characters, no path separators
-              if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
-                  whiptail --title " Error " --msgbox "Invalid wallet name.\nUse only letters, numbers, dot, underscore, and hyphen." 9 55
-                  continue
-              fi
-
-              # Ask for word count
-              WORDS_CHOICE=$(whiptail --title " Import Wallet " --notags \
-                  --menu "How many seed words does your wallet have?" 12 50 2 \
-                  "24" "24 words" \
-                  "12" "12 words" \
-                  3>&1 1>&2 2>&3) || break
-              WORDS="${WORDS_CHOICE:-24}"
-
-              WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
-              mkdir -p "$DATA_DIR/wallets"
-
-              # Collect the encryption password upfront (issue #462).
-              NEW_PWD=$(prompt_new_wallet_password) || continue
-
-              clear
-              echo "=== Import Wallet from Seed ==="
-              echo ""
-              echo "You will be prompted to enter your BIP39 seed words."
-              echo ""
-              MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet import \
-                  --words "$WORDS" --no-prompt-password -o "$WALLET_PATH"
-              RESULT=$?
-
-              if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
-                  echo ""
-                  echo "Wallet imported to: $WALLET_PATH"
-                  post_wallet_create "$WALLET_PATH" "$NEW_PWD"
-              else
-                  echo "Import may have failed. Check output above."
-              fi
-              unset NEW_PWD
-              pause
-              ;;
-
-          # --------------------------------------------------------------
-          # VAL - Validate Seed
-          # --------------------------------------------------------------
-          VAL)
-              clear
-              echo "=== Validate Seed Phrase ==="
-              echo ""
-              echo "Check that a BIP39 mnemonic is valid before importing."
-              echo ""
-              jm-wallet validate
-              pause
-              ;;
-
           # --------------------------------------------------------------
           # BAL - Wallet Info (with submenu)
           # --------------------------------------------------------------
@@ -1126,6 +1006,114 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
               ;;
 
           # --------------------------------------------------------------
+          # NEW - Create New Wallet
+          # --------------------------------------------------------------
+          NEW)
+              WNAME=$(whiptail --title " Create New Wallet " \
+                  --inputbox "Enter wallet name (leave empty for 'default'):" \
+                  10 55 "" 3>&1 1>&2 2>&3) || continue
+              # Use 'default' if empty
+              WNAME="${WNAME:-default}"
+              # Strip extension if provided, we add .mnemonic
+              WNAME="${WNAME%.mnemonic}"
+              # Validate: only safe characters, no path separators
+              if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                  whiptail --title " Error " --msgbox "Invalid wallet name.\nUse only letters, numbers, dot, underscore, and hyphen." 9 55
+                  continue
+              fi
+
+              # Ask for seed word count (default 24; 12 is also widely supported)
+              WORDS_CHOICE=$(whiptail --title " Create New Wallet " --notags \
+                  --menu "How many seed words should the new wallet have?" 12 55 2 \
+                  "24" "24 words (recommended, 256-bit entropy)" \
+                  "12" "12 words (128-bit entropy)" \
+                  3>&1 1>&2 2>&3) || continue
+              WORDS="${WORDS_CHOICE:-24}"
+
+              WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
+              mkdir -p "$DATA_DIR/wallets"
+
+              # Collect the encryption password via whiptail so the user
+              # does not get dropped into the CLI prompt and does not get
+              # asked a second time when storing it in config.toml later
+              # (issue #462). An empty password disables encryption.
+              NEW_PWD=$(prompt_new_wallet_password) || continue
+
+              clear
+              echo "=== Create New Wallet ==="
+              echo ""
+              echo "This will generate a new ${WORDS}-word BIP39 mnemonic."
+              echo "IMPORTANT: Write down the seed words! They are your backup."
+              echo ""
+              echo "Generating wallet..."
+              MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet generate \
+                  --words "$WORDS" --no-prompt-password -o "$WALLET_PATH"
+              RESULT=$?
+
+              if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
+                  echo ""
+                  echo "Wallet saved to: $WALLET_PATH"
+                  # Pass the captured password to post_wallet_create so the
+                  # "store in config" branch can reuse it directly.
+                  post_wallet_create "$WALLET_PATH" "$NEW_PWD"
+              else
+                  echo "Wallet creation may have failed. Check output above."
+              fi
+              unset NEW_PWD
+              pause
+              ;;
+
+          # --------------------------------------------------------------
+          # IMP - Import Wallet
+          # --------------------------------------------------------------
+          IMP)
+              WNAME=$(whiptail --title " Import Wallet " \
+                  --inputbox "Enter wallet name (leave empty for 'imported'):" \
+                  10 55 "" 3>&1 1>&2 2>&3) || continue
+              # Use 'imported' if empty
+              WNAME="${WNAME:-imported}"
+              WNAME="${WNAME%.mnemonic}"
+              # Validate: only safe characters, no path separators
+              if [[ ! "$WNAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+                  whiptail --title " Error " --msgbox "Invalid wallet name.\nUse only letters, numbers, dot, underscore, and hyphen." 9 55
+                  continue
+              fi
+
+              # Ask for word count
+              WORDS_CHOICE=$(whiptail --title " Import Wallet " --notags \
+                  --menu "How many seed words does your wallet have?" 12 50 2 \
+                  "24" "24 words" \
+                  "12" "12 words" \
+                  3>&1 1>&2 2>&3) || break
+              WORDS="${WORDS_CHOICE:-24}"
+
+              WALLET_PATH="$DATA_DIR/wallets/${WNAME}.mnemonic"
+              mkdir -p "$DATA_DIR/wallets"
+
+              # Collect the encryption password upfront (issue #462).
+              NEW_PWD=$(prompt_new_wallet_password) || continue
+
+              clear
+              echo "=== Import Wallet from Seed ==="
+              echo ""
+              echo "You will be prompted to enter your BIP39 seed words."
+              echo ""
+              MNEMONIC_PASSWORD="$NEW_PWD" jm-wallet import \
+                  --words "$WORDS" --no-prompt-password -o "$WALLET_PATH"
+              RESULT=$?
+
+              if [ $RESULT -eq 0 ] && [ -f "$WALLET_PATH" ]; then
+                  echo ""
+                  echo "Wallet imported to: $WALLET_PATH"
+                  post_wallet_create "$WALLET_PATH" "$NEW_PWD"
+              else
+                  echo "Import may have failed. Check output above."
+              fi
+              unset NEW_PWD
+              pause
+              ;;
+
+          # --------------------------------------------------------------
           # SEL - Select Active Wallet
           # --------------------------------------------------------------
           SEL)
@@ -1168,6 +1156,58 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
                   fi
               else
                   whiptail --title " Error " --msgbox "File not found: $DATA_DIR/wallets/$WNAME" 8 55
+              fi
+              ;;
+
+          # --------------------------------------------------------------
+          # VAL - Validate Seed
+          # --------------------------------------------------------------
+          VAL)
+              clear
+              echo "=== Validate Seed Phrase ==="
+              echo ""
+              echo "Check that a BIP39 mnemonic is valid before importing."
+              echo ""
+              jm-wallet validate
+              pause
+              ;;
+
+# --------------------------------------------------------------
+          # SEED - Show Seed Words
+          # --------------------------------------------------------------
+          SEED)
+              if [ -z "$CURRENT_WALLET" ]; then
+                  whiptail --title " Error " --msgbox "No wallet configured.\nUse 'Select Active Wallet' or 'Create New Wallet' first." 9 50
+              else
+                  if ! whiptail --title " Security Warning " \
+                      --yesno "\n$WALLET_INFO | Maker Bot: $MAKER_STATUS\n\nYou are about to display your BIP39 seed words.\n\nWARNING: Anyone with these words can spend all your funds.\nDo not share them, photograph them, or paste them into any website.\n\nMake sure you are in a private setting!\n\nContinue?" \
+                      17 78 --defaultno 3>&1 1>&2 2>&3; then
+                      continue
+                  fi
+
+                  clear
+                  echo "=== Seed Words ==="
+                  echo ""
+                  echo "Active wallet: $(basename "$CURRENT_WALLET")"
+                  echo ""
+                  echo "Preparing your wallet, please wait..."
+                  echo ""
+
+                  # Clear any cached password from previous operations
+                  unset MNEMONIC_PASSWORD
+
+                  if ! ensure_wallet_password "$CURRENT_WALLET"; then
+                      clear
+                      continue
+                  fi
+
+                  echo ""
+                  jm-wallet showseed -f "$CURRENT_WALLET"
+                  echo ""
+                  echo ""
+                  echo "Press [Enter] to continue."
+                  read -r _
+                  clear
               fi
               ;;
 
@@ -1429,7 +1469,7 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
       # Outer loop so "Cancel" on the confirm dialog returns to this menu
       # instead of the top-level menu (#451 point 6).
       while true; do
-        UCHOICE=$(whiptail --title " Update JoinMarket-NG (current: ${CURRENT_LABEL}) " \
+UCHOICE=$(whiptail --title " Update JoinMarket-NG (current: ${CURRENT_LABEL}) " \
             --menu "\n$WALLET_INFO | Maker Bot: $MAKER_STATUS\n\nChoose update channel:" \
             16 70 4 \
             "STABLE"  "Latest stable release (v${LATEST_STABLE})" \
