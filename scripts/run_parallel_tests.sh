@@ -1207,10 +1207,11 @@ launch_suite() {
 wait_for_capacity() {
     while :; do
         local running=0
-        for suite_name in "${!SUITE_PIDS[@]}"; do
-            local pid=${SUITE_PIDS[$suite_name]}
+        local sn
+        for sn in "${!SUITE_PIDS[@]}"; do
+            local pid=${SUITE_PIDS[$sn]}
             # Skip already-finalized entries.
-            [ -n "${SUITE_RESULTS[$suite_name]:-}" ] && continue
+            [ -n "${SUITE_RESULTS[$sn]:-}" ] && continue
             if kill -0 "$pid" 2>/dev/null; then
                 running=$((running + 1))
             else
@@ -1218,14 +1219,14 @@ wait_for_capacity() {
                 local rc=0
                 wait "$pid" 2>/dev/null || rc=$?
                 local end=$(date +%s)
-                local start=${SUITE_START_TIMES[$suite_name]:-$end}
+                local start=${SUITE_START_TIMES[$sn]:-$end}
                 local duration=$((end - start))
                 if [ "$rc" -eq 0 ]; then
-                    SUITE_RESULTS[$suite_name]="PASS"
-                    log_success "$suite_name passed (${duration}s)"
+                    SUITE_RESULTS[$sn]="PASS"
+                    log_success "$sn passed (${duration}s)"
                 else
-                    SUITE_RESULTS[$suite_name]="FAIL"
-                    log_error "$suite_name failed (${duration}s) -- see ${PARALLEL_DIR}/${suite_name}.log"
+                    SUITE_RESULTS[$sn]="FAIL"
+                    log_error "$sn failed (${duration}s) -- see ${PARALLEL_DIR}/${sn}.log"
                 fi
             fi
         done
