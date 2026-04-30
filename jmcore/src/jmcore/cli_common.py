@@ -839,6 +839,11 @@ def create_backend(
             wallet_name=wallet_name,
         )
     elif backend_type == "scantxoutset":
+        logger.warning(
+            "The 'scantxoutset' backend is deprecated and will be removed in a "
+            "future release. Switch to 'descriptor_wallet' (default) for faster, "
+            "incremental sync. Update [bitcoin].backend_type in config.toml."
+        )
         backend = BitcoinCoreBackend(
             rpc_url=backend_settings.rpc_url,
             rpc_user=backend_settings.rpc_user,

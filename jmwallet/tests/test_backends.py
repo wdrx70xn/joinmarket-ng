@@ -356,6 +356,21 @@ class TestBitcoinCoreBackendUnit:
         )
         assert backend.can_estimate_fee() is True
 
+    def test_bitcoin_core_emits_deprecation_warning(self):
+        """Instantiating BitcoinCoreBackend (scantxoutset) must emit a DeprecationWarning."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            BitcoinCoreBackend(
+                rpc_url=TEST_RPC_URL, rpc_user=TEST_RPC_USER, rpc_password=TEST_RPC_PASSWORD
+            )
+
+        deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+        assert deprecations, "expected a DeprecationWarning when constructing BitcoinCoreBackend"
+        assert any("scantxoutset" in str(w.message) for w in deprecations)
+        assert any("descriptor_wallet" in str(w.message) for w in deprecations)
+
     @pytest.mark.asyncio
     async def test_warns_for_remote_non_https_rpc_url(self, monkeypatch):
         """Remote non-HTTPS RPC URLs should emit a credential exposure warning."""

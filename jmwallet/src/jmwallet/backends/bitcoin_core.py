@@ -9,6 +9,7 @@ import asyncio
 import ipaddress
 import os
 import random
+import warnings
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlparse
@@ -60,6 +61,15 @@ class BitcoinCoreBackend(BlockchainBackend):
         rpc_password: str = "rpcpassword",
         scan_timeout: float = SCAN_RPC_TIMEOUT,
     ):
+        warnings.warn(
+            "The scantxoutset full-node backend (BitcoinCoreBackend) is deprecated "
+            "and will be removed in a future release. Use the descriptor_wallet "
+            "backend (default) instead, which is faster, supports incremental sync, "
+            "and does not require a full UTXO set scan on every call. "
+            'Set [bitcoin].backend_type = "descriptor_wallet" in your config.toml.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.rpc_url = rpc_url.rstrip("/")
         self.rpc_user = rpc_user
         self.rpc_password = rpc_password
