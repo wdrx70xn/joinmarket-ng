@@ -588,7 +588,13 @@ setup_reference_implementation() {
 # =============================================================================
 build_images() {
     log_info "Building Docker images (shared across suites)..."
-    docker compose build --parallel 2>&1 | tee "${PARALLEL_DIR}/build.log"
+    # Use --profile all so profile-gated services (e.g. jam-playwright,
+    # neutrino*, reference, maker) are built too. Without this, profile
+    # services keep stale images from previous runs.
+    docker compose --profile all --profile e2e --profile maker \
+        --profile neutrino --profile reference --profile reference-maker \
+        --profile taker \
+        build --parallel 2>&1 | tee "${PARALLEL_DIR}/build.log"
     log_success "Docker images built"
 }
 
@@ -758,9 +764,9 @@ run_suite_playwright() {
         fi
         wait_for_port "$dir_port" "Directory ($suite)"
 
-        # Wait for jam-playwright
+        # Wait for jam-playwright (HTTPS, self-signed cert)
         for i in $(seq 1 60); do
-            if curl -sf "http://127.0.0.1:${jam_pw_port}/api/v1/session" >/dev/null 2>&1; then
+            if curl -skf "https://127.0.0.1:${jam_pw_port}/api/v1/session" >/dev/null 2>&1; then
                 break
             fi
             sleep 2
@@ -769,14 +775,15 @@ run_suite_playwright() {
         local PW_DIR="${PROJECT_ROOT}/tests/playwright"
         (cd "$PW_DIR" && npm install && npx playwright install chromium)
 
-        JAM_URL="http://localhost:${jam_pw_port}" \
-        JMWALLETD_URL="http://localhost:${jam_pw_port}" \
+        JAM_URL="https://localhost:${jam_pw_port}" \
+        JMWALLETD_URL="https://localhost:${jam_pw_port}" \
         BITCOIN_RPC_URL="http://localhost:${btc_rpc}" \
         BITCOIN_RPC_USER=test \
         BITCOIN_RPC_PASS=test \
         DIRECTORY_PORT="${dir_port}" \
         JM_CONTAINER_PREFIX="${prefix}" \
         COMPOSE_PROJECT_NAME="jmpt-${suite}" \
+        NODE_TLS_REJECT_UNAUTHORIZED=0 \
         bash -c "cd '${PW_DIR}' && npx playwright test"
     } > "$log" 2>&1 || rc=$?
     cleanup_suite "$suite"
