@@ -277,8 +277,9 @@ export default async function globalSetup(): Promise<void> {
     // the wallet's available balance.
     await btc.sendToAddress(address, 0.01);
 
-    // Mine 1 block to confirm the transaction.
-    await btc.mineBlocks(1);
+    // Mine 5 blocks so the funding tx has enough confirmations for
+    // collaborative sends (JAM requires >=5 confirmations on input UTXOs).
+    await btc.mineBlocks(5);
 
     // Trigger descriptor refresh and wait for balance to appear.
     await waitForBalance(token, MIN_BALANCE_BTC);

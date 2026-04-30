@@ -89,7 +89,9 @@ test.describe("Direct Send", () => {
       page.getByText(/successfully sent/i).first(),
     ).toBeVisible({ timeout: 30_000 });
 
-    await bitcoinRpc.mineBlocks(1);
+    // Mine 5 blocks so that any change UTXO produced by this send has the
+    // 5+ confirmations required by the next collaborative-send test.
+    await bitcoinRpc.mineBlocks(5);
     await page.screenshot({ path: "test-results/send-completed.png", fullPage: true });
   });
 
@@ -141,12 +143,13 @@ test.describe("Direct Send", () => {
       await cjSwitch.click();
     }
 
-    // Keep collaborator count low so the regtest setup can always fill.
+    // JAM requires between 4 and 99 collaborators. The Playwright stack
+    // runs 5 makers (maker1..maker5) so 4 is always satisfiable.
     const collaboratorsInput = page
       .locator('input[type="number"][placeholder="Other"]')
       .first();
     await expect(collaboratorsInput).toBeEnabled({ timeout: 10_000 });
-    await collaboratorsInput.fill("1");
+    await collaboratorsInput.fill("4");
     await collaboratorsInput.blur();
 
     const sendBtn = page
