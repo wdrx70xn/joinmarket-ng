@@ -372,6 +372,12 @@ jobs:
           echo "=== Maker3 logs ==="
           docker compose logs maker3 --tail=100
           echo ""
+          echo "=== Maker4 logs ==="
+          docker compose logs maker4 --tail=100
+          echo ""
+          echo "=== Maker5 logs ==="
+          docker compose logs maker5 --tail=100
+          echo ""
           echo "=== jmwalletd logs ==="
           docker compose logs jmwalletd --tail=200
           echo ""

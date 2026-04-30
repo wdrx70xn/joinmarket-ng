@@ -711,7 +711,7 @@ run_suite_tumbler() {
         ORDERBOOK_WATCHER_IMAGE="joinmarket-ng-orderbook-watcher:latest" \
         compose_cmd "$suite" --profile e2e up -d \
             bitcoin miner directory directory2 orderbook-watcher tor tor-init wallet-funder \
-            jmwalletd maker1 maker2 maker3
+            jmwalletd maker1 maker2 maker3 maker4 maker5
 
         if ! wait_for_bitcoin_rpc "$suite" "$btc_rpc"; then
             log_error "Bitcoin RPC not ready on host port $btc_rpc for suite $suite"
@@ -745,7 +745,7 @@ run_suite_tumbler() {
             echo "=========================================================="
             echo "Container logs for diagnostics (suite=${suite}, rc=${rc})"
             echo "=========================================================="
-            for svc in jmwalletd maker1 maker2 maker3 bitcoin miner directory directory2; do
+            for svc in jmwalletd maker1 maker2 maker3 maker4 maker5 bitcoin miner directory directory2; do
                 echo
                 echo "----- ${svc} -----"
                 COMPOSE_PROJECT_NAME="jmpt-${suite}" \
