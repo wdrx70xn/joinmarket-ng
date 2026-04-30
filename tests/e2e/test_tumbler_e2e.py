@@ -12,8 +12,8 @@ sweep+fractional logic (``mintxcount=2``, ``include_maker_sessions=False``).
 With one funded mixdepth on a 5-mixdepth wallet and one destination, the
 builder emits 1 stage-1 sweep + 4 stage-2 blocks of (1 fractional + 1
 sweep) = 9 CoinJoin phases. ``maker_count_min`` and ``maker_count_max``
-are both ``2`` because only three makers are available in the ``e2e``
-profile.
+are both ``2`` to keep the plan small and fast; the ``e2e`` profile
+provides five makers (maker1..maker5).
 
 Requires ``docker compose --profile e2e up -d`` and Bitcoin Core RPC
 reachable on ``127.0.0.1:18443`` (the default for the e2e profile).
@@ -290,9 +290,10 @@ async def _fund_via_fidelity_funder(address: str, amount_btc: float) -> str:
 def _minimal_plan_parameters() -> dict[str, Any]:
     """Parameters for a minimal plan that still round-trips the builder.
 
-    - ``maker_count_min=maker_count_max=2``: only three makers in the e2e
-      profile, and the reference JM CJ requires counterparty_count < maker
-      count to guarantee a pool big enough to pick from.
+    - ``maker_count_min=maker_count_max=2``: keeps the plan small and
+      fast; the reference JM CJ requires counterparty_count < maker
+      count to guarantee a pool big enough to pick from. The ``e2e``
+      profile provides five makers (maker1..maker5).
     - ``include_maker_sessions=False``: keep the plan to taker-coinjoin
       phases only, which is what this test exercises.
     - ``mintxcount=2``: smallest value that still produces a stage-2
