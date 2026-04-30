@@ -389,100 +389,95 @@ class OrderbookAggregator:
     async def _periodic_peerlist_refresh(self) -> None:
         """Background task to periodically refresh peerlists and clean up stale offers.
 
-        This runs every 5 minutes to:
-        1. Refresh peerlists from all connected directories
-        2. Remove offers from nicks that are no longer in ANY directory's peerlist
-        3. Deduplicate offers that use the same fidelity bond UTXO
+        Runs every 5 minutes and applies a per-directory trust model:
 
-        IMPORTANT: Cleanup only happens if ALL directories with peerlist support report
-        the nick as gone. We err on the side of showing offers when in doubt.
+        1. Refresh each connected directory's peerlist.
+        2. For directories that support GETPEERLIST and responded successfully,
+           remove offers from that client whose nicks are NOT in that
+           directory's current peerlist. This honours explicit disconnect
+           announcements (";D") as well as silent drops the directory has
+           since pruned from its registry.
+        3. For directories without GETPEERLIST support (e.g. legacy reference
+           implementation), fall back to age-based cleanup via
+           ``cleanup_stale_offers``.
+        4. After peerlist refresh, run feature discovery for makers we still
+           don't have features for. Direct probes never remove offers; they
+           are strictly informational / for feature population.
+
+        This replaces the previous cross-directory union model, where an
+        offer was kept as long as ANY directory still reported the maker.
+        That model retained orphan offers for makers that had disconnected
+        from a directory but were still listed by another, which inflated
+        per-directory offer counts.
         """
         # Initial wait to let connections stabilize
         await asyncio.sleep(120)
 
+        refresh_interval = 300.0
+        stale_offer_max_age = 1800.0
+
         while True:
             try:
-                # Collect active nicks from ALL connected directories
-                # Always collect nicks even if refresh fails - use cached state
-                all_active_nicks: set[str] = set()
-                directories_checked = 0
-                directories_with_peerlist_support = 0
+                total_removed = 0
+                refreshed = 0
                 refresh_failures = 0
+                fallback_cleanups = 0
 
-                for node_id, client in self.clients.items():
+                for node_id, client in list(self.clients.items()):
+                    refresh_ok = False
                     try:
-                        # Refresh peerlist for this client
-                        # This updates the client's active_peers tracking
                         await client.get_peerlist_with_features()
-
-                        # Track if this directory supports peerlist
-                        if client._peerlist_supported:
-                            directories_with_peerlist_support += 1
+                        refresh_ok = True
+                        refreshed += 1
                     except Exception as e:
                         logger.debug(f"Failed to refresh peerlist from {node_id}: {e}")
                         refresh_failures += 1
 
-                    # ALWAYS collect active nicks, even if refresh failed
-                    # The client's _active_peers contains accumulated state from previous responses
-                    active_nicks = client.get_active_nicks()
-                    all_active_nicks.update(active_nicks)
-                    directories_checked += 1
+                    if refresh_ok and client._peerlist_supported:
+                        # Per-directory trust: drop offers from nicks the
+                        # directory no longer reports as connected.
+                        active_nicks = client.get_active_nicks()
+                        client_nicks = {key[0] for key in client.offers}
+                        stale_nicks = client_nicks - active_nicks
+                        for nick in stale_nicks:
+                            total_removed += client.remove_offers_for_nick(nick)
+                        logger.debug(
+                            f"Directory {node_id}: {len(active_nicks)} active nicks, "
+                            f"removed offers for {len(stale_nicks)} disconnected nicks"
+                        )
+                    elif client._peerlist_supported is False:
+                        # Reference implementation fallback: prune by age.
+                        removed = client.cleanup_stale_offers(max_age_seconds=stale_offer_max_age)
+                        if removed:
+                            fallback_cleanups += removed
+                            logger.debug(
+                                f"Directory {node_id}: fallback removed {removed} stale offers "
+                                f"(no GETPEERLIST support)"
+                            )
 
-                    logger.debug(f"Directory {node_id}: {len(active_nicks)} active nicks")
-
-                if directories_checked > 0:
+                if refreshed or refresh_failures:
                     logger.info(
-                        f"Peerlist refresh: {len(all_active_nicks)} unique nicks "
-                        f"across {directories_checked} directories "
-                        f"({directories_with_peerlist_support} support GETPEERLIST, "
-                        f"{refresh_failures} refresh failures)"
+                        f"Peerlist refresh: {refreshed} directories refreshed, "
+                        f"{refresh_failures} failed, "
+                        f"{total_removed} offers pruned from disconnected nicks, "
+                        f"{fallback_cleanups} stale offers pruned by age"
                     )
 
-                    # Clean up offers from nicks that are no longer in ANY directory's peerlist
-                    # Only do this if at least one directory supports GETPEERLIST AND
-                    # we successfully refreshed from all peerlist-supporting directories
-                    if directories_with_peerlist_support > 0 and refresh_failures == 0:
-                        total_removed = 0
-                        all_stale_nicks: set[str] = set()
-                        for client in self.clients.values():
-                            # Get all nicks with offers in this client
-                            client_nicks = {key[0] for key in client.offers}
+                # After peerlist refresh, populate features for makers we're
+                # still missing. This is informational and never removes offers.
+                try:
+                    await self._check_makers_without_features()
+                except Exception as e:
+                    logger.debug(f"Error checking makers without features: {e}")
 
-                            # Remove offers from nicks not in the global active list
-                            stale_nicks = client_nicks - all_active_nicks
-                            all_stale_nicks.update(stale_nicks)
-                            for nick in stale_nicks:
-                                removed = client.remove_offers_for_nick(nick)
-                                total_removed += removed
-
-                        if total_removed > 0:
-                            logger.info(
-                                f"Peerlist cleanup: removed {total_removed} offers from "
-                                f"{len(all_stale_nicks)} nicks no longer in any peerlist"
-                            )
-                    elif refresh_failures > 0:
-                        logger.debug(
-                            "Skipping peerlist cleanup due to refresh failures - "
-                            "avoiding false positives"
-                        )
-
-                    # After peerlist refresh, check makers that still don't have features
-                    # This handles the case where directory doesn't support peerlist_features
-                    # or the maker's features weren't included in the peerlist
-                    try:
-                        await self._check_makers_without_features()
-                    except Exception as e:
-                        logger.debug(f"Error checking makers without features: {e}")
-
-                # Sleep for 5 minutes before next refresh
-                await asyncio.sleep(300)
+                await asyncio.sleep(refresh_interval)
 
             except asyncio.CancelledError:
                 logger.info("Peerlist refresh task cancelled")
                 break
             except Exception as e:
                 logger.error(f"Error in peerlist refresh task: {e}")
-                await asyncio.sleep(300)
+                await asyncio.sleep(refresh_interval)
 
         logger.info("Peerlist refresh task stopped")
 
@@ -612,87 +607,37 @@ class OrderbookAggregator:
             logger.info(f"Feature discovery: Discovered features for {features_discovered} makers")
 
     async def _periodic_maker_health_check(self) -> None:
-        """Background task to periodically check maker reachability via direct connections.
+        """Background task to periodically probe makers for feature discovery.
 
-        This runs every 15 minutes to:
-        1. Collect all makers with valid onion addresses from current offers
-        2. Check if they're reachable via direct Tor connection
-        3. Extract features from handshake (for directories without peerlist_features)
-        4. Log reachability statistics for monitoring
+        This task is purely informational and NEVER removes offers. Offer
+        presence is governed exclusively by the directories' peerlists (see
+        ``_periodic_peerlist_refresh``).
 
-        NOTE: This task does NOT remove offers from unreachable makers. The directory
-        server may still have a valid connection to the maker even if we can't reach
-        them directly. We trust the directory's peerlist for offer validity.
+        It exists so we can still learn maker capabilities (e.g.
+        ``neutrino_compat``) when a directory does not advertise
+        ``peerlist_features`` (notably the legacy reference implementation).
+        On healthy jm-ng directories the peerlist already carries features
+        and this probe will mostly be a no-op since makers without missing
+        features are skipped by ``_check_makers_without_features``.
         """
-        # Initial wait to let orderbook populate - reduced from 10 minutes to 2 minutes
-        # to discover features faster for newly connected makers
-        await asyncio.sleep(120)  # 2 minutes
+        # Initial wait to let orderbook populate; feature discovery also
+        # runs after each peerlist refresh, so this loop is the slow path.
+        await asyncio.sleep(120)
 
-        # Health check interval: check makers every 15 minutes
         check_interval = 900.0
 
         while True:
             try:
-                # Collect all unique makers with their locations from all connected clients
-                makers_to_check: dict[str, tuple[str, str]] = {}  # location -> (nick, location)
-
-                for _node_id, client in self.clients.items():
-                    offers_with_ts = client.get_offers_with_timestamps()
-                    for offer_ts in offers_with_ts:
-                        offer = offer_ts.offer
-                        nick = offer.counterparty
-
-                        # Try to find location from peerlist
-                        active_peers = client._active_peers  # nick -> location
-                        location = active_peers.get(nick)
-
-                        # If location not found or is NOT-SERVING-ONION, skip health check
-                        if not location or location == "NOT-SERVING-ONION":
-                            continue
-
-                        # Only check each unique location once (makers may have multiple offers)
-                        if location not in makers_to_check:
-                            makers_to_check[location] = (nick, location)
-
-                if not makers_to_check:
-                    logger.debug(
-                        "Maker health check: No makers with valid onion addresses to check"
-                    )
-                else:
-                    logger.info(
-                        f"Maker health check: Checking reachability of {len(makers_to_check)} "
-                        "unique makers"
-                    )
-
-                    # Sort by priority: bonded first (desc value), then bondless (asc fee)
-                    makers_list = self._prioritize_makers_for_scan(list(makers_to_check.values()))
-                    health_statuses = await self.health_checker.check_makers_batch(makers_list)
-
-                    # Log unreachable makers for debugging but DO NOT remove offers
-                    # The directory server may still have a valid connection to the maker
-                    # even if we can't reach them directly. Trust the directory's peerlist
-                    # for offer validity, not our own direct connection attempts.
-                    unreachable_locations = self.health_checker.get_unreachable_locations(
-                        max_consecutive_failures=3
-                    )
-
-                    reachable_count = sum(1 for s in health_statuses.values() if s.reachable)
-                    logger.info(
-                        f"Maker health check: {reachable_count}/{len(makers_to_check)} makers "
-                        f"directly reachable, {len(unreachable_locations)} unreachable"
-                    )
-
-                # Sleep until next check
+                await self._check_makers_without_features()
                 await asyncio.sleep(check_interval)
-
             except asyncio.CancelledError:
-                logger.info("Maker health check task cancelled")
+                logger.info("Maker feature-discovery task cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in maker health check task: {e}")
+                logger.error(f"Error in maker feature-discovery task: {e}")
                 await asyncio.sleep(check_interval)
 
-        logger.info("Maker health check task stopped")
+        logger.info("Maker feature-discovery task stopped")
 
     async def _connect_to_node(self, onion_address: str, port: int) -> DirectoryClient | None:
         node_id = f"{onion_address}:{port}"
@@ -770,8 +715,9 @@ class OrderbookAggregator:
         peerlist_task = asyncio.create_task(self._periodic_peerlist_refresh())
         self.listener_tasks.append(peerlist_task)
 
-        # Start periodic maker health check task (direct onion reachability verification)
-        # This extracts features from handshake and tracks reachability but does NOT remove offers
+        # Start periodic feature-discovery task (direct onion handshake to learn
+        # maker capabilities when directories don't advertise peerlist_features).
+        # This task NEVER removes offers; offer presence is governed by peerlist.
         health_check_task = asyncio.create_task(self._periodic_maker_health_check())
         self.listener_tasks.append(health_check_task)
 
