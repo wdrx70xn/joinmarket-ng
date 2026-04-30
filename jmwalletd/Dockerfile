@@ -4,20 +4,20 @@
 # Update with: ./scripts/update-base-images.sh
 # =============================================================================
 ARG PYTHON_VERSION=3.14
-ARG PYTHON_SLIM_DIGEST=sha256:bc389f7dfcb21413e72a28f491985326994795e34d2b86c8ae2f417b4e7818aa
+ARG PYTHON_SLIM_DIGEST=sha256:5b3879b6f3cb77e712644d50262d05a7c146b7312d784a18eff7ff5462e77033
 ARG NODE_VERSION=24
-ARG NODE_SLIM_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c
+ARG NODE_SLIM_DIGEST=sha256:03eae3ef7e88a9de535496fb488d67e02b9d96a063a8967bae657744ecd513f2
 
 # JAM frontend: pinned commit hash for reproducible builds
 # Update with: ./scripts/update-base-images.sh
-ARG JAM_COMMIT=488c7a373d61a48fc0267ded8dd5571dc9d1d052
+ARG JAM_COMMIT=70fdc264c757011d7b61e08bd8b56d260ceee258
 
 # Pin build tools for reproducible builds
 # setuptools version is stamped into WHEEL metadata (Generator: setuptools (x.y.z))
 # Different versions produce different WHEEL/RECORD files, breaking layer reproducibility
 # Update versions with: ./scripts/update-base-images.sh
 ARG SETUPTOOLS_VERSION=82.0.1
-ARG WHEEL_VERSION=0.46.3
+ARG WHEEL_VERSION=0.47.0
 
 # =============================================================================
 # Stage 1: Build Python environment
