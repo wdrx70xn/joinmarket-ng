@@ -632,6 +632,8 @@ class TestLifecycle:
     async def test_loop_runs_sweep_periodically(self) -> None:
         """Verify the background loop actually calls _sweep."""
         sweep_count = 0
+        target = 2
+        reached = asyncio.Event()
         registry = PeerRegistry()
         manager = HeartbeatManager(
             peer_registry=registry,
@@ -646,19 +648,27 @@ class TestLifecycle:
             nonlocal sweep_count
             sweep_count += 1
             await original_sweep()
+            if sweep_count >= target:
+                reached.set()
 
         manager._sweep = counting_sweep  # type: ignore[assignment]
 
         manager.start()
-        await asyncio.sleep(0.2)  # Allow a few sweeps
-        await manager.stop()
+        try:
+            # Wait deterministically for the target number of sweeps instead of
+            # relying on wall-clock timing, which is flaky under CI load.
+            await asyncio.wait_for(reached.wait(), timeout=5.0)
+        finally:
+            await manager.stop()
 
-        assert sweep_count >= 2
+        assert sweep_count >= target
 
     @pytest.mark.anyio
     async def test_loop_survives_sweep_exception(self) -> None:
         """A failing sweep should not kill the heartbeat loop."""
         call_count = 0
+        target = 2
+        reached = asyncio.Event()
         registry = PeerRegistry()
         manager = HeartbeatManager(
             peer_registry=registry,
@@ -670,15 +680,24 @@ class TestLifecycle:
         async def failing_sweep() -> None:
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                raise RuntimeError("transient error")
-            # Subsequent calls succeed (no-op)
+            try:
+                if call_count == 1:
+                    raise RuntimeError("transient error")
+                # Subsequent calls succeed (no-op)
+            finally:
+                if call_count >= target:
+                    reached.set()
 
         manager._sweep = failing_sweep  # type: ignore[assignment]
 
         manager.start()
-        await asyncio.sleep(0.2)
-        await manager.stop()
+        try:
+            # Wait deterministically for the loop to recover and call sweep
+            # again instead of relying on wall-clock timing, which is flaky
+            # under CI load (observed on Python 3.11 GitHub Actions runners).
+            await asyncio.wait_for(reached.wait(), timeout=5.0)
+        finally:
+            await manager.stop()
 
         # Should have called sweep multiple times despite the first failure
-        assert call_count >= 2
+        assert call_count >= target
