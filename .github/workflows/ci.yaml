@@ -453,6 +453,13 @@ jobs:
             "curl -skf https://127.0.0.1:29183/api/v1/session" \
             90 2
 
+          # Wait for at least 4 maker offers to appear in the orderbook so
+          # that the collaborative-send playwright test (which requires the
+          # JAM minimum of 4 collaborators) does not race maker startup.
+          .github/scripts/wait-for-service.sh "Orderbook offers (>=4)" \
+            "curl -sf http://127.0.0.1:8080/orderbook.json | python3 -c 'import sys,json; sys.exit(0 if len(json.load(sys.stdin).get(\"offers\", [])) >= 4 else 1)'" \
+            120 2
+
           echo "E2E services ready!"
 
       - name: Run Playwright tests
