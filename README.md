@@ -67,3 +67,11 @@ jm-maker start
 ## License
 
 MIT: https://joinmarket-ng.github.io/joinmarket-ng/license/
+
+## Acknowledgements
+
+JoinMarket NG builds on the work of the original JoinMarket project. Special thanks to Adam Gibson (@AdamISZ) and all past and present JoinMarket contributors.
+
+Thanks to @1440000bytes (Floppy) for the ongoing external audit, and to @L3ftBlank for beta testing and contributions. And to everyone who has opened an issue, submitted a PR, or joined a discussion. You're part of this too!
+
+Sustained by grants from [OpenSats](https://opensats.org/) and the [HRF Bitcoin Development Fund](https://hrf.org/program/financial-freedom/bitcoin-development-fund/). Keeping this project free, open, and independent.
