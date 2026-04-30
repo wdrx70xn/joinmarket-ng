@@ -98,6 +98,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                         PATH     Data directory (default:         │
 │                                             ~/.joinmarket-ng or              │
 │                                             $JOINMARKET_DATA_DIR)            │
+│                                             [env var: JOINMARKET_DATA_DIR]   │
 │ --funded-only                               Show only funded bonds (offline  │
 │                                             mode)                            │
 │ --active-only                               Show only active bonds (offline  │
@@ -130,6 +131,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                         PATH     Data directory (default:         │
 │                                             ~/.joinmarket-ng or              │
 │                                             $JOINMARKET_DATA_DIR)            │
+│                                             [env var: JOINMARKET_DATA_DIR]   │
 │ --no-save                                   Do not save the bond to the      │
 │                                             registry                         │
 │ --log-level                -l      TEXT     Log level                        │
@@ -173,6 +175,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                         PATH     Data directory (default:         │
 │                                             ~/.joinmarket-ng or              │
 │                                             $JOINMARKET_DATA_DIR)            │
+│                                             [env var: JOINMARKET_DATA_DIR]   │
 │ --log-level                -l      TEXT     Log level                        │
 │ --help                                      Show this message and exit.      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -208,6 +211,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                         PATH  Data directory (default:            │
 │                                          ~/.joinmarket-ng or                 │
 │                                          $JOINMARKET_DATA_DIR)               │
+│                                          [env var: JOINMARKET_DATA_DIR]      │
 │ --log-level                -l      TEXT  Log level                           │
 │ --help                                   Show this message and exit.         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -251,6 +255,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --network        -n      TEXT     [default: mainnet]                         │
 │ --data-dir               PATH     Data directory (default: ~/.joinmarket-ng  │
 │                                   or $JOINMARKET_DATA_DIR)                   │
+│                                   [env var: JOINMARKET_DATA_DIR]             │
 │ --no-save                         Do not save the bond to the registry       │
 │ --log-level      -l      TEXT     [default: INFO]                            │
 │ --help                            Show this message and exit.                │
@@ -288,6 +293,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │                             registry)                                        │
 │ --data-dir            PATH  Data directory (default: ~/.joinmarket-ng or     │
 │                             $JOINMARKET_DATA_DIR)                            │
+│                             [env var: JOINMARKET_DATA_DIR]                   │
 │ --log-level           TEXT  [default: INFO]                                  │
 │ --help                      Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -335,6 +341,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                  PATH     Data directory (default:                │
 │                                      ~/.joinmarket-ng or                     │
 │                                      $JOINMARKET_DATA_DIR)                   │
+│                                      [env var: JOINMARKET_DATA_DIR]          │
 │ --network           -n      TEXT     Bitcoin network                         │
 │ --backend           -b      TEXT     Backend: scantxoutset |                 │
 │                                      descriptor_wallet | neutrino            │
@@ -391,6 +398,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                   PATH     Data directory (default:               │
 │                                       ~/.joinmarket-ng or                    │
 │                                       $JOINMARKET_DATA_DIR)                  │
+│                                       [env var: JOINMARKET_DATA_DIR]         │
 │ --skip-verification                   Skip signature verification (not       │
 │                                       recommended)                           │
 │ --network            -n      TEXT     Bitcoin network                        │
@@ -486,6 +494,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                    PATH     Data directory (default:              │
 │                                        ~/.joinmarket-ng or                   │
 │                                        $JOINMARKET_DATA_DIR)                 │
+│                                        [env var: JOINMARKET_DATA_DIR]        │
 │ --log-level           -l      TEXT     [default: INFO]                       │
 │ --help                                 Show this message and exit.           │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -510,6 +519,9 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --backend       -b      TEXT  Backend: scantxoutset | descriptor_wallet |    │
 │                               neutrino                                       │
 │ --neutrino-url          TEXT  [env var: NEUTRINO_URL]                        │
+│ --data-dir              PATH  Data directory (default: ~/.joinmarket-ng or   │
+│                               $JOINMARKET_DATA_DIR)                          │
+│                               [env var: JOINMARKET_DATA_DIR]                 │
 │ --log-level     -l      TEXT  Log level                                      │
 │ --help                        Show this message and exit.                    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -546,6 +558,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                         PATH     Data directory (default:         │
 │                                             ~/.joinmarket-ng or              │
 │                                             $JOINMARKET_DATA_DIR)            │
+│                                             [env var: JOINMARKET_DATA_DIR]   │
 │ --log-level                -l      TEXT     Log level                        │
 │ --help                                      Show this message and exit.      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -574,6 +587,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --csv                             Output as CSV                              │
 │ --data-dir               PATH     Data directory (default: ~/.joinmarket-ng  │
 │                                   or $JOINMARKET_DATA_DIR)                   │
+│                                   [env var: JOINMARKET_DATA_DIR]             │
 │ --mnemonic-file  -f      PATH     Path to mnemonic file. When provided, the  │
 │                                   history is filtered to entries belonging   │
 │                                   to this wallet (matched by BIP32 master    │
@@ -607,6 +621,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │ --data-dir           PATH  Data directory (default: ~/.joinmarket-ng or      │
 │                            $JOINMARKET_DATA_DIR)                             │
+│                            [env var: JOINMARKET_DATA_DIR]                    │
 │ --json       -j            Output as JSON                                    │
 │ --log-level  -l      TEXT  [default: WARNING]                                │
 │ --help                     Show this message and exit.                       │
@@ -652,6 +667,7 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --data-dir                         PATH     Data directory (default:         │
 │                                             ~/.joinmarket-ng or              │
 │                                             $JOINMARKET_DATA_DIR)            │
+│                                             [env var: JOINMARKET_DATA_DIR]   │
 │ --log-level                -l      TEXT     Log level                        │
 │ --help                                      Show this message and exit.      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -671,8 +687,10 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
  Enter your existing mnemonic interactively with autocomplete support,
  or set the MNEMONIC environment variable.
 
- By default, saves to ~/.joinmarket-ng/wallets/default.mnemonic with password
- protection.
+ By default, saves to <data-dir>/wallets/default.mnemonic with password
+ protection. The data directory is taken from --data-dir, the
+ JOINMARKET_DATA_DIR environment variable, or ~/.joinmarket-ng (in that
+ order of precedence).
 
  Examples:
      jm-wallet import                          # Interactive input, 24 words
@@ -693,6 +711,16 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │ --force            -f                                   Overwrite existing   │
 │                                                         file without         │
 │                                                         confirmation         │
+│ --data-dir                                     PATH     Data directory       │
+│                                                         (default:            │
+│                                                         ~/.joinmarket-ng or  │
+│                                                         $JOINMARKET_DATA_DI… │
+│                                                         When --output is not │
+│                                                         given, the wallet is │
+│                                                         saved under          │
+│                                                         <data-dir>/wallets/… │
+│                                                         [env var:            │
+│                                                         JOINMARKET_DATA_DIR] │
 │ --help                                                  Show this message    │
 │                                                         and exit.            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -709,9 +737,11 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 
  Generate a new BIP39 mnemonic phrase with secure entropy.
 
- By default, saves to ~/.joinmarket-ng/wallets/default.mnemonic with password
- protection.
- Use --no-save to only display the mnemonic without saving.
+ By default, saves to <data-dir>/wallets/default.mnemonic with password
+ protection. The data directory is taken from --data-dir, the
+ JOINMARKET_DATA_DIR environment variable, or ~/.joinmarket-ng (in that
+ order of precedence). Use --no-save to only display the mnemonic without
+ saving.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────╮
 │ --words            -w                          INTEGER  Number of words (12, │
@@ -726,6 +756,16 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │                                                         (default: prompt)    │
 │                                                         [default:            │
 │                                                         prompt-password]     │
+│ --data-dir                                     PATH     Data directory       │
+│                                                         (default:            │
+│                                                         ~/.joinmarket-ng or  │
+│                                                         $JOINMARKET_DATA_DI… │
+│                                                         When --output is not │
+│                                                         given, the wallet is │
+│                                                         saved under          │
+│                                                         <data-dir>/wallets/… │
+│                                                         [env var:            │
+│                                                         JOINMARKET_DATA_DIR] │
 │ --help                                                  Show this message    │
 │                                                         and exit.            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -778,6 +818,8 @@ For full documentation, see [jmwallet Documentation](https://joinmarket-ng.githu
 │                                                        (default:             │
 │                                                        ~/.joinmarket-ng or   │
 │                                                        $JOINMARKET_DATA_DIR) │
+│                                                        [env var:             │
+│                                                        JOINMARKET_DATA_DIR]  │
 │ --log-level            -l                     TEXT     Log level             │
 │ --help                                                 Show this message and │
 │                                                        exit.                 │

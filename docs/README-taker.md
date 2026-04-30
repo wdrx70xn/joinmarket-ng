@@ -218,6 +218,13 @@ Takers only require Tor SOCKS; no Tor control port is needed.
 │    --yes            -y                                      Skip             │
 │                                                             confirmation     │
 │                                                             prompt           │
+│    --data-dir                              PATH             Data directory   │
+│                                                             (default:        │
+│                                                             ~/.joinmarket-ng │
+│                                                             or               │
+│                                                             $JOINMARKET_DAT… │
+│                                                             [env var:        │
+│                                                             JOINMARKET_DATA… │
 │    --log-level      -l                     TEXT             Log level        │
 │    --help                                                   Show this        │
 │                                                             message and      │
@@ -271,6 +278,12 @@ Takers only require Tor SOCKS; no Tor control port is needed.
 │ --tor-socks-port                INTEGER               Tor SOCKS proxy port   │
 │                                                       (overrides             │
 │                                                       TOR__SOCKS_PORT)       │
+│ --data-dir                      PATH                  Data directory         │
+│                                                       (default:              │
+│                                                       ~/.joinmarket-ng or    │
+│                                                       $JOINMARKET_DATA_DIR)  │
+│                                                       [env var:              │
+│                                                       JOINMARKET_DATA_DIR]   │
 │ --log-level             -l      TEXT                  Log level              │
 │ --help                                                Show this message and  │
 │                                                       exit.                  │

@@ -143,6 +143,13 @@ For full documentation, see [taker Documentation](https://joinmarket-ng.github.i
 │    --yes            -y                                      Skip             │
 │                                                             confirmation     │
 │                                                             prompt           │
+│    --data-dir                              PATH             Data directory   │
+│                                                             (default:        │
+│                                                             ~/.joinmarket-ng │
+│                                                             or               │
+│                                                             $JOINMARKET_DAT… │
+│                                                             [env var:        │
+│                                                             JOINMARKET_DATA… │
 │    --log-level      -l                     TEXT             Log level        │
 │    --help                                                   Show this        │
 │                                                             message and      │
@@ -196,6 +203,12 @@ For full documentation, see [taker Documentation](https://joinmarket-ng.github.i
 │ --tor-socks-port                INTEGER               Tor SOCKS proxy port   │
 │                                                       (overrides             │
 │                                                       TOR__SOCKS_PORT)       │
+│ --data-dir                      PATH                  Data directory         │
+│                                                       (default:              │
+│                                                       ~/.joinmarket-ng or    │
+│                                                       $JOINMARKET_DATA_DIR)  │
+│                                                       [env var:              │
+│                                                       JOINMARKET_DATA_DIR]   │
 │ --log-level             -l      TEXT                  Log level              │
 │ --help                                                Show this message and  │
 │                                                       exit.                  │

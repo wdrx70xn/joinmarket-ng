@@ -165,6 +165,13 @@ pytest tumbler/tests
 │                                                             pairwise         │
 │                                                             re-aggregation   │
 │                                                             heuristics.      │
+│    --data-dir                              PATH             Data directory   │
+│                                                             (default:        │
+│                                                             ~/.joinmarket-ng │
+│                                                             or               │
+│                                                             $JOINMARKET_DAT… │
+│                                                             [env var:        │
+│                                                             JOINMARKET_DATA… │
 │    --log-level      -l                     TEXT                              │
 │    --help                                                   Show this        │
 │                                                             message and      │
@@ -189,6 +196,10 @@ pytest tumbler/tests
 │ --mnemonic-file            -f      PATH  Path to mnemonic file               │
 │ --prompt-bip39-passphrase                Prompt for BIP39 passphrase         │
 │                                          interactively                       │
+│ --data-dir                         PATH  Data directory (default:            │
+│                                          ~/.joinmarket-ng or                 │
+│                                          $JOINMARKET_DATA_DIR)               │
+│                                          [env var: JOINMARKET_DATA_DIR]      │
 │ --log-level                -l      TEXT                                      │
 │ --help                                   Show this message and exit.         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -212,6 +223,10 @@ pytest tumbler/tests
 │ --prompt-bip39-passphrase                Prompt for BIP39 passphrase         │
 │                                          interactively                       │
 │ --yes                      -y            Skip confirmation prompt            │
+│ --data-dir                         PATH  Data directory (default:            │
+│                                          ~/.joinmarket-ng or                 │
+│                                          $JOINMARKET_DATA_DIR)               │
+│                                          [env var: JOINMARKET_DATA_DIR]      │
 │ --log-level                -l      TEXT                                      │
 │ --help                                   Show this message and exit.         │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -273,6 +288,12 @@ pytest tumbler/tests
 │                                                       the configured count   │
 │                                                       is unavailable on the  │
 │                                                       chosen network.        │
+│ --data-dir                      PATH                  Data directory         │
+│                                                       (default:              │
+│                                                       ~/.joinmarket-ng or    │
+│                                                       $JOINMARKET_DATA_DIR)  │
+│                                                       [env var:              │
+│                                                       JOINMARKET_DATA_DIR]   │
 │ --log-level             -l      TEXT                                         │
 │ --help                                                Show this message and  │
 │                                                       exit.                  │

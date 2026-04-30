@@ -221,6 +221,12 @@ you specifically want isolated config and runtime state.
 │                                                       (defaults to           │
 │                                                       --network)             │
 │ --backend-type                  TEXT                  Backend type           │
+│ --data-dir                      PATH                  Data directory         │
+│                                                       (default:              │
+│                                                       ~/.joinmarket-ng or    │
+│                                                       $JOINMARKET_DATA_DIR)  │
+│                                                       [env var:              │
+│                                                       JOINMARKET_DATA_DIR]   │
 │ --log-level             -l      TEXT                  Log level              │
 │ --help                                                Show this message and  │
 │                                                       exit.                  │
