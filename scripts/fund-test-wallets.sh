@@ -31,6 +31,12 @@ echo "Bitcoin Core is ready"
 # Maker3: "echo rural present blue chapter game keen keen keen keen keen keen"
 #   Address: bcrt1qf5gztst2rddqv4hw2jh4m52ahrrvjrz4zescgw
 #
+# Maker4: "tower fence frozen amazing mosquito hint pause sausage door enrich gentle pulp"
+#   Address: bcrt1qky5mftk8zj07ewcru27zngg2ersz4mpxkmvclm
+#
+# Maker5: "lemon orchard violet bargain travel orange brown dolphin hour ribbon canyon coral"
+#   Address: bcrt1qed048vcfagng5k3s257rzx2dr4ckga0fhr5edt
+#
 # Maker-Neutrino: "ice index boss season jealous supreme nephew kit cool lock caught enter"
 #   Address: bcrt1q6mse43hzgfdqh7fyg05lmd4x2ufhlunn3gw5j3
 #
@@ -52,6 +58,12 @@ MAKER2_ADDR="bcrt1qfuzpvnf2lgg8z54p3xcjp8xf8x5ydla63tgud2"
 # Maker3 address (derived from: echo rural present...)
 MAKER3_ADDR="bcrt1qe4hmtjq53u7l5vr9uw6sjr9c75ulmklg8jgsj0"
 
+# Maker4 address (derived from: tower fence frozen...)
+MAKER4_ADDR="bcrt1qky5mftk8zj07ewcru27zngg2ersz4mpxkmvclm"
+
+# Maker5 address (derived from: lemon orchard violet...)
+MAKER5_ADDR="bcrt1qed048vcfagng5k3s257rzx2dr4ckga0fhr5edt"
+
 # Taker address (derived from: burden notable love...)
 TAKER_ADDR="bcrt1q84l5vscg3pvjn6se8jp4ruymtyh393ed5v2d9e"
 
@@ -68,6 +80,8 @@ echo "  Maker1: $MAKER1_ADDR"
 echo "  Maker1 Fidelity Bond: $MAKER1_FIDELITY_BOND_ADDR"
 echo "  Maker2: $MAKER2_ADDR"
 echo "  Maker3: $MAKER3_ADDR"
+echo "  Maker4: $MAKER4_ADDR"
+echo "  Maker5: $MAKER5_ADDR"
 echo "  Maker-Neutrino: $MAKER_NEUTRINO_ADDR"
 echo "  Taker:  $TAKER_ADDR"
 
@@ -81,6 +95,12 @@ echo "Mined $BLOCKS_TO_MINE blocks to Maker2"
 
 $CLI generatetoaddress $BLOCKS_TO_MINE "$MAKER3_ADDR"
 echo "Mined $BLOCKS_TO_MINE blocks to Maker3"
+
+$CLI generatetoaddress $BLOCKS_TO_MINE "$MAKER4_ADDR"
+echo "Mined $BLOCKS_TO_MINE blocks to Maker4"
+
+$CLI generatetoaddress $BLOCKS_TO_MINE "$MAKER5_ADDR"
+echo "Mined $BLOCKS_TO_MINE blocks to Maker5"
 
 $CLI generatetoaddress $BLOCKS_TO_MINE "$TAKER_ADDR"
 echo "Mined $BLOCKS_TO_MINE blocks to Taker"

@@ -302,6 +302,26 @@ services:
         aliases:
           - jm-maker3
 
+  maker4:
+    container_name: ${prefix}-maker4
+    networks:
+      jm-network:
+        aliases:
+          - jm-maker4
+    volumes: !override
+      - maker4-data:/home/jm/.joinmarket-ng
+      - "${shared_dir}:/shared:ro"
+
+  maker5:
+    container_name: ${prefix}-maker5
+    networks:
+      jm-network:
+        aliases:
+          - jm-maker5
+    volumes: !override
+      - maker5-data:/home/jm/.joinmarket-ng
+      - "${shared_dir}:/shared:ro"
+
   maker-neutrino:
     container_name: ${prefix}-maker-neutrino
     networks:
@@ -519,11 +539,11 @@ wait_for_neutrino() {
 restart_makers() {
     local suite=$1
     local prefix="jm-${suite}"
-    for maker in "${prefix}-maker1" "${prefix}-maker2" "${prefix}-maker3" "${prefix}-maker-neutrino"; do
+    for maker in "${prefix}-maker1" "${prefix}-maker2" "${prefix}-maker3" "${prefix}-maker4" "${prefix}-maker5" "${prefix}-maker-neutrino"; do
         docker exec "$maker" sh -c \
             "rm -rf /home/jm/.joinmarket-ng/cmtdata/commitmentlist" 2>/dev/null || true
     done
-    compose_cmd "$suite" restart maker1 maker2 maker3 maker-neutrino 2>/dev/null || true
+    compose_cmd "$suite" restart maker1 maker2 maker3 maker4 maker5 maker-neutrino 2>/dev/null || true
     sleep 20
 }
 
@@ -767,6 +787,23 @@ run_suite_playwright() {
         # Wait for jam-playwright (HTTPS, self-signed cert)
         for i in $(seq 1 60); do
             if curl -skf "https://127.0.0.1:${jam_pw_port}/api/v1/session" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 2
+        done
+
+        # Wait for at least 4 maker offers to appear in the orderbook so that
+        # the collaborative-send playwright tests have enough counterparties.
+        # The maker minimum the JAM UI accepts is 4. We poll the orderbook
+        # watcher and time out after ~3 minutes.
+        local obwatch_port=$((8080 + offset))
+        for i in $(seq 1 90); do
+            local n_offers
+            n_offers=$(curl -sf "http://127.0.0.1:${obwatch_port}/orderbook.json" 2>/dev/null \
+                | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('offers', [])))" 2>/dev/null \
+                || echo 0)
+            if [ "${n_offers:-0}" -ge 4 ]; then
+                log_info "Orderbook has ${n_offers} offers (>=4), proceeding"
                 break
             fi
             sleep 2
