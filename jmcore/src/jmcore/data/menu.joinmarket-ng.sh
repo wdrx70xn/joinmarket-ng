@@ -858,7 +858,7 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
           "SEL"      "Select Active Wallet" \
           "VAL"      "Validate a Seed Phrase" \
           "SEED"     "Show Seed Words" \
-          "BACK"     "Back to Main Menu" 3>&1 1>&2 2>&3)  
+          "BACK"     "Back to Main Menu" 3>&1 1>&2 2>&3)
 
         # Handle ESC/Cancel - exit W submenu
         [ $? -ne 0 ] && break
