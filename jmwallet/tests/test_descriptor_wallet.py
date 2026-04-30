@@ -7,6 +7,7 @@ Integration tests (marked with @pytest.mark.docker) require a running Bitcoin Co
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -1775,12 +1776,18 @@ class TestAddressHistory:
 
         "send" addresses are counterparty addresses (where we sent to) and should
         not be included from listsinceblock, since they don't belong to this wallet.
-        However, listaddressgroupings returns all addresses involved in transactions.
+
+        Note: ``listaddressgroupings`` returns addresses involved in transactions
+        with this wallet, including counterparty addresses from CoinJoin co-spends.
+        Filtering of those external addresses happens at sync time via
+        ``filter_mine_addresses`` (``getaddressinfo``-based ``ismine`` check),
+        not in ``get_addresses_with_history`` itself.
         """
         backend = DescriptorWalletBackend(wallet_name="test_filter_history")
         backend._wallet_loaded = True
 
-        # listaddressgroupings only returns our own addresses
+        # Mock returns only our own addresses for this test (sync-layer filtering
+        # of externals is exercised separately).
         mock_groupings = [
             [["bc1qreceive", 0.0]],
             [["bc1qgenerate", 50.0]],
@@ -1926,6 +1933,140 @@ class TestAddressHistory:
         # Both addresses should be in addresses_with_history
         assert addr_with_utxo in wallet.addresses_with_history
         assert addr_spent in wallet.addresses_with_history
+
+    @pytest.mark.asyncio
+    async def test_is_address_mine_true(self) -> None:
+        """``is_address_mine`` returns True when getaddressinfo reports ismine."""
+        backend = DescriptorWalletBackend(wallet_name="test_ismine_true")
+        backend._wallet_loaded = True
+        backend._rpc_call = make_mock_rpc(
+            {"getaddressinfo": {"ismine": True, "address": "bc1qmine"}},
+        )
+        assert await backend.is_address_mine("bc1qmine") is True
+
+    @pytest.mark.asyncio
+    async def test_is_address_mine_false(self) -> None:
+        """``is_address_mine`` returns False for addresses Core does not own."""
+        backend = DescriptorWalletBackend(wallet_name="test_ismine_false")
+        backend._wallet_loaded = True
+        backend._rpc_call = make_mock_rpc(
+            {"getaddressinfo": {"ismine": False, "address": "bc1qexternal"}},
+        )
+        assert await backend.is_address_mine("bc1qexternal") is False
+
+    @pytest.mark.asyncio
+    async def test_is_address_mine_rpc_error_returns_false(self) -> None:
+        """RPC failures are treated as 'not mine' to avoid expensive false-positive scans."""
+        backend = DescriptorWalletBackend(wallet_name="test_ismine_err")
+        backend._wallet_loaded = True
+
+        async def boom(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("rpc down")
+
+        backend._rpc_call = boom  # type: ignore[method-assign]
+        assert await backend.is_address_mine("bc1qany") is False
+
+    @pytest.mark.asyncio
+    async def test_filter_mine_addresses_partitions_inputs(self) -> None:
+        """``filter_mine_addresses`` returns only addresses with ismine=True."""
+        backend = DescriptorWalletBackend(wallet_name="test_filter_mine")
+        backend._wallet_loaded = True
+
+        responses = {
+            "bc1qmine_a": True,
+            "bc1qexternal_b": False,
+            "bc1qmine_c": True,
+        }
+
+        def addr_info(params: list[Any] | None, _use_wallet: bool) -> dict[str, Any]:
+            assert params is not None
+            return {"ismine": responses[params[0]]}
+
+        backend._rpc_call = make_mock_rpc({"getaddressinfo": addr_info})
+
+        mine = await backend.filter_mine_addresses(list(responses.keys()))
+        assert mine == {"bc1qmine_a", "bc1qmine_c"}
+
+    @pytest.mark.asyncio
+    async def test_sync_skips_extended_scan_for_external_addresses(self) -> None:
+        """Counterparty addresses from listaddressgroupings must NOT trigger extended-range scan.
+
+        Regression test for the slow ``jm-wallet info`` issue: external addresses
+        (e.g., CoinJoin counterparties) appearing in ``listaddressgroupings`` were
+        being treated as "ours but beyond range" and triggering a ~5000-index
+        BIP32 derivation scan per address (multiple seconds per call).
+        """
+        from unittest.mock import MagicMock
+
+        from jmwallet.backends.base import UTXO
+        from jmwallet.wallet.service import WalletService
+
+        backend = DescriptorWalletBackend(wallet_name="test_skip_ext_scan")
+        backend._wallet_loaded = True
+        backend._descriptors_imported = True
+
+        own_addr = "bc1qown"
+        external_addr = "bc1qexternal_counterparty"
+
+        async def mock_get_all_utxos() -> list[UTXO]:
+            return [
+                UTXO(
+                    txid=TEST_FAKE_TXID,
+                    vout=0,
+                    value=100000,
+                    address=own_addr,
+                    confirmations=10,
+                    scriptpubkey="0014own",
+                ),
+            ]
+
+        async def mock_get_addresses_with_history() -> set[str]:
+            # Bitcoin Core's listaddressgroupings would return both addresses;
+            # only own_addr is actually ours.
+            return {own_addr, external_addr}
+
+        filter_calls: list[Sequence[str]] = []
+
+        async def mock_filter_mine_addresses(addresses: Sequence[str]) -> set[str]:
+            filter_calls.append(list(addresses))
+            return {a for a in addresses if a == own_addr}
+
+        backend.get_all_utxos = mock_get_all_utxos  # type: ignore[method-assign]
+        backend.get_addresses_with_history = mock_get_addresses_with_history  # type: ignore[method-assign]
+        backend.filter_mine_addresses = mock_filter_mine_addresses  # type: ignore[method-assign]
+
+        wallet = WalletService(
+            mnemonic=TEST_MNEMONIC,
+            backend=backend,
+            network="mainnet",
+            mixdepth_count=5,
+        )
+        # Cache has own_addr (in current range) but NOT external_addr.
+        wallet.address_cache[own_addr] = (0, 0, 0)
+
+        # Spy on the extended-range scan: it must not be invoked for the external
+        # address. (It may still be invoked zero times overall, which is what we
+        # want.)
+        wallet._find_address_path_extended = MagicMock(  # type: ignore[method-assign]
+            return_value=None
+        )
+
+        await wallet.sync_with_descriptor_wallet()
+
+        # The filter was consulted with the unknown address.
+        assert filter_calls, "filter_mine_addresses should have been called"
+        assert external_addr in filter_calls[0]
+
+        # Extended scan must NOT have been called for the external address.
+        called_args = [c.args[0] for c in wallet._find_address_path_extended.call_args_list]
+        assert external_addr not in called_args, (
+            f"extended scan should be skipped for external addresses, got: {called_args}"
+        )
+
+        # Own address still tracked.
+        assert own_addr in wallet.addresses_with_history
+        # External never gets added (it isn't ours).
+        assert external_addr not in wallet.addresses_with_history
 
 
 class TestDescriptorRangeUpgrade:
@@ -2516,6 +2657,12 @@ class TestDescriptorRangeUpgrade:
                 return [{"success": True} for _ in (params[0] if params else [])]
             if method == "getblockchaininfo":
                 return {"blocks": 800000}
+            if method == "getaddressinfo":
+                # Simulate Bitcoin Core recognizing this as ours (it WAS imported
+                # at this index in a prior wallet session, hence in history). The
+                # extended-range scan must then locate it deterministically.
+                addr = params[0] if params else ""
+                return {"ismine": addr == high_index_address, "address": addr}
             raise ValueError(f"Unexpected RPC: {method}")
 
         backend._rpc_call = mock_rpc_call  # type: ignore[method-assign]

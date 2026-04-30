@@ -1036,16 +1036,40 @@ class WalletSyncMixin:
                         addresses_beyond_range.append(address)
                 logger.debug(f"Tracked {len(self.addresses_with_history)} addresses with history")
                 if addresses_beyond_range:
-                    logger.info(
+                    logger.debug(
                         f"Found {len(addresses_beyond_range)} address(es) from history "
-                        f"not in current range [0, {current_range}], searching extended range..."
+                        f"not in current range [0, {current_range}]; will filter and "
+                        f"search extended range if any are ours"
                     )
         except Exception as e:
             logger.debug(f"Could not fetch addresses with history: {e}")
 
         # Search for addresses beyond the current range
         # This handles wallets previously used with different software (e.g., reference impl)
-        # that may have used addresses at indices beyond our current descriptor range
+        # that may have used addresses at indices beyond our current descriptor range.
+        #
+        # Bitcoin Core's listaddressgroupings (used by get_addresses_with_history) returns
+        # ALL addresses appearing in transactions involving wallet inputs/outputs, including
+        # counterparty addresses from CoinJoin co-spends. Those addresses are not ours and
+        # must NOT trigger _find_address_path_extended (a ~5000-index BIP32 scan per
+        # address, which can take many seconds). Use the backend's authoritative ismine
+        # check (getaddressinfo) to filter them out before scanning.
+        if addresses_beyond_range:
+            filter_mine = getattr(self.backend, "filter_mine_addresses", None)
+            if filter_mine is not None:
+                try:
+                    mine_addresses = await filter_mine(addresses_beyond_range)
+                except Exception as e:
+                    logger.debug(f"Could not filter ismine addresses, scanning all: {e}")
+                    mine_addresses = set(addresses_beyond_range)
+                external_count = len(addresses_beyond_range) - len(mine_addresses)
+                if external_count:
+                    logger.debug(
+                        f"Skipping extended-range scan for {external_count} external "
+                        f"address(es) (e.g., CoinJoin counterparties)"
+                    )
+                addresses_beyond_range = sorted(mine_addresses)
+
         if addresses_beyond_range:
             extended_addresses_found = 0
             for address in addresses_beyond_range:

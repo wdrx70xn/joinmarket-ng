@@ -1485,6 +1485,53 @@ class DescriptorWalletBackend(BlockchainBackend):
         logger.debug(f"Total addresses with history: {len(addresses)}")
         return addresses
 
+    async def is_address_mine(self, address: str) -> bool:
+        """
+        Check whether an address belongs to this wallet.
+
+        Uses Bitcoin Core's ``getaddressinfo`` RPC, which is authoritative for
+        descriptor wallets: it inspects the loaded descriptors and returns
+        ``ismine=True`` only for addresses derived from this wallet's own
+        descriptors. Counterparty addresses that merely appear in transaction
+        history (e.g., in ``listaddressgroupings`` due to CoinJoin co-spends)
+        return ``ismine=False``.
+
+        Args:
+            address: Bitcoin address to check.
+
+        Returns:
+            ``True`` if the address belongs to this wallet, ``False`` otherwise
+            (including on RPC errors, where we conservatively assume it is not
+            ours rather than triggering an expensive extended-range scan).
+        """
+        try:
+            info = await self._rpc_call("getaddressinfo", [address])
+        except Exception as e:
+            logger.debug(f"getaddressinfo failed for {address[:20]}...: {e}")
+            return False
+        return bool(info.get("ismine", False))
+
+    async def filter_mine_addresses(self, addresses: Sequence[str]) -> set[str]:
+        """
+        Return the subset of ``addresses`` that belong to this wallet.
+
+        Convenience batch wrapper around :meth:`is_address_mine`. Performs one
+        ``getaddressinfo`` RPC per address. Intended for short candidate lists
+        (e.g., a handful of addresses from history that missed the in-memory
+        cache); not optimized for scanning thousands of addresses.
+
+        Args:
+            addresses: Iterable of Bitcoin addresses to check.
+
+        Returns:
+            Set of addresses for which ``ismine`` is true.
+        """
+        mine: set[str] = set()
+        for address in addresses:
+            if await self.is_address_mine(address):
+                mine.add(address)
+        return mine
+
     async def get_descriptor_ranges(self) -> dict[str, tuple[int, int]]:
         """
         Get the current range for each imported descriptor.
