@@ -217,6 +217,45 @@ def _runner_alive_for(state: DaemonState, wallet_name: str) -> bool:
     )
 
 
+def build_tumbler_taker_config(
+    *,
+    phase: Any,
+    mnemonic: Any,
+    jm_settings: Any,
+    taker_config_cls: Any,
+) -> Any:
+    """Build a ``TakerConfig`` for a tumbler taker phase.
+
+    Mirrors the per-phase config that ``taker.cli.build_taker_config`` would
+    produce when a CLI caller lowers ``--counterparties`` below
+    ``settings.taker.minimum_makers``. The tumbler walletd path does not
+    go through that CLI helper, so the cap must be re-applied here.
+
+    Without this cap, sweep mode can legitimately select an N-maker
+    CoinJoin (where N == ``phase.counterparty_count``) and then reject
+    it against a higher policy-level ``minimum_makers`` (default 4),
+    failing the phase with ``Not enough makers for sweep: N``.
+    """
+    phase_counterparties = int(getattr(phase, "counterparty_count", 1) or 1)
+    effective_minimum_makers = min(jm_settings.taker.minimum_makers, phase_counterparties)
+    return taker_config_cls(
+        mnemonic=mnemonic,
+        mixdepth=getattr(phase, "mixdepth", 0),
+        amount=getattr(phase, "amount", 0) or 0,
+        # ``destination`` is resolved inside the runner (INTERNAL sentinel),
+        # so we pass a throwaway here; the Taker reads it only when
+        # ``do_coinjoin`` is not given one.
+        destination_address="",
+        counterparty_count=phase_counterparties,
+        minimum_makers=effective_minimum_makers,
+        network=jm_settings.network_config.network,
+        directory_servers=jm_settings.get_directory_servers(),
+        socks_host=jm_settings.tor.socks_host,
+        socks_port=jm_settings.tor.socks_port,
+        stream_isolation=jm_settings.tor.stream_isolation,
+    )
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/wallet/{walletname}/tumbler/plan
 # ---------------------------------------------------------------------------
@@ -356,20 +395,11 @@ async def start_plan(
             force_new=True,
             wallet_service=ws,
         )
-        config = TakerConfig(
+        config = build_tumbler_taker_config(
+            phase=phase,
             mnemonic=state.wallet_mnemonic,
-            mixdepth=getattr(phase, "mixdepth", 0),
-            amount=getattr(phase, "amount", 0) or 0,
-            # ``destination`` is resolved inside the runner (INTERNAL sentinel),
-            # so we pass a throwaway here; the Taker reads it only when
-            # ``do_coinjoin`` is not given one.
-            destination_address="",  # type: ignore[arg-type]
-            counterparty_count=getattr(phase, "counterparty_count", 1),
-            network=jm_settings.network_config.network,
-            directory_servers=jm_settings.get_directory_servers(),
-            socks_host=jm_settings.tor.socks_host,
-            socks_port=jm_settings.tor.socks_port,
-            stream_isolation=jm_settings.tor.stream_isolation,
+            jm_settings=jm_settings,
+            taker_config_cls=TakerConfig,
         )
         return Taker(wallet=ws, backend=backend, config=config)
 

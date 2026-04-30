@@ -587,3 +587,107 @@ class TestReconcileStaleOnStartup:
     def test_reconcile_returns_empty_when_no_schedules_dir(self, tmp_path: Path) -> None:
         state = DaemonState(data_dir=tmp_path)
         assert state.reconcile_stale_tumbler_plans() == []
+
+
+# ---------------------------------------------------------------------------
+# build_tumbler_taker_config (regression: sweep "Not enough makers" failure)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTumblerTakerConfig:
+    """``build_tumbler_taker_config`` must cap ``minimum_makers`` at the
+    phase's ``counterparty_count`` so a sweep that legitimately selects N
+    makers is not rejected against a stale higher policy threshold.
+
+    Regression: tumbler phases planned with ``counterparty_count=2`` against
+    a 3-maker test stack produced ``Not enough makers for sweep: 2`` because
+    the walletd factory left ``minimum_makers`` at the policy default (4).
+    """
+
+    def _settings(self, *, policy_minimum_makers: int = 4) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            taker=SimpleNamespace(minimum_makers=policy_minimum_makers),
+            tor=SimpleNamespace(
+                socks_host="127.0.0.1",
+                socks_port=9050,
+                stream_isolation=True,
+            ),
+            network_config=SimpleNamespace(network="regtest"),
+            get_directory_servers=lambda: [],
+        )
+
+    def _phase(
+        self,
+        *,
+        counterparty_count: int = 2,
+        mixdepth: int = 0,
+        amount: int = 0,
+    ) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            counterparty_count=counterparty_count,
+            mixdepth=mixdepth,
+            amount=amount,
+        )
+
+    def test_caps_minimum_makers_at_phase_counterparties(self) -> None:
+        from jmwalletd.routers.tumbler import build_tumbler_taker_config
+
+        captured: dict[str, object] = {}
+
+        def fake_taker_config_cls(**kwargs: object) -> object:
+            captured.update(kwargs)
+            return MagicMock()
+
+        build_tumbler_taker_config(
+            phase=self._phase(counterparty_count=2),
+            mnemonic="dummy",
+            jm_settings=self._settings(policy_minimum_makers=4),
+            taker_config_cls=fake_taker_config_cls,
+        )
+
+        assert captured["counterparty_count"] == 2
+        assert captured["minimum_makers"] == 2
+
+    def test_keeps_policy_minimum_when_phase_count_is_higher(self) -> None:
+        from jmwalletd.routers.tumbler import build_tumbler_taker_config
+
+        captured: dict[str, object] = {}
+
+        def fake_taker_config_cls(**kwargs: object) -> object:
+            captured.update(kwargs)
+            return MagicMock()
+
+        build_tumbler_taker_config(
+            phase=self._phase(counterparty_count=6),
+            mnemonic="dummy",
+            jm_settings=self._settings(policy_minimum_makers=4),
+            taker_config_cls=fake_taker_config_cls,
+        )
+
+        assert captured["counterparty_count"] == 6
+        assert captured["minimum_makers"] == 4
+
+    def test_handles_missing_or_falsy_counterparty_count(self) -> None:
+        from jmwalletd.routers.tumbler import build_tumbler_taker_config
+
+        captured: dict[str, object] = {}
+
+        def fake_taker_config_cls(**kwargs: object) -> object:
+            captured.update(kwargs)
+            return MagicMock()
+
+        build_tumbler_taker_config(
+            phase=self._phase(counterparty_count=0),
+            mnemonic="dummy",
+            jm_settings=self._settings(policy_minimum_makers=4),
+            taker_config_cls=fake_taker_config_cls,
+        )
+
+        # Falsy / missing counterparty_count falls back to 1, which then caps
+        # minimum_makers at 1 (matches taker.cli behaviour).
+        assert captured["counterparty_count"] == 1
+        assert captured["minimum_makers"] == 1
