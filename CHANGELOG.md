@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-04-30
+
+### Added
+
+- Add new mainnet directory server nok55gjlqw6h76zi6gigukoztpx7xgo5r3w5csu362nys5yukzrxpgad.onion ([c595bf92](../../commit/c595bf92858bf7e5fec251cde5e28b48c0d6b686))
+- Show git commit hash in debug-info for easier troubleshooting ([33f622d7](../../commit/33f622d7e7a2ffb8b6d467d80bf9dd009eab6c90))
+- Add in-TUI update option with stable, dev, and version channels ([e36baa5d](../../commit/e36baa5dfff668c44fe6d505e39ccea415632bfb))
+- Enable per-slot probabilistic bondless maker selection with 20% default allowance ([8f55b902](../../commit/8f55b902c58df654336c8884faa1be667b6f6bf8))
+- Add jm-wallet verify-password subcommand for scripted ([92c36f06](../../commit/92c36f06eb1a82a4e2e65ac939e985d35b5b6fb1))
+- TUI now lets you choose 12- or 24-word seeds when creating a new wallet ([f5363e0a](../../commit/f5363e0ad0747a9a58d62a647d0fd1ac94415299))
+- jm-wallet info --extended now hides zero-balance addresses by default; use --show-empty to restore the old output ([ad1e9199](../../commit/ad1e9199f794c580819d9a644eafc16ed6d4e4aa))
+- Per-wallet CoinJoin history isolation; jm-wallet history gains --mnemonic-file and --all-wallets ([bc416fcb](../../commit/bc416fcb339eb8643b17a343f9762b077caa246b))
+- New jm-wallet showseed command to display BIP39 seed words from an encrypted mnemonic file ([943b27b7](../../commit/943b27b7047c4c193cb596d6ea1f1dcae13cf41a))
+- TUI update menu now shows the running commit on non-editable installs (pip git+, Docker, release wheels) ([42d38d3e](../../commit/42d38d3e36cf85236e2eff3b122d2a43546c4679))
+- Randomize CoinJoin counterparty count in [8, 10] per request when not configured, matching the upstream JoinMarket reference and avoiding fingerprinting via a fixed value. ([330202b9](../../commit/330202b9b3e1d06932a2594f891fd004f32497b6))
+- Bump default minimum_makers from 1 to 4 to match the upstream JoinMarket POLICY default and avoid fingerprinting. ([4fd34ff1](../../commit/4fd34ff17d2fea7d085a916de554f49ee510431b))
+- Align maker default cj_fee_relative (0.00002) and min_size (100000) with the upstream JoinMarket reference to avoid making jm-ng makers fingerprintable on the orderbook. ([23fa076a](../../commit/23fa076a5bbd37849adc6aa7ed727107db087dd9))
+- Randomize maker-advertised cjfee, txfee contribution, and minsize per offer announcement (defaults match upstream yg-privacyenhanced) so jm-ng makers do not stand out on the orderbook. ([4779f54b](../../commit/4779f54b7c3a2a6c5b340b4e3e4f29ffdf00e70f))
+- Add jm-tumbler package introducing a role-mixing tumbler with a human-readable YAML schedule state file ([4716fe2d](../../commit/4716fe2d822bb6ff64618821141637bd2c85fb99))
+- Added tumbler endpoints driven by jm_tumbler with persistent ([66e59e53](../../commit/66e59e531afc098720b6105c575d5335728d2e03))
+- Added ([a08e9f13](../../commit/a08e9f13cff2706538a3e4ea30f294d84975222a))
+- Pin stable OpenAPI operationIds across the wallet daemon ([5ea878c0](../../commit/5ea878c00c289e5d8015ab8e53e7bb862aeb79f3))
+- Added standalone jm-tumbler CLI for building and running tumbler schedules outside jmwalletd. ([073ba977](../../commit/073ba977028d3475b5b4ea74a9ec4f426227fc80))
+- Tumbler maker phases can now exit via an idle-timeout fallback when no CoinJoin is served in time. ([7c85d7da](../../commit/7c85d7da3d40c3f42a77a2f8ad862caea8a923e3))
+- Tumbler plan requests can now set a maker-session idle timeout that exits the maker phase when the wallet is never selected as a counterparty. ([3b95dc66](../../commit/3b95dc66a77fa29deaf4a604b41cdad9683f3808))
+- jmwalletd now serves TLS by default in the docker-compose ([9de0d758](../../commit/9de0d758c2750088b9630e43817a308416406972))
+- jm-tumbler plan now defaults maker_count_min/max to ([fb2a09e6](../../commit/fb2a09e6b37f15312bc582d3260d8e19f0343bdc))
+- Add /api/v1/logs for recent jmwalletd output ([6ace5185](../../commit/6ace5185f039bb05febbd7852ae6c11fff46faac))
+- Record peer handshake features on OnionPeer so taker-side ([b1c5afdc](../../commit/b1c5afdce515f55b81131824d71cd7d171cd0ad0))
+- Filter out makers whose handshake explicitly lacks ([a9e75455](../../commit/a9e754559802764b1988058dbd248405eb326dca))
+- ``POST /tumbler/plan`` now accepts legacy JAM parameter names. ([770ea0f6](../../commit/770ea0f6ae3ce2986198a2f5527d42d090b3bc16))
+- Drop the bondless-taker burst phase from the tumbler ([4e514a7b](../../commit/4e514a7b3255d64bac25867fa37a43abc68f31bb))
+- Tumbler retries failed coinjoin phases with progressively ([8bb3fe33](../../commit/8bb3fe3346b9b8bd27eb36cc66a1545fd566cda8))
+- Tumbler CLI now requires at least three destinations by ([73b0cfd1](../../commit/73b0cfd1bfe59a09556bc6403edbe5bfbd9d138b))
+- Tumbler maker sessions now run as 0-sat absolute-fee offers with no fidelity bond ([82cc92c0](../../commit/82cc92c01a9e1292a05d2962a8470934ce97bae0))
+- Show fee and duration estimates plus active taker config ([3c0156eb](../../commit/3c0156ebe13fa14e445ebf5933ba3f3b531c57dc))
+- jm-tumbler plan now prints wallet balance, fee percentages, and live fee-rate estimates ([9ce44bb1](../../commit/9ce44bb13b078734ebbfa4c4a5c53bd6c0e3efab))
+- Tumbler now avoids re-using the previous phase's makers in the next coinjoin to improve cross-phase unlinkability ([f0889213](../../commit/f08892134f264a04619f9edbdbe2d244fa7d9fd4))
+- Tumbler now obfuscates non-sweep CoinJoin amounts via ([73c83594](../../commit/73c835945b379b90b7466914fcf50dcbe4f7757b))
+- Tumbler runner pacing (retry delay, confirmation poll ([221ea5f3](../../commit/221ea5f37c7eae19e79ce6f8da4e22f74be604c8))
+
+### Fixed
+
+- Fix directory server Docker healthcheck using wrong CLI command ([9ffead35](../../commit/9ffead35c90afa6f1a78a26116dc3e8406f6a56b))
+- Check for duplicate wallet name before generating seed phrase ([e964898e](../../commit/e964898e242c05d021b348d44e6cf3b69a1d07df))
+- Clear stored password when switching active wallet to prevent decryption errors ([edc2cc45](../../commit/edc2cc4529e11efe715d75721db383c7ad919e21))
+- Improve import wallet UX with empty default name, go-back support, and no auto-advance ([7cc7829d](../../commit/7cc7829d3d29fef107c97de59ead36171e1949f2))
+- Support pasting full seed phrase with space, comma, or semicolon separators ([fa6c0081](../../commit/fa6c0081e8805f5320bcd78b736ea5c1870cfcf6))
+- Allow blank encryption password during wallet creation with a plaintext warning ([8ff0ca08](../../commit/8ff0ca088f9a463eaba2e3dd0a15f80bcbee7047))
+- Fix heartbeat orderbook probes for legacy JoinMarket makers ([eb812d4c](../../commit/eb812d4c3cd23f0fceac9fb83bebb72734c3cc76))
+- Show wallet filename in the mnemonic password prompt ([d8fd8afc](../../commit/d8fd8afc93f0a2e16aa99131402acc9ff4f0eea1))
+- Validate wallet password before storing it in config.toml ([1db9131c](../../commit/1db9131cfd1344bcbb05448c612324e8f6264493))
+- Keep mnemonic_file and mnemonic_password in sync after ([1db9131c](../../commit/1db9131cfd1344bcbb05448c612324e8f6264493))
+- Offer wallet selection before starting the maker bot when ([bfb80897](../../commit/bfb80897ef90c77fb4e14b4a32ce36027163c8a1))
+- Retry wallet mnemonic password prompt on wrong input in the CLI/TUI ([10d036ff](../../commit/10d036ff7394451a2420bd68b6b866acfa6dac55))
+- TUI now offers to store the password after selecting a different active wallet ([dd1625be](../../commit/dd1625bea29cdc6f72dc049a981ce75b21195cc8))
+- TUI update menu shows current and target versions, detects already-installed versions, and returns to the update submenu on cancel. ([24213128](../../commit/24213128b5245d534e47e73b72f8750955ea2441))
+- Fix spurious PEERLIST timeout warnings when background peerlist refreshes raced with the directory client's receive loop ([d51f7d64](../../commit/d51f7d646ed5c6d9b9e36c94ab41a2e1f98331e2))
+- Display CoinJoin change outputs as 'cj-change' instead of the misleading 'non-cj-change' in wallet info and the walletd display API ([05227245](../../commit/0522724554fd3cef2aa5e67fc363d967f9373316))
+- Fix TUI update menu showing 'vunknown' on standalone pip installs ([cb6497dd](../../commit/cb6497dd6017c8d396dc3e18eac3f1dd0b723c3f))
+- Reduce blackout between main menu and update menu in the TUI ([7c2f71bb](../../commit/7c2f71bb1b9ac301bd8cab8bfbd42ac3f9d72928))
+- Fix TUI update confirmation dialog showing literal '\\t' characters ([038416eb](../../commit/038416eb500d4f8558dc8bf0f36144cf03f84979))
+- Prompt wallet password via whiptail instead of dropping to CLI prompt ([f66246c9](../../commit/f66246c9d743b548f0247736e05773d2956d0fe0))
+- Do not report 'Update complete' when the TUI update step actually failed ([0d371390](../../commit/0d371390ec87365a1cadb15561be27629947921e))
+- respect taker.fee_rate from config.toml and fix priorities so ([7d0464cf](../../commit/7d0464cf044bb7edd919b1b498ac4ef7c4f5f42f))
+- TUI Wallet Management now advertises 12- or 24-word wallet creation support ([e5ad6171](../../commit/e5ad6171bcbc57317561d785a673401bb3986107))
+- Returning from the Fidelity Bonds submenu now stays in Maker Bot Control ([12778194](../../commit/12778194a9f710dcc72e0466e16c8eb51b3a23bd))
+- Maker Bot Control now refreshes its displayed service status after each action ([9870bef2](../../commit/9870bef2d81c0c366960a28be2b3c732036f6e96))
+- Restore JoinMarket-style 0.2 taker fee randomization default and clarify tx_fee_factor documentation ([75f819fa](../../commit/75f819fa12ed91de10a030a5dca20f30537105c1))
+- Quiet TUI wallet logs, clear stale wallet config, reuse captured wallet passwords, and keep wallet info focused on fresh receive addresses ([3c8a47e8](../../commit/3c8a47e8ad79d0c10443a2a561d8ed36afc87f34))
+- Retry transient Bitcoin Core wallet-loading conflicts instead of failing immediately ([2a0b2a85](../../commit/2a0b2a859577d85e01ace651f8539a5c46bd0bbf))
+- Show fidelity bonds list in a clean TUI message box ([3fd47beb](../../commit/3fd47bebbba534479e124dccf9fbecbe26d5ebf7))
+- Maker auto-detects the standard Tor cookie file when no path is configured ([4e7d4ce0](../../commit/4e7d4ce068dccc224a4826521bf2829686096709))
+- Stop crashing with httpx.ReadTimeout on first wallet command when Bitcoin Core's importdescriptors rescan exceeds two minutes. ([ca8c9e5c](../../commit/ca8c9e5c2ac850fe6706d133292b9b0b7a40f81c))
+- Update menu correctly identifies development builds and lets dev users switch back to the stable release without a misleading 'already up to date' prompt ([7fed650b](../../commit/7fed650bec220f5c08725ab2cf7c186834684358))
+- Make CLI data-dir overrides apply consistently to wallets, config, and neutrino TLS/auth paths ([92ed0b2e](../../commit/92ed0b2ec7a291d05a7241672c8f0d134f9667e2))
+- Label pending CoinJoin outputs as cj-out/cj-change instead of deposit/non-cj-change ([8bc69335](../../commit/8bc69335efc1b69a118d71579a4b8ce3e53a87a0))
+- Prevent directory-client leak when a coinjoin or tumbler task finishes ([43524a72](../../commit/43524a7273425e979702ff16275c3e30834f24ab))
+- fixed ([935469af](../../commit/935469af5f08d33bbbb2f6128660379789a5c6a2))
+- Fixed ([8fa5af6d](../../commit/8fa5af6d5b56d19ef1391c12250a10c8c0680943))
+- Raise docker-compose directory healthcheck timeout to 15s to ([891295e5](../../commit/891295e5bc419c61732eccdf4ba05cc3c8676f41))
+- Taker now logs the randomized fee rate at INFO. ([1d4f5d00](../../commit/1d4f5d00293c12b5e8506811dac1a74927ef36d0))
+- Taker now handles blacklisted PoDLE commitments more robustly ([29347a3c](../../commit/29347a3cfbf73130a8559cdba68e12f6731b470c))
+- Treat clean EOFs on incoming direct connections as normal ([248e6a09](../../commit/248e6a097ac9ab000a1d8f1a5e5d2ee3d1ff85d6))
+- Service-state 401 responses are no longer advertised as ``invalid_token``. ([60e7408f](../../commit/60e7408f026d9677488c50cd0c28045a11014f81))
+- Default tumbler inter-phase wait raised to 60 minutes; stage-1 multiplier now configurable (default 3x) ([46c59a3b](../../commit/46c59a3b60418f1ff9a25aa28707bb9540ceb006))
+- Improve tumbler retries for low-confirmation and no-eligible-UTXO failures ([58201903](../../commit/58201903cf32ff6c39965106bd55bbaceef2e40b))
+- Increase default tumbler waits to match the reference timing profile ([2e1cdb12](../../commit/2e1cdb1255e7d2291dec72ac6150b64bf086b067))
+- Tumbler runner no longer stalls forever between phases when the wallet backend cannot resolve the broadcast txid by id ([0c5d0555](../../commit/0c5d0555c091d82f23b2dbecd6bfc7f73a5b14d0))
+- Tumbler now resolves inter-phase confirmations via watched addresses, fixing stalls on neutrino / BIP158 light-client backends ([31532b3f](../../commit/31532b3fd2f374ef0ad559c59e33333a033f840f))
+- Tumbler now logs the inter-phase delay duration, ETA, and periodic progress so operators can see the runner is sleeping on schedule rather than stuck ([9803a8f7](../../commit/9803a8f79db0615de5686a24a19e15fac361e60d))
+- Make tumbler commands respect the configured JoinMarket data directory ([c02ed030](../../commit/c02ed030d1386387fe256d2847a45b644ff26435))
+- Reduce premature tumbler retries between phases ([fdf1d698](../../commit/fdf1d6988ac97139ac8e9effe7907a73f331a152))
+- Expose descriptor_wallet_name on /api/v1/session for clients ([7a13ac60](../../commit/7a13ac60f31989a272118b31e6dfa94cab97fdd8))
+- Fix tumbler sweep failing with 'Not enough makers' when the ([ebd542d5](../../commit/ebd542d5568e608c70595b15ed8a2ee54ce8e9b8))
+- Fix slow `jm-wallet info` on full-node wallets caused by extended-range scans for CoinJoin counterparty addresses ([ad7c5170](../../commit/ad7c5170aefdb6a2c9aa8b87cc4623b444d5968b))
+- Deprecate the scantxoutset (BitcoinCoreBackend) full-node backend; use descriptor_wallet instead ([64ace9d8](../../commit/64ace9d8dc1ef8a2f6c6706baf2e70f248720e3d))
+
 ## [0.27.0] - 2026-04-17
 
 ### Added
@@ -1209,7 +1307,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.27.0...HEAD
+[Unreleased]: ../../compare/0.28.0...HEAD
+[0.28.0]: ../../compare/0.27.0...0.28.0
 [0.27.0]: ../../compare/0.26.1...0.27.0
 [0.26.1]: ../../compare/0.26.0...0.26.1
 [0.26.0]: ../../compare/0.25.0...0.26.0
