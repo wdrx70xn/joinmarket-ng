@@ -93,12 +93,16 @@ def create_jam_wallet(
         logger.info(f"Wallet {wallet_name} already exists in {container}")
         return True
 
-    # Check if expect is available
+    # The jam-standalone image is built from tests/e2e/reference/Dockerfile
+    # which pre-installs expect. Fail loudly if it is missing instead of
+    # attempting a runtime apt-get install.
     result = run_container_cmd(container, ["which", "expect"], timeout=10)
     if result.returncode != 0:
-        logger.info(f"Installing expect in {container}...")
-        run_container_cmd(container, ["apt-get", "update"], timeout=60)
-        run_container_cmd(container, ["apt-get", "install", "-y", "expect"], timeout=60)
+        logger.error(
+            f"`expect` is not installed in container {container}. "
+            f"Rebuild via `docker compose --profile reference build jam`."
+        )
+        return False
 
     # Run the expect script to create wallet
     # Note: Ensure create_wallet.exp is mounted in the container

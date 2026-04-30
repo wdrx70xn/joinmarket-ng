@@ -126,14 +126,20 @@ def cleanup_wallet_lock(wallet_name: str) -> None:
 
 
 def ensure_expect_installed() -> bool:
-    """Ensure expect is installed in the jam container."""
+    """Ensure expect is installed in the jam container.
+
+    The jam-standalone image is built from tests/e2e/reference/Dockerfile
+    which pre-installs expect. If it is missing here, the image was not
+    rebuilt and we fail loudly instead of attempting a runtime apt-get.
+    """
     result = run_jam_cmd(["which", "expect"], timeout=10)
     if result.returncode != 0:
-        logger.info("Installing expect in jam container...")
-        run_jam_cmd(["apt-get", "update"], timeout=60)
-        run_jam_cmd(["apt-get", "install", "-y", "expect"], timeout=60)
-        result = run_jam_cmd(["which", "expect"], timeout=10)
-    return result.returncode == 0
+        logger.error(
+            "`expect` is not installed in the jam-standalone image. "
+            "Rebuild via `docker compose --profile reference build jam`."
+        )
+        return False
+    return True
 
 
 def copy_expect_script_to_jam() -> bool:

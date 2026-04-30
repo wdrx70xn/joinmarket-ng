@@ -1054,8 +1054,16 @@ services:
 
   # Reference JoinMarket implementation (jam-standalone)
   # Contains internal Tor daemon for onion messaging
+  #
+  # We build a thin wrapper image (tests/e2e/reference/Dockerfile) that
+  # pre-installs `expect`, which the wallet-creation automation scripts
+  # (create_wallet.exp, recover_wallet_with_passphrase.exp) need. This
+  # avoids fragile runtime `apt-get install` calls inside the container.
   jam:
-    image: ghcr.io/joinmarket-webui/jam-standalone:v0.4.0-clientserver-v0.9.11
+    image: joinmarket-ng-jam-standalone:latest
+    build:
+      context: .
+      dockerfile: tests/e2e/reference/Dockerfile
     container_name: jm-jam
     logging:
       driver: json-file
@@ -1109,7 +1117,10 @@ services:
 
   # Reference JAM maker 1 (yieldgenerator)
   jam-maker1:
-    image: ghcr.io/joinmarket-webui/jam-standalone:v0.4.0-clientserver-v0.9.11
+    image: joinmarket-ng-jam-standalone:latest
+    build:
+      context: .
+      dockerfile: tests/e2e/reference/Dockerfile
     container_name: jm-jam-maker1
     restart: unless-stopped
     logging:
@@ -1159,7 +1170,10 @@ services:
 
   # Reference JAM maker 2 (yieldgenerator)
   jam-maker2:
-    image: ghcr.io/joinmarket-webui/jam-standalone:v0.4.0-clientserver-v0.9.11
+    image: joinmarket-ng-jam-standalone:latest
+    build:
+      context: .
+      dockerfile: tests/e2e/reference/Dockerfile
     container_name: jm-jam-maker2
     restart: unless-stopped
     logging:
