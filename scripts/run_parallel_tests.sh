@@ -49,6 +49,22 @@ declare -A SUITE_PIDS
 declare -A SUITE_RESULTS
 declare -A SUITE_START_TIMES
 
+# Maximum number of suites to run concurrently. 0 disables the limit.
+# Defaults to half the visible CPU cores (rounded down, minimum 1) so that a
+# 16-core host caps at 8 concurrent docker stacks. Override with
+# --max-concurrent N or the MAX_CONCURRENT env var.
+default_cpu_cap() {
+    local cores
+    if cores=$(nproc 2>/dev/null) && [ -n "$cores" ] && [ "$cores" -gt 0 ]; then
+        local cap=$((cores / 2))
+        [ "$cap" -lt 1 ] && cap=1
+        echo "$cap"
+    else
+        echo 4
+    fi
+}
+MAX_CONCURRENT="${MAX_CONCURRENT:-$(default_cpu_cap)}"
+
 # =============================================================================
 # Port allocation per suite
 # Each suite gets a unique port range to avoid conflicts.
@@ -1175,10 +1191,50 @@ launch_suite() {
     local suite_name=$1
     local runner_func=$2
 
+    if [ "${MAX_CONCURRENT:-0}" -gt 0 ]; then
+        wait_for_capacity
+    fi
+
     SUITE_START_TIMES[$suite_name]=$(date +%s)
     $runner_func &
     SUITE_PIDS[$suite_name]=$!
     log_info "Launched $suite_name (PID ${SUITE_PIDS[$suite_name]})"
+}
+
+# Block until the number of still-running suite PIDs falls below MAX_CONCURRENT.
+# Reaped suites have their results recorded so the final summary stays accurate
+# regardless of completion order.
+wait_for_capacity() {
+    while :; do
+        local running=0
+        for suite_name in "${!SUITE_PIDS[@]}"; do
+            local pid=${SUITE_PIDS[$suite_name]}
+            # Skip already-finalized entries.
+            [ -n "${SUITE_RESULTS[$suite_name]:-}" ] && continue
+            if kill -0 "$pid" 2>/dev/null; then
+                running=$((running + 1))
+            else
+                # Reap and record result.
+                local rc=0
+                wait "$pid" 2>/dev/null || rc=$?
+                local end=$(date +%s)
+                local start=${SUITE_START_TIMES[$suite_name]:-$end}
+                local duration=$((end - start))
+                if [ "$rc" -eq 0 ]; then
+                    SUITE_RESULTS[$suite_name]="PASS"
+                    log_success "$suite_name passed (${duration}s)"
+                else
+                    SUITE_RESULTS[$suite_name]="FAIL"
+                    log_error "$suite_name failed (${duration}s) -- see ${PARALLEL_DIR}/${suite_name}.log"
+                fi
+            fi
+        done
+
+        if [ "$running" -lt "$MAX_CONCURRENT" ]; then
+            return 0
+        fi
+        sleep 2
+    done
 }
 
 # =============================================================================
@@ -1188,6 +1244,12 @@ wait_for_all() {
     local any_failed=false
 
     for suite_name in "${!SUITE_PIDS[@]}"; do
+        # Skip suites that were already reaped by wait_for_capacity().
+        if [ -n "${SUITE_RESULTS[$suite_name]:-}" ]; then
+            [ "${SUITE_RESULTS[$suite_name]}" = "FAIL" ] && any_failed=true
+            continue
+        fi
+
         local pid=${SUITE_PIDS[$suite_name]}
         local start=${SUITE_START_TIMES[$suite_name]}
 
@@ -1255,6 +1317,11 @@ main() {
     log_info "=== JoinMarket Parallel Test Suite ==="
     log_info "Starting at $(date)"
     log_info "Logs directory: ${PARALLEL_DIR}/"
+    if [ "${MAX_CONCURRENT:-0}" -gt 0 ]; then
+        log_info "Concurrency cap: ${MAX_CONCURRENT} suite(s) at a time"
+    else
+        log_info "Concurrency cap: unlimited"
+    fi
     echo
 
     # Environment setup
@@ -1325,6 +1392,34 @@ main() {
 # =============================================================================
 # Argument handling
 # =============================================================================
+
+# Pre-parse global flags that may precede the subcommand. Currently only
+# --max-concurrent (alias --jobs / -j) and its --max-concurrent=N form.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --max-concurrent|--jobs|-j)
+            if [ -z "${2:-}" ]; then
+                log_error "Option $1 requires an integer argument (use 0 for unlimited)"
+                exit 1
+            fi
+            MAX_CONCURRENT="$2"
+            shift 2
+            ;;
+        --max-concurrent=*|--jobs=*)
+            MAX_CONCURRENT="${1#*=}"
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if ! [[ "$MAX_CONCURRENT" =~ ^[0-9]+$ ]]; then
+    log_error "MAX_CONCURRENT must be a non-negative integer (got '$MAX_CONCURRENT')"
+    exit 1
+fi
+
 case "${1:-}" in
     --cleanup|--cleanup-only)
         cleanup_all
@@ -1378,11 +1473,17 @@ Runs all test suites in parallel using Docker Compose project isolation.
 Each suite gets its own containers, ports, network, and volumes.
 
 Usage:
-  $0                    Run all suites in parallel
-  $0 --suite <name>     Run a single suite
-  $0 --cleanup          Clean up all parallel test resources
-  $0 --cleanup-only     Alias for --cleanup
-  $0 --help             Show this help
+  $0                              Run all suites in parallel
+  $0 --suite <name>               Run a single suite
+  $0 --max-concurrent <N>         Limit concurrent suites (0 = unlimited;
+                                   default = max(1, CPU cores / 2))
+  $0 --jobs <N>                   Alias for --max-concurrent
+  $0 --cleanup                    Clean up all parallel test resources
+  $0 --cleanup-only               Alias for --cleanup
+  $0 --help                       Show this help
+
+Environment:
+  MAX_CONCURRENT=<N>              Same as --max-concurrent
 
 Available suites:
   unit                  Unit tests (no Docker)
