@@ -7,6 +7,13 @@ ARG PYTHON_VERSION=3.14
 ARG PYTHON_SLIM_DIGEST=sha256:5b3879b6f3cb77e712644d50262d05a7c146b7312d784a18eff7ff5462e77033
 ARG NODE_VERSION=24
 ARG NODE_SLIM_DIGEST=sha256:03eae3ef7e88a9de535496fb488d67e02b9d96a063a8967bae657744ecd513f2
+# JAM frontend is built on a single fixed platform regardless of the target
+# image platform (the build output is static JS that is platform-independent).
+# Pinning JAM_BUILDER_PLATFORM ensures reproducible JS bytes across hosts.
+# It is exposed as an ARG (not a constant) to silence the
+# FromPlatformFlagConstDisallowed lint warning while keeping the value fixed
+# in practice (callers should not override it).
+ARG JAM_BUILDER_PLATFORM=linux/amd64
 
 # JAM frontend: pinned commit hash for reproducible builds
 # Update with: ./scripts/update-base-images.sh
@@ -169,7 +176,7 @@ CMD ["jmwalletd"]
 #   content, identical cache keys prevent any mtime-driven divergence).
 # - npm ci is deterministic from a pinned package-lock.json with integrity hashes.
 # =============================================================================
-FROM --platform=linux/amd64 node:${NODE_VERSION}-slim@${NODE_SLIM_DIGEST} AS jam-builder
+FROM --platform=${JAM_BUILDER_PLATFORM} node:${NODE_VERSION}-slim@${NODE_SLIM_DIGEST} AS jam-builder
 ARG JAM_COMMIT
 ARG SOURCE_DATE_EPOCH
 
