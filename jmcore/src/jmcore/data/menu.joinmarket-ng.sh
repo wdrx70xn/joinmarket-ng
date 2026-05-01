@@ -84,8 +84,6 @@ fi
 # Ensure ~/.local/bin is in PATH (fallback for pip console scripts)
 export PATH="${HOME_JM}/.local/bin:$PATH"
 
-
-
 # =============================================================================
 # Notes for Contributors
 # =============================================================================
@@ -93,8 +91,6 @@ export PATH="${HOME_JM}/.local/bin:$PATH"
 #    or any function that opens a whiptail dialog after terminal output (echo,
 #    jm-wallet output, etc.). This prevents stale terminal buffer from flashing
 #    between whiptail dialogs.
-
-
 
 # =============================================================================
 # Helpers
@@ -316,6 +312,14 @@ prompt_and_store_password() {
     local max_attempts=3
     local pwd_store
 
+    # Plaintext wallets have nothing to store.
+    jm-wallet verify-password -f "$wallet_path" --no-prompt --password "" \
+        >/dev/null 2>&1
+    if [ $? -eq 2 ]; then
+        whiptail --title " Info " --msgbox "This wallet is not encrypted.\nNo password to store." 8 50
+        return 1
+    fi
+
     # Security warning first (#453). Make the trade-off explicit.
     if ! whiptail --title " Security Warning " \
         --yesno "Storing the wallet password in config.toml saves it in PLAIN TEXT.\n\nAnyone with read access to:\n  $CONFIG_FILE\ncan decrypt your wallet. This effectively defeats the\nwallet encryption.\n\nOnly store the password if the maker bot needs to start\nunattended and you trust the security of this machine.\n\nContinue and store the password?" \
@@ -332,11 +336,6 @@ prompt_and_store_password() {
             # User cancelled
             unset pwd_store
             return 1
-        fi
-        if [ -z "$pwd_store" ]; then
-            whiptail --title " Error " --msgbox "Password cannot be empty." 8 40
-            attempts=$((attempts + 1))
-            continue
         fi
         if verify_wallet_password "$wallet_path" "$pwd_store"; then
             store_password "${pwd_store}"
@@ -423,11 +422,6 @@ ensure_wallet_password() {
         if [ $rc -ne 0 ]; then
             unset pwd_entry
             return 1
-        fi
-        if [ -z "$pwd_entry" ]; then
-            whiptail --title " Error " --msgbox "Password cannot be empty." 8 40
-            attempts=$((attempts + 1))
-            continue
         fi
         if verify_wallet_password "$wallet_path" "$pwd_entry"; then
             export MNEMONIC_PASSWORD="$pwd_entry"
@@ -1146,23 +1140,27 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
                   18 64 6 \
                   "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3) || continue
 
+              clear  # prevent stale terminal buffer from flashing after wallet selection
+              echo "Please wait..."              
+
               if [ -f "$DATA_DIR/wallets/$WNAME" ]; then
                   set_config_value "mnemonic_file" "$DATA_DIR/wallets/$WNAME" "true"
                   # Clear stored password to prevent mismatch with the new wallet
                   clear_config_value "mnemonic_password"
 
-                  # Offer to store the matching password for the freshly
-                  # selected wallet so the maker can restart unattended
-                  # (issue #455 Case 3: previously the old password was
-                  # cleared with no way to record the new one, leaving a
-                  # wallet_file/password mismatch until the user edited
-                  # config.toml by hand).
-                  if whiptail --title " Store Password " \
+                  # Check if wallet is encrypted before offering to store password
+                  # (issue #455 Case 3: previously the old password was cleared with
+                  # no way to record the new one, leaving a wallet_file/password
+                  # mismatch until the user edited config.toml by hand).
+                  jm-wallet verify-password -f "$DATA_DIR/wallets/$WNAME" --no-prompt --password "" \
+                      >/dev/null 2>&1
+                  if [ $? -eq 2 ]; then
+                      # Unencrypted wallet - no password to store
+                      whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nThis wallet is not encrypted.\nRestart the maker service for changes to take effect." 10 60
+                  elif whiptail --title " Store Password " \
                       --yesno "Active wallet set to: $WNAME\n\nStore this wallet's password in config.toml?\nThis lets the maker start without prompting.\nChoose No to be asked for the password on each use." \
                       12 64 --defaultno 3>&1 1>&2 2>&3; then
 
-                      clear # prevent stale terminal buffer from flashing between whiptail dialogs
-                      echo "Please wait..."
                       prompt_and_store_password "$DATA_DIR/wallets/$WNAME" || \
                           echo "Password not stored."
                       whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nRestart the maker service for changes to take effect." 10 60
