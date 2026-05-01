@@ -222,8 +222,25 @@ SOURCE_DATE_EPOCH=$(git -C "$PROJECT_ROOT" log -1 --pretty=%ct)
 BUILD_DATE=$(date -u -d "@$SOURCE_DATE_EPOCH" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || \
              date -u -r "$SOURCE_DATE_EPOCH" +"%Y-%m-%dT%H:%M:%SZ")
 
+# Resolve build ref to mirror CI's ${{ github.ref_name }}.
+# On a tag push CI sets ref_name to the tag (e.g. "v0.28.0"); on a branch push it
+# is the branch name. Locally we prefer a tag pointing at HEAD (release workflow),
+# falling back to the current branch. This must match the value setup.py would
+# otherwise derive itself, so the produced /root/.local layer is byte-identical
+# to CI's. setup.py reads JOINMARKET_BUILD_COMMIT/REF before falling back to git,
+# so passing them explicitly also makes the build reproducible inside the docker
+# build sandbox where the .git directory is not available.
+BUILD_REF=$(git -C "$PROJECT_ROOT" tag --points-at HEAD | head -n 1)
+if [[ -z "$BUILD_REF" ]]; then
+    BUILD_REF=$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [[ "$BUILD_REF" == "HEAD" ]]; then
+        BUILD_REF=""
+    fi
+fi
+
 log_info "Building JoinMarket NG release $VERSION"
 log_info "Commit: $COMMIT_SHA"
+log_info "Build ref: ${BUILD_REF:-<none>}"
 log_info "SOURCE_DATE_EPOCH: $SOURCE_DATE_EPOCH"
 log_info "Platform: $PLATFORM ($CURRENT_ARCH)"
 log_info "Parallel jobs: $BUILD_JOBS"
@@ -259,10 +276,15 @@ build_image() {
     mkdir -p "$oci_extract"
 
     # Build command with optional --target
+    # JOINMARKET_BUILD_COMMIT/REF are stamped into wheel metadata via setup.py.
+    # Mirroring CI's release.yaml ensures the resulting /root/.local COPY layer
+    # has the same digest locally and in CI (reproducible build verification).
     build_cmd=(docker buildx build
         --file "$dockerfile"
         --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"
         --build-arg VERSION="$VERSION"
+        --build-arg JOINMARKET_BUILD_COMMIT="$COMMIT_SHA"
+        --build-arg JOINMARKET_BUILD_REF="$BUILD_REF"
         --platform "$PLATFORM"
         --output "type=oci,dest=${oci_tar},rewrite-timestamp=true"
         --no-cache)

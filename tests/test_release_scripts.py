@@ -275,3 +275,115 @@ exit 1
     assert local_commit in result.stdout
     assert ci_commit in result.stdout
     assert "Insufficient valid signatures" in result.stdout
+
+
+def test_build_release_passes_commit_and_ref_build_args(tmp_path: Path) -> None:
+    """build-release.sh must propagate JOINMARKET_BUILD_COMMIT/REF to docker
+    buildx so wheel metadata stamping in jmcore/setup.py matches CI builds.
+    Without these args, /root/.local layer digests diverge between local and CI
+    (see jmcore/setup.py:_resolve_commit which writes _build_info.py).
+    """
+    repo_dir = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    repo_dir.mkdir()
+    (repo_dir / "scripts").mkdir()
+    (repo_dir / "scripts" / "build-release.sh").write_text(
+        (SCRIPTS_DIR / "build-release.sh").read_text()
+    )
+    (repo_dir / "scripts" / "build-release.sh").chmod(0o755)
+
+    # Minimal source tree expected by build-release.sh
+    (repo_dir / "jmcore" / "src" / "jmcore").mkdir(parents=True)
+    (repo_dir / "jmcore" / "src" / "jmcore" / "version.py").write_text(
+        '__version__ = "9.9.9"\n'
+    )
+    # Capture every docker invocation to a log file so we can assert on the
+    # buildx args that would be passed for the real build.
+    capture_log = tmp_path / "docker-calls.log"
+    write_executable(
+        bin_dir / "docker",
+        textwrap.dedent(
+            f"""#!/usr/bin/env bash
+# Log all args (newline-separated to survive embedded spaces) and synthesize
+# minimal OCI artifacts so build-release.sh's post-build extraction succeeds.
+printf '%s\\n' "$@" >> {capture_log}
+printf -- '---\\n' >> {capture_log}
+case "$1" in
+    buildx)
+        case "${{2:-}}" in
+            inspect)
+                # Pretend a docker-container builder is already active.
+                printf 'Driver: docker-container\\n'
+                exit 0
+                ;;
+            build)
+                # Find the --output dest=<path> and create a minimal OCI tar
+                dest=""
+                while [[ $# -gt 0 ]]; do
+                    case "$1" in
+                        --output)
+                            # value form: type=oci,dest=/path,...
+                            for kv in $(echo "$2" | tr ',' ' '); do
+                                case "$kv" in
+                                    dest=*) dest="${{kv#dest=}}" ;;
+                                esac
+                            done
+                            shift 2
+                            ;;
+                        *)
+                            shift
+                            ;;
+                    esac
+                done
+                tmpd=$(mktemp -d)
+                mkdir -p "$tmpd/blobs/sha256"
+                # Empty manifest with no layers; jq '.layers[].digest' yields nothing
+                manifest_body='{{"layers":[]}}'
+                manifest_digest=$(printf '%s' "$manifest_body" | sha256sum | cut -d' ' -f1)
+                printf '%s' "$manifest_body" > "$tmpd/blobs/sha256/$manifest_digest"
+                printf '{{"manifests":[{{"digest":"sha256:%s"}}]}}' "$manifest_digest" \\
+                    > "$tmpd/index.json"
+                tar -cf "$dest" -C "$tmpd" .
+                exit 0
+                ;;
+        esac
+        ;;
+esac
+exit 0
+"""
+        ),
+    )
+    write_executable(bin_dir / "jq", '#!/usr/bin/env bash\nexec /usr/bin/jq "$@"\n')
+
+    run_git(repo_dir, "init", "--initial-branch=main")
+    (repo_dir / "README.md").write_text("hi\n")
+    run_git(repo_dir, "add", ".")
+    run_git(repo_dir, "commit", "-m", "init")
+    expected_commit = run_git(repo_dir, "rev-parse", "HEAD").stdout.strip()
+    run_git(repo_dir, "tag", "v9.9.9")
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(repo_dir / "scripts" / "build-release.sh"),
+            "9.9.9",
+            "--jobs",
+            "1",
+        ],
+        cwd=repo_dir,
+        text=True,
+        capture_output=True,
+        env=make_env(bin_dir),
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"build-release.sh failed:\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+
+    log = capture_log.read_text()
+    # The buildx build invocation must include both the commit (full HEAD sha)
+    # and the ref (the tag pointing at HEAD), so setup.py stamps deterministic
+    # _build_info.py contents into the wheels regardless of build environment.
+    assert f"JOINMARKET_BUILD_COMMIT={expected_commit}" in log, log
+    assert "JOINMARKET_BUILD_REF=v9.9.9" in log, log
