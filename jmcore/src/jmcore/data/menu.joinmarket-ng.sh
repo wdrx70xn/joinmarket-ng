@@ -84,6 +84,18 @@ fi
 # Ensure ~/.local/bin is in PATH (fallback for pip console scripts)
 export PATH="${HOME_JM}/.local/bin:$PATH"
 
+
+
+# =============================================================================
+# Notes for Contributors
+# =============================================================================
+# 1. Terminal Buffer: Always `clear` before calling prompt_and_store_password()
+#    or any function that opens a whiptail dialog after terminal output (echo,
+#    jm-wallet output, etc.). This prevents stale terminal buffer from flashing
+#    between whiptail dialogs.
+
+
+
 # =============================================================================
 # Helpers
 # =============================================================================
@@ -1148,6 +1160,9 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
                   if whiptail --title " Store Password " \
                       --yesno "Active wallet set to: $WNAME\n\nStore this wallet's password in config.toml?\nThis lets the maker start without prompting.\nChoose No to be asked for the password on each use." \
                       12 64 --defaultno 3>&1 1>&2 2>&3; then
+
+                      clear # prevent stale terminal buffer from flashing between whiptail dialogs
+                      echo "Please wait..."
                       prompt_and_store_password "$DATA_DIR/wallets/$WNAME" || \
                           echo "Password not stored."
                       whiptail --title " Wallet Selected " --msgbox "Active wallet set to: $WNAME\n\nRestart the maker service for changes to take effect." 10 60
