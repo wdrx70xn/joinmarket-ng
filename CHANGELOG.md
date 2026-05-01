@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-05-01
+
+### Fixed
+
+- Fix orderbook watcher reporting stale offers from disconnected makers ([57d41a35](../../commit/57d41a35d391002d415c0d1cc9f1d702dcbc6fbf))
+- Fix local release builds to match CI digests for reproducibility verification ([3d95088b](../../commit/3d95088bcf4ca1e15b8f33a80030fd578342089b))
+
 ## [0.28.0] - 2026-04-30
 
 ### Added
@@ -1307,7 +1314,8 @@ Releases prior to these changes (including 0.13.5, 0.13.6, and 0.13.7) cannot be
 - Pre-built image support for directory server compose.
 - Tor configuration instructions.
 
-[Unreleased]: ../../compare/0.28.0...HEAD
+[Unreleased]: ../../compare/0.28.1...HEAD
+[0.28.1]: ../../compare/0.28.0...0.28.1
 [0.28.0]: ../../compare/0.27.0...0.28.0
 [0.27.0]: ../../compare/0.26.1...0.27.0
 [0.26.1]: ../../compare/0.26.0...0.26.1

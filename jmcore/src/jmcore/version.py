@@ -15,7 +15,7 @@ from typing import Any
 
 # The project version - update this when releasing
 # Format: MAJOR.MINOR.PATCH (Semantic Versioning)
-__version__ = "0.28.0"
+__version__ = "0.28.1"
 
 # Alias for convenience
 VERSION = __version__
