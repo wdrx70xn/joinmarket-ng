@@ -51,43 +51,36 @@ RUN echo "setuptools==${SETUPTOOLS_VERSION}" > /build/constraints.txt && \
 # coincurve (the only source-build in requirements) uses hatchling, not setuptools, so our
 # setuptools constraint does not apply. Using --build-constraint here would conflict with
 # third-party packages that pin their own exact setuptools version (e.g. httptools on armv7).
-# Note: SOURCE_DATE_EPOCH is passed as ARG, which is available during RUN commands
+# All requirements are installed in a single pip invocation so that pip resolves the
+# dependency graph once instead of re-resolving across three sequential calls.
 COPY jmcore/requirements.txt /build/jmcore/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/jmcore/requirements.txt
+COPY jmwallet/requirements.txt /build/jmwallet/requirements.txt
+COPY maker/requirements.txt /build/maker/requirements.txt
 
-# Copy jmcore source and install (with notifications support)
-# --build-constraint pins setuptools version in PEP 517 build isolation environments for our
-# packages, which declare requires=["setuptools>=68.0"] and thus accept the latest compatible
-# version. Without pinning, pip downloads the latest setuptools, stamping its version into
-# WHEEL metadata (Generator: setuptools x.y.z) and breaking layer reproducibility.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user \
+        -r /build/jmcore/requirements.txt \
+        -r /build/jmwallet/requirements.txt \
+        -r /build/maker/requirements.txt
+
+# Copy all source packages and install in a single pip invocation so that pip resolves
+# dependencies once. --build-constraint pins setuptools version in PEP 517 build isolation
+# environments for our packages, which declare requires=["setuptools>=68.0"].
 COPY jmcore/src /build/jmcore/src
 COPY jmcore/pyproject.toml /build/jmcore/
 COPY jmcore/setup.py /build/jmcore/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt "/build/jmcore"
-
-# Install jmwallet dependencies
-COPY jmwallet/requirements.txt /build/jmwallet/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/jmwallet/requirements.txt
-
-# Copy jmwallet source and install
-COPY jmwallet/pyproject.toml /build/jmwallet/pyproject.toml
 COPY jmwallet/src /build/jmwallet/src
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt /build/jmwallet
-
-# Install maker dependencies
-COPY maker/requirements.txt /build/maker/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/maker/requirements.txt
-
-# Copy maker source and install
+COPY jmwallet/pyproject.toml /build/jmwallet/
 COPY maker/src /build/maker/src
 COPY maker/pyproject.toml /build/maker/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt /build/maker
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user --build-constraint /build/constraints.txt \
+        /build/jmcore \
+        /build/jmwallet \
+        /build/maker
 
 # Normalize installed Python environment mtimes for reproducible COPY layer digests
 RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then \

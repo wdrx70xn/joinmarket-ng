@@ -44,33 +44,30 @@ ARG WHEEL_VERSION
 RUN echo "setuptools==${SETUPTOOLS_VERSION}" > /build/constraints.txt && \
     echo "wheel==${WHEEL_VERSION}" >> /build/constraints.txt
 
-# Install jmcore dependencies (with hash verification)
-# coincurve (the only source-build here) uses hatchling, not setuptools, so the setuptools
-# constraint is not needed for this step.
+# Install jmcore and directory_server dependencies in a single pip invocation.
+# --build-constraint is included because stem (in directory_server requirements) uses
+# legacy setup.py/setuptools and needs its build isolation environment pinned.
 COPY jmcore/requirements.txt /build/jmcore/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/jmcore/requirements.txt
+COPY directory_server/requirements.txt /build/directory_server/requirements.txt
 
-# Copy jmcore source and install (with notifications support)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user --build-constraint /build/constraints.txt \
+        -r /build/jmcore/requirements.txt \
+        -r /build/directory_server/requirements.txt
+
+# Copy all source packages and install in a single pip invocation.
 COPY jmcore/src /build/jmcore/src
 COPY jmcore/pyproject.toml /build/jmcore/
 COPY jmcore/setup.py /build/jmcore/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt "/build/jmcore"
-
-# Install directory_server dependencies
-# stem (in this requirements file) has no pre-built wheel and uses legacy setup.py/setuptools.
-# --build-constraint pins the setuptools version stamped into stem's WHEEL metadata, ensuring
-# the resulting layer digest is identical across builds.
-COPY directory_server/requirements.txt /build/directory_server/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt -r /build/directory_server/requirements.txt
-
-# Copy directory_server source and install
 COPY directory_server/src /build/directory_server/src
 COPY directory_server/pyproject.toml /build/directory_server/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt /build/directory_server
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user --build-constraint /build/constraints.txt \
+        /build/jmcore \
+        /build/directory_server
 
 # Normalize installed Python environment mtimes for reproducible COPY layer digests
 RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then \
@@ -153,34 +150,30 @@ ARG WHEEL_VERSION
 RUN echo "setuptools==${SETUPTOOLS_VERSION}" > /build/constraints.txt && \
     echo "wheel==${WHEEL_VERSION}" >> /build/constraints.txt
 
-# Install jmcore dependencies (with hash verification)
-# coincurve (the only source-build here) uses hatchling, not setuptools, so the setuptools
-# constraint is not needed for this step.
+# Install jmcore and directory_server dependencies in a single pip invocation
+# (debug-builder variant). --build-constraint is included because stem uses legacy
+# setup.py/setuptools and needs its build isolation environment pinned.
 COPY jmcore/requirements.txt /build/jmcore/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/jmcore/requirements.txt
+COPY directory_server/requirements.txt /build/directory_server/requirements.txt
 
-# Copy jmcore source and install (with notifications support)
-# --build-constraint pins setuptools so its version is stamped identically into WHEEL metadata
-# across builds. Applied only to our packages to avoid conflicting with third-party build deps.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user --build-constraint /build/constraints.txt \
+        -r /build/jmcore/requirements.txt \
+        -r /build/directory_server/requirements.txt
+
+# Copy all source packages and install in a single pip invocation (debug-builder variant).
 COPY jmcore/src /build/jmcore/src
 COPY jmcore/pyproject.toml /build/jmcore/
 COPY jmcore/setup.py /build/jmcore/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt "/build/jmcore"
-
-# Install directory_server dependencies
-# stem (in this requirements file) has no pre-built wheel and uses legacy setup.py/setuptools.
-# --build-constraint pins the setuptools version stamped into stem's WHEEL metadata.
-COPY directory_server/requirements.txt /build/directory_server/requirements.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt -r /build/directory_server/requirements.txt
-
-# Copy directory_server source and install
 COPY directory_server/src /build/directory_server/src
 COPY directory_server/pyproject.toml /build/directory_server/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt /build/directory_server
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user --build-constraint /build/constraints.txt \
+        /build/jmcore \
+        /build/directory_server
 
 # Normalize installed Python environment mtimes for reproducible COPY layer digests
 RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then \

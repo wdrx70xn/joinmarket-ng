@@ -59,42 +59,35 @@ ARG WHEEL_VERSION
 RUN echo "setuptools==${SETUPTOOLS_VERSION}" > /build/constraints.txt && \
     echo "wheel==${WHEEL_VERSION}" >> /build/constraints.txt
 # Note: --build-constraint is applied only to our own package install steps below to pin
-# setuptools in PEP 517 build isolation. It is NOT applied to third-party requirements installs
-# because some packages pin their own exact setuptools version (e.g. httptools==0.7.1 requires
-# setuptools==80.9.0 exactly and has no pre-built wheel on armv7). Applying --build-constraint
-# globally would cause a conflict between our pin (82.0.0) and httptools' pin (80.9.0).
+# setuptools in PEP 517 build isolation. It is NOT applied to the requirements install
+# because some packages pin their own exact setuptools version (e.g. httptools==0.7.1
+# requires setuptools==80.9.0 exactly and has no pre-built wheel on armv7). Applying
+# --build-constraint globally would cause a conflict between our pin (82.0.0) and
+# httptools' pin (80.9.0).
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# All requirements are installed in a single pip invocation so that pip resolves the
+# dependency graph once instead of re-resolving and re-verifying hashes across six
+# sequential calls. BuildKit cache mount avoids re-downloading packages on rebuilds
+# while keeping the image layer small (the cache lives on the host, not in the image).
 COPY jmcore/requirements.txt /build/requirements-jmcore.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir -r /build/requirements-jmcore.txt
-
 COPY jmwallet/requirements.txt /build/requirements-jmwallet.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir -r /build/requirements-jmwallet.txt
-
 COPY maker/requirements.txt /build/requirements-maker.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir -r /build/requirements-maker.txt
-
 COPY taker/requirements.txt /build/requirements-taker.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir -r /build/requirements-taker.txt
-
 COPY orderbook_watcher/requirements.txt /build/requirements-obwatcher.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir -r /build/requirements-obwatcher.txt
-
-# Note: --build-constraint is NOT used for the requirements installs above.
-# It is only needed for our own packages below (which declare setuptools>=68.0).
-# Using --build-constraint globally would conflict with third-party packages that
-# pin their own exact setuptools version (e.g. httptools==0.7.1 pins setuptools==80.9.0
-# and has no pre-built wheel on armv7, triggering PEP 517 build isolation).
 COPY jmwalletd/requirements.txt /build/requirements-jmwalletd.txt
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir -r /build/requirements-jmwalletd.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install \
+        -r /build/requirements-jmcore.txt \
+        -r /build/requirements-jmwallet.txt \
+        -r /build/requirements-maker.txt \
+        -r /build/requirements-taker.txt \
+        -r /build/requirements-obwatcher.txt \
+        -r /build/requirements-jmwalletd.txt
 
 # Copy source packages individually to allow layer caching per component
 COPY jmcore/src /build/jmcore/src

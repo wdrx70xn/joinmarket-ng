@@ -43,39 +43,34 @@ ARG WHEEL_VERSION
 RUN echo "setuptools==${SETUPTOOLS_VERSION}" > /build/constraints.txt && \
     echo "wheel==${WHEEL_VERSION}" >> /build/constraints.txt
 
-# Install jmcore dependencies (with hash verification)
-# Note: --build-constraint is NOT used here; it is only needed for our own packages below.
-# coincurve (the only source-build in requirements) uses hatchling, not setuptools, so our
-# setuptools constraint does not apply. Using --build-constraint here would conflict with
-# third-party packages that pin their own exact setuptools version (e.g. httptools on armv7).
+# Install all requirements in a single pip invocation so that pip resolves the
+# dependency graph once instead of re-resolving across three sequential calls.
 COPY jmcore/requirements.txt /build/jmcore/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/jmcore/requirements.txt
+COPY jmwallet/requirements.txt /build/jmwallet/
+COPY orderbook_watcher/requirements.txt /build/orderbook_watcher/
 
-# Copy jmcore source and install (with notifications support)
-# --build-constraint pins setuptools so its version is stamped identically into WHEEL metadata
-# across builds. Applied only to our packages to avoid conflicting with third-party build deps.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user \
+        -r /build/jmcore/requirements.txt \
+        -r /build/jmwallet/requirements.txt \
+        -r /build/orderbook_watcher/requirements.txt
+
+# Copy and install jmcore + jmwallet source packages in a single pip invocation.
+# --build-constraint pins setuptools version in PEP 517 build isolation environments
+# for our packages, which declare requires=["setuptools>=68.0"].
+# Note: orderbook_watcher source is copied separately below (not installed as a package).
 COPY jmcore/src /build/jmcore/src
 COPY jmcore/pyproject.toml /build/jmcore/
 COPY jmcore/setup.py /build/jmcore/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt "/build/jmcore"
-
-# Install jmwallet dependencies
-COPY jmwallet/requirements.txt /build/jmwallet/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/jmwallet/requirements.txt
-
-# Copy jmwallet source and install
 COPY jmwallet/src /build/jmwallet/src
 COPY jmwallet/pyproject.toml /build/jmwallet/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user --build-constraint /build/constraints.txt "/build/jmwallet"
 
-# Install orderbook_watcher dependencies
-COPY orderbook_watcher/requirements.txt /build/orderbook_watcher/
-RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
-    pip install --no-cache-dir --user -r /build/orderbook_watcher/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH; fi && \
+    pip install --user --build-constraint /build/constraints.txt \
+        /build/jmcore \
+        /build/jmwallet
 
 # Copy source and static files, normalize permissions and timestamps for reproducibility
 # This runs as root in builder, ensuring consistent 644/755 permissions regardless of source
