@@ -92,27 +92,63 @@ Reproducible release verification and signing workflows:
 
 See [Signatures](../README-signatures.md) for repository signature layout.
 
-### Local-First Workflow (Recommended for Release Managers)
+### Pre-Release Preparation
 
-Build, sign, and then let CI verify independently. No waiting for CI.
+Update dependencies, regenerate help text, run the full test suite, then
+commit the resulting changes manually before bumping the version:
 
 ```bash
-# 1. Bump version (creates commit + tag locally)
-python scripts/bump_version.py patch --no-push
+scripts/update-base-images.sh \
+  && scripts/update-deps.sh \
+  && scripts/update-flatpak-deps.py \
+  && scripts/update_readme_help.py \
+  && prek run --all-files \
+  && scripts/run_parallel_tests.sh 2>&1 | tee tmp/run_parallel_tests.log
+```
 
-# 2. Build images locally and generate manifest
-./scripts/build-release.sh
+Review `tmp/run_parallel_tests.log`, then commit:
+
+```bash
+git add -p && git commit
+```
+
+### Local-First Workflow (Recommended for Release Managers)
+
+Build, sign locally, then push. CI verifies independently against your
+signed manifest.
+
+```bash
+# 1. Bump version — opens $EDITOR on CHANGELOG.md before committing/tagging
+LEVEL=patch scripts/bump_version.py patch --no-push
+
+# 2. Build release images locally (generates release-manifest-<version>.txt)
+scripts/build-release.sh
 
 # 3. Sign the locally-built manifest
-./scripts/sign-release.sh --manifest release-manifest-<version>.txt --key <fingerprint>
+VERSION=$(grep -oP '__version__\s*=\s*"\K[^"]+' jmcore/src/jmcore/version.py)
+scripts/sign-release.sh "$VERSION" \
+  --manifest "release-manifest-$VERSION.txt" \
+  --key 1C53A412D11EF3051704419C44912E1E03005B31
 
-# 4. Push to trigger CI
+# 4. Push commit, tag, and signature to trigger CI
 git push && git push --tags
 ```
 
 CI will build the same images independently and verify its layer digests
 match your signed local manifest. The release is confirmed reproducible
 when CI passes.
+
+`release-manifest-<version>.txt` is gitignored — it is a build artefact
+and is not committed to the repository.
+
+**LEVEL**: `bump_version.py` accepts `patch`, `minor`, or `major` as its
+positional argument. Set `LEVEL` as a shell variable if you want to
+parameterise it:
+
+```bash
+LEVEL=minor  # or patch / major
+scripts/bump_version.py "$LEVEL" --no-push
+```
 
 Note: strict layer-digest matching is currently skipped for `jam-ng` because
 the CRA/webpack frontend build is non-deterministic across environments.
@@ -140,15 +176,15 @@ local/CI digests will diverge.
 
 ### CI-First Workflow (For Additional Signers)
 
-Wait for CI to complete, then reproduce and sign.
+Wait for CI to complete, then reproduce and sign:
 
 ```bash
-# After CI release is complete:
-./scripts/sign-release.sh <version> --key <fingerprint>
+VERSION=<version>
+scripts/sign-release.sh "$VERSION" --key <fingerprint>
 ```
 
-This downloads the manifest, rebuilds locally, and signs if digests match.
-The same `jam-ng` skip rule applies for strict layer matching.
+This downloads the CI manifest, rebuilds locally, and signs if digests
+match. The same `jam-ng` skip rule applies for strict layer matching.
 
 ## Verify a Release
 

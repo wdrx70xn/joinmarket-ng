@@ -33,6 +33,7 @@ The script will:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -258,6 +259,16 @@ def generate_changelog_entries(
     run_command(cmd, dry_run=dry_run)
 
 
+def open_editor_for_changelog(dry_run: bool = False) -> None:
+    """Open the user's editor to review/amend the generated changelog entries."""
+    if dry_run:
+        print("Would open $EDITOR (or vim) to edit CHANGELOG.md")
+        return
+    editor = os.environ.get("EDITOR", "vim")
+    print(f"Opening {CHANGELOG} in {editor!r} for review...")
+    subprocess.run([editor, str(CHANGELOG)], check=True, cwd=PROJECT_ROOT)
+
+
 def git_commit_and_tag(
     new_version: str, dry_run: bool = False, push: bool = True
 ) -> None:
@@ -395,6 +406,7 @@ def main() -> None:
     update_pyproject_files(new_version, dry_run=args.dry_run)
     update_install_script(new_version, dry_run=args.dry_run)
     update_changelog(new_version, current_version, dry_run=args.dry_run)
+    open_editor_for_changelog(dry_run=args.dry_run)
     print()
 
     # Git operations
