@@ -117,6 +117,24 @@ when CI passes.
 Note: strict layer-digest matching is currently skipped for `jam-ng` because
 the CRA/webpack frontend build is non-deterministic across environments.
 
+#### How reproducibility is achieved
+
+Three inputs must match between local builds and CI builds for layer digests
+to be byte-identical:
+
+- `SOURCE_DATE_EPOCH`: derived from the release commit's timestamp.
+- `JOINMARKET_BUILD_COMMIT` / `JOINMARKET_BUILD_REF`: stamped into wheel
+  metadata via `jmcore/setup.py` (writes `_build_info.py`). When unset,
+  `setup.py` falls back to `git rev-parse`, but the docker build sandbox
+  has no `.git` directory, so passing these explicitly is required.
+- Pinned base image digests, apt package versions, and pip build constraints
+  (`setuptools`, `wheel`) — all enforced in the Dockerfiles.
+
+`build-release.sh` derives commit/ref from the local git state and passes
+them as `--build-arg` to `docker buildx build`, mirroring CI's
+`release.yaml` invocation. If you bypass `build-release.sh` you must
+replicate this manually or local/CI digests will diverge.
+
 ### CI-First Workflow (For Additional Signers)
 
 Wait for CI to complete, then reproduce and sign.
