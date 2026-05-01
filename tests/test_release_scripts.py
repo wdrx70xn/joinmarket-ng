@@ -387,3 +387,25 @@ exit 0
     # _build_info.py contents into the wheels regardless of build environment.
     assert f"JOINMARKET_BUILD_COMMIT={expected_commit}" in log, log
     assert "JOINMARKET_BUILD_REF=v9.9.9" in log, log
+
+
+def test_verify_release_reproduce_passes_commit_and_ref_build_args() -> None:
+    """verify-release.sh --reproduce must pass JOINMARKET_BUILD_COMMIT/REF to
+    docker buildx for layer digests to match CI. Asserted via static inspection
+    of the script: end-to-end mocking of --reproduce (worktree, OCI export,
+    layer comparison) is impractical, but the buildx command is built up in a
+    single bash array literal whose contents are easy to verify textually.
+    Regression guard for the reproducibility fix.
+    """
+    script = (SCRIPTS_DIR / "verify-release.sh").read_text()
+    # Locate the buildx build command construction. There is exactly one
+    # docker buildx build invocation in --reproduce mode.
+    assert "docker buildx build" in script
+    # Both build-args must be passed; values come from the verifier resolving
+    # the manifest commit and the tag pointing at it (or VERSION fallback).
+    assert "--build-arg JOINMARKET_BUILD_COMMIT=" in script
+    assert "--build-arg JOINMARKET_BUILD_REF=" in script
+    # The ref should be derived from a tag pointing at the commit, falling back
+    # to the supplied VERSION so detached release commits without tags still
+    # work in disaster-recovery scenarios.
+    assert 'git -C "$PROJECT_ROOT" tag --points-at "$COMMIT"' in script

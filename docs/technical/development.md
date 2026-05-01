@@ -132,8 +132,11 @@ to be byte-identical:
 
 `build-release.sh` derives commit/ref from the local git state and passes
 them as `--build-arg` to `docker buildx build`, mirroring CI's
-`release.yaml` invocation. If you bypass `build-release.sh` you must
-replicate this manually or local/CI digests will diverge.
+`release.yaml` invocation. `verify-release.sh --reproduce` does the same,
+deriving the commit from the manifest and the ref from the tag pointing at
+that commit (falling back to the supplied version). If you invoke
+`docker buildx build` directly you must replicate this manually or
+local/CI digests will diverge.
 
 ### CI-First Workflow (For Additional Signers)
 
