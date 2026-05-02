@@ -91,6 +91,12 @@ export PATH="${HOME_JM}/.local/bin:$PATH"
 #    or any function that opens a whiptail dialog after terminal output (echo,
 #    jm-wallet output, etc.). This prevents stale terminal buffer from flashing
 #    between whiptail dialogs.
+#
+# 2. Never use whiptail --msgbox after whiptail --passwordbox.
+#    Two passwordbox dialogs back-to-back without an external process
+#    in between cause the terminal buffer to become stale, and the
+#    msgbox will not be rendered. Instead, include the message in
+#    the next dialog's text (see prompt_new_wallet_password).
 
 # =============================================================================
 # Helpers
@@ -455,6 +461,7 @@ ensure_wallet_password() {
 # such as post_wallet_create (issue #462).
 prompt_new_wallet_password() {
     local pwd1 pwd2
+    local mismatch=""
     while true; do
         pwd1=$(whiptail --title " Wallet Password " \
             --passwordbox "Enter a password to encrypt the wallet file.\n\nLeave empty for an UNENCRYPTED wallet (not recommended)." \
@@ -468,18 +475,19 @@ prompt_new_wallet_password() {
             fi
             continue
         fi
-        pwd2=$(whiptail --title " Wallet Password " \
-            --passwordbox "Re-enter the password to confirm." \
-            9 64 3>&1 1>&2 2>&3) || return 1
-        if [ "$pwd1" = "$pwd2" ]; then
-            # Print password on stdout. Use printf to avoid echo mangling
-            # leading dashes or backslashes.
-            printf '%s' "$pwd1"
-            unset pwd1 pwd2
-            return 0
-        fi
-        whiptail --title " Password Mismatch " \
-            --msgbox "The passwords do not match. Please try again." 8 55
+        # Inner loop - only re-ask confirmation on mismatch
+        mismatch=""
+        while true; do
+            pwd2=$(whiptail --title " Wallet Password " \
+                --passwordbox "${mismatch}Re-enter the password to confirm." \
+                9 64 3>&1 1>&2 2>&3) || break  # ESC goes back to pwd1
+            if [ "$pwd1" = "$pwd2" ]; then
+                printf '%s' "$pwd1"
+                unset pwd1 pwd2
+                return 0
+            fi
+            mismatch="Passwords did not match.\n\n"
+        done
     done
 }
 
