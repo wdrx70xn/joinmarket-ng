@@ -14,6 +14,49 @@ for d in jmcore jmwallet maker taker directory_server orderbook_watcher jmwallet
 done
 ```
 
+## Lint / Format / Type Check
+
+Install and enable [prek](https://github.com/anomalyco/prek) to run checks automatically on commit:
+
+```bash
+pip install prek
+prek install
+```
+
+Run all checks manually:
+
+```bash
+prek run --all-files
+```
+
+Fallback (if prek is unavailable):
+
+```bash
+pre-commit run --all-files
+```
+
+## Commit Conventions
+
+All commits must follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+Format: `<type>(<scope>): <description>`
+
+Common types: `feat`, `fix`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`.
+
+Use the component as scope (e.g. `fix(jmwallet): ...`, `feat(taker): ...`).
+
+For `feat:` and `fix:` commits, include at least one user-oriented `Changelog:` trailer in the commit body:
+
+```
+feat(taker): add fee estimation fallback
+
+Changelog: Taker now estimates fees when the maker's quote is unavailable.
+```
+
+`Changelog:` trailers are not required (and should be omitted) for `docs:`, `test:`, `build:`, `refactor:`, `chore:`, and `ci:` commits.
+
+Changelog entries are generated automatically at release time from these trailers — do not edit `CHANGELOG.md` manually during development.
+
 ## Tests
 
 Fast unit test run:
@@ -29,20 +72,6 @@ Full orchestrated suite (unit + Docker-backed phases):
 ```
 
 When selecting Docker-marked tests manually, use `--fail-on-skip`.
-
-## Lint / Format / Type Check
-
-Preferred:
-
-```bash
-prek run --all-files
-```
-
-Fallback:
-
-```bash
-pre-commit run --all-files
-```
 
 ## Documentation
 
