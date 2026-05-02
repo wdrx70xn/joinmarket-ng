@@ -35,7 +35,6 @@ copyright: <a href="license">MIT License</a> © 2026 JoinMarket contributors
 # These pages exist in docs/ but are not included in the nav configuration.
 # This suppresses the INFO warning during build.
 not_in_nav: |
-  license.md
   extension-documentation.md
 
 # -----------------------------------------------------------------------------
