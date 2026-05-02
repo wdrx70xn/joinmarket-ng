@@ -1141,7 +1141,7 @@ CHOICE=$(whiptail --title " JoinMarket-NG Menu " \
                   "${MENU_ITEMS[@]}" 3>&1 1>&2 2>&3) || continue
 
               clear  # prevent stale terminal buffer from flashing after wallet selection
-              echo "Please wait..."              
+              echo "Please wait..."
 
               if [ -f "$DATA_DIR/wallets/$WNAME" ]; then
                   set_config_value "mnemonic_file" "$DATA_DIR/wallets/$WNAME" "true"
