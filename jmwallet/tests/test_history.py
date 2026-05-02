@@ -2281,3 +2281,111 @@ class TestWalletFingerprintIsolation:
         # to keep new wallets isolated from pre-existing shared history.
         scoped = read_history(temp_data_dir, wallet_fingerprint=self.FP_A)
         assert scoped == []
+
+
+# Header used by the v0.27.x release, before the wallet_fingerprint column
+# was appended in v0.28.0 (issue #473).
+_LEGACY_V027_HEADER = (
+    "timestamp,completed_at,role,success,failure_reason,confirmations,"
+    "confirmed_at,txid,cj_amount,peer_count,counterparty_nicks,fee_received,"
+    "txfee_contribution,total_maker_fees_paid,mining_fee_paid,net_fee,"
+    "source_mixdepth,destination_address,change_address,utxos_used,"
+    "broadcast_method,network"
+)
+
+
+class TestLegacyHeaderMigration:
+    """0.28.0 added a wallet_fingerprint column without migrating legacy CSV
+    files. New writes against an old header silently produced rows with an
+    extra trailing cell that csv.DictReader dropped on read, leaving makers
+    unable to update their pending entries to success=True. The daily
+    summary therefore reported successful=0 indefinitely."""
+
+    FP = "deadbeef"
+
+    def test_pure_legacy_file_migrates_on_append(self, temp_data_dir: Path) -> None:
+        """Pre-existing v0.27.x CSV with no new rows: appending must rewrite
+        the header so subsequent rows include the wallet_fingerprint cell."""
+        path = temp_data_dir / "coinjoin_history.csv"
+        path.write_text(
+            f"{_LEGACY_V027_HEADER}\n"
+            "2026-01-01T00:00:00,2026-01-01T00:01:00,maker,True,,1,"
+            "2026-01-01T00:01:00,oldtx,200000,,,1000,0,0,0,0,0,,,,,mainnet\n"
+        )
+
+        entry = TransactionHistoryEntry(
+            timestamp=datetime.now().isoformat(),
+            role="maker",
+            success=False,
+            failure_reason="Pending confirmation",
+            txid="newtx",
+            cj_amount=100_000,
+            wallet_fingerprint=self.FP,
+        )
+        append_history_entry(entry, temp_data_dir)
+
+        # The legacy row's missing fingerprint stays empty (correct: that
+        # row predates the column and cannot belong to any wallet).
+        # The new row's fingerprint must round-trip.
+        all_entries = read_history(temp_data_dir)
+        by_txid = {e.txid: e for e in all_entries}
+        assert by_txid["oldtx"].wallet_fingerprint == ""
+        assert by_txid["newtx"].wallet_fingerprint == self.FP
+
+        # Filtered read must surface the new entry, not silently drop it.
+        scoped = read_history(temp_data_dir, wallet_fingerprint=self.FP)
+        assert len(scoped) == 1
+        assert scoped[0].txid == "newtx"
+
+    def test_corrupted_file_recovers_trailing_fingerprint(self, temp_data_dir: Path) -> None:
+        """File already in the broken state: legacy 22-col header with rows
+        that 0.28.x writers appended a 23rd cell to. Migration must recover
+        those trailing cells into wallet_fingerprint instead of discarding
+        them."""
+        path = temp_data_dir / "coinjoin_history.csv"
+        # Use recent timestamps so the 24h stats window includes them.
+        recent = datetime.now().isoformat()
+        path.write_text(
+            f"{_LEGACY_V027_HEADER}\n"
+            f"{recent},{recent},maker,True,,1,"
+            f"{recent},confirmedtx,200000,,,1000,0,0,0,0,0,,,,,"
+            f"mainnet,{self.FP}\n"
+            f"{recent},,maker,False,Pending confirmation,0,,"
+            "pendingtx,300000,,,1500,0,0,0,0,0,,,,,"
+            f"mainnet,{self.FP}\n"
+        )
+
+        entries = read_history(temp_data_dir, wallet_fingerprint=self.FP)
+        # Both rows must be recovered under the active wallet's filter.
+        assert {e.txid for e in entries} == {"confirmedtx", "pendingtx"}
+        assert all(e.wallet_fingerprint == self.FP for e in entries)
+
+        # And confirming the pending entry must now succeed end-to-end so
+        # the periodic summary sees successful_coinjoins > 0.
+        assert update_transaction_confirmation(
+            "pendingtx", 1, temp_data_dir, wallet_fingerprint=self.FP
+        )
+        stats = get_history_stats_for_period(
+            24, role_filter="maker", data_dir=temp_data_dir, wallet_fingerprint=self.FP
+        )
+        assert stats["successful_coinjoins"] == 2
+
+    def test_migration_is_idempotent(self, temp_data_dir: Path) -> None:
+        """Calling read/append on an already-current file must not rewrite
+        it (no spurious churn) and must preserve all rows verbatim."""
+        entry = TransactionHistoryEntry(
+            timestamp="2026-02-02T00:00:00",
+            role="maker",
+            success=True,
+            txid="abc",
+            cj_amount=1,
+            wallet_fingerprint=self.FP,
+        )
+        append_history_entry(entry, temp_data_dir)
+        path = temp_data_dir / "coinjoin_history.csv"
+        before = path.read_text()
+
+        # Re-read several times: file content must be byte-identical.
+        for _ in range(3):
+            read_history(temp_data_dir)
+        assert path.read_text() == before

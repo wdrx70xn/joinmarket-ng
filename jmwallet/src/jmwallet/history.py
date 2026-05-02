@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import fields
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -109,6 +110,139 @@ def _get_fieldnames() -> list[str]:
     return [f.name for f in fields(TransactionHistoryEntry)]
 
 
+def _read_csv_header(history_path: Path) -> list[str] | None:
+    """Return the header (first row) of the CSV file, or None if absent/empty."""
+    if not history_path.exists():
+        return None
+    try:
+        with open(history_path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            try:
+                return next(reader)
+            except StopIteration:
+                return None
+    except OSError as e:
+        logger.warning(f"Could not read history header for migration check: {e}")
+        return None
+
+
+def _ensure_history_header_current(history_path: Path) -> None:
+    """Migrate a legacy ``coinjoin_history.csv`` to the current header.
+
+    When the dataclass gains a new field (for example
+    ``wallet_fingerprint`` introduced for issue #473), an existing CSV
+    written by an older version still has the old header. ``DictWriter``
+    happily appends rows whose dict has extra keys not in the on-disk
+    header, producing rows with more cells than columns. ``DictReader``
+    then drops the extra cells into a ``None``-keyed catch-all and the
+    new field silently reads back as empty — which broke per-wallet
+    pending lookups, leaving makers' confirmed CoinJoins stuck on
+    ``success=False`` and the daily summary reporting zero successful
+    rounds.
+
+    This helper detects a stale header and rewrites the file in place
+    (preserving every row, with missing columns defaulted) so callers
+    never have to know the file was upgraded. Idempotent and cheap
+    when the header already matches.
+    """
+    expected = _get_fieldnames()
+    actual = _read_csv_header(history_path)
+    if actual is None or actual == expected:
+        return
+
+    missing = [name for name in expected if name not in actual]
+    if not missing:
+        # Header has all expected columns (perhaps reordered); leave it.
+        return
+
+    logger.info(
+        f"Migrating coinjoin history CSV: adding columns {missing} "
+        f"(legacy {len(actual)}-column header detected)"
+    )
+    # Read raw rows assuming the *expected* layout so cells previously
+    # written past the legacy header (e.g. wallet_fingerprint appended
+    # by a 0.28.x writer against a 0.27.x header) are recovered.
+    raw_rows: list[dict[str, str]] = []
+    try:
+        with open(history_path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            try:
+                next(reader)  # skip stale header
+            except StopIteration:
+                return
+            for cells in reader:
+                if not cells:
+                    continue
+                # Map cells positionally to the legacy header where they
+                # exist; any trailing cells correspond to columns appended
+                # by a newer writer (in dataclass declaration order).
+                row: dict[str, str] = {}
+                for idx, cell in enumerate(cells):
+                    if idx < len(actual):
+                        row[actual[idx]] = cell
+                    else:
+                        # Trailing cells: assign to the next missing column
+                        offset = idx - len(actual)
+                        if offset < len(missing):
+                            row[missing[offset]] = cell
+                raw_rows.append(row)
+    except OSError as e:
+        raise HistoryWriteError(f"Failed to read {history_path} for migration: {e}") from e
+
+    entries: list[TransactionHistoryEntry] = [
+        e for e in (_row_to_entry(r) for r in raw_rows) if e is not None
+    ]
+    if not _write_history_entries_atomic(entries, history_path):
+        raise HistoryWriteError(f"Failed to migrate {history_path} to the current header layout")
+
+
+def _row_to_entry(row: Mapping[str, str | None]) -> TransactionHistoryEntry | None:
+    """Convert a CSV row dict to a TransactionHistoryEntry.
+
+    Returns None when the row cannot be parsed (malformed). Tolerant of
+    missing columns so legacy rows from earlier schema versions still
+    parse with sensible defaults.
+    """
+
+    def _get(key: str, default: str = "") -> str:
+        value = row.get(key, default)
+        return value if value is not None else default
+
+    try:
+        return TransactionHistoryEntry(
+            timestamp=_get("timestamp"),
+            completed_at=_get("completed_at"),
+            role=_get("role", "taker"),  # type: ignore[arg-type]
+            success=_get("success", "True").lower() == "true",
+            failure_reason=_get("failure_reason"),
+            confirmations=int(_get("confirmations", "0") or 0),
+            confirmed_at=_get("confirmed_at"),
+            txid=_get("txid"),
+            cj_amount=int(_get("cj_amount", "0") or 0),
+            peer_count=(
+                int(_get("peer_count"))
+                if _get("peer_count") and _get("peer_count") not in ("", "None")
+                else None
+            ),
+            counterparty_nicks=_get("counterparty_nicks"),
+            fee_received=int(_get("fee_received", "0") or 0),
+            txfee_contribution=int(_get("txfee_contribution", "0") or 0),
+            total_maker_fees_paid=int(_get("total_maker_fees_paid", "0") or 0),
+            mining_fee_paid=int(_get("mining_fee_paid", "0") or 0),
+            net_fee=int(_get("net_fee", "0") or 0),
+            source_mixdepth=int(_get("source_mixdepth", "0") or 0),
+            destination_address=_get("destination_address"),
+            change_address=_get("change_address"),
+            utxos_used=_get("utxos_used"),
+            broadcast_method=_get("broadcast_method"),
+            network=_get("network", "mainnet"),
+            wallet_fingerprint=_get("wallet_fingerprint"),
+        )
+    except (ValueError, KeyError) as e:
+        logger.warning(f"Skipping malformed history row: {e}")
+        return None
+
+
 def append_history_entry(
     entry: TransactionHistoryEntry,
     data_dir: Path | None = None,
@@ -125,6 +259,10 @@ def append_history_entry(
     """
     history_path = _get_history_path(data_dir)
     fieldnames = _get_fieldnames()
+
+    # Migrate legacy headers so new columns are not appended past the
+    # on-disk header (which would otherwise silently lose data on read).
+    _ensure_history_header_current(history_path)
 
     # Check if file exists to determine if we need to write header
     write_header = not history_path.exists()
@@ -210,59 +348,38 @@ def read_history(
     if not history_path.exists():
         return []
 
+    # Recover fingerprint cells appended past a stale legacy header so
+    # per-wallet filters and updates work for pre-existing files even
+    # when no new write has occurred yet.
+    try:
+        _ensure_history_header_current(history_path)
+    except HistoryWriteError as e:
+        # Migration is best-effort on read; keep going so the user can
+        # still inspect history even if the file is read-only.
+        logger.warning(f"History header migration failed during read: {e}")
+
     entries: list[TransactionHistoryEntry] = []
 
     try:
         with open(history_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Convert string values back to appropriate types
-                try:
-                    entry = TransactionHistoryEntry(
-                        timestamp=row.get("timestamp", ""),
-                        completed_at=row.get("completed_at", ""),
-                        role=row.get("role", "taker"),  # type: ignore
-                        success=row.get("success", "True").lower() == "true",
-                        failure_reason=row.get("failure_reason", ""),
-                        confirmations=int(row.get("confirmations", 0) or 0),
-                        confirmed_at=row.get("confirmed_at", ""),
-                        txid=row.get("txid", ""),
-                        cj_amount=int(row.get("cj_amount", 0) or 0),
-                        peer_count=(
-                            int(row["peer_count"])
-                            if row.get("peer_count") and row["peer_count"] not in ("", "None")
-                            else None
-                        ),
-                        counterparty_nicks=row.get("counterparty_nicks", ""),
-                        fee_received=int(row.get("fee_received", 0) or 0),
-                        txfee_contribution=int(row.get("txfee_contribution", 0) or 0),
-                        total_maker_fees_paid=int(row.get("total_maker_fees_paid", 0) or 0),
-                        mining_fee_paid=int(row.get("mining_fee_paid", 0) or 0),
-                        net_fee=int(row.get("net_fee", 0) or 0),
-                        source_mixdepth=int(row.get("source_mixdepth", 0) or 0),
-                        destination_address=row.get("destination_address", ""),
-                        change_address=row.get("change_address", ""),
-                        utxos_used=row.get("utxos_used", ""),
-                        broadcast_method=row.get("broadcast_method", ""),
-                        network=row.get("network", "mainnet"),
-                        wallet_fingerprint=row.get("wallet_fingerprint", ""),
-                    )
+                entry = _row_to_entry(row)
+                if entry is None:
+                    continue
 
-                    # Apply role filter
-                    if role_filter and entry.role != role_filter:
+                # Apply role filter
+                if role_filter and entry.role != role_filter:
+                    continue
+
+                # Apply wallet filter (issue #473): legacy rows without a
+                # recorded fingerprint do not match any specific wallet
+                # and are therefore hidden from the per-wallet view.
+                if wallet_fingerprint is not None:
+                    if entry.wallet_fingerprint != wallet_fingerprint:
                         continue
 
-                    # Apply wallet filter (issue #473): legacy rows without a
-                    # recorded fingerprint do not match any specific wallet
-                    # and are therefore hidden from the per-wallet view.
-                    if wallet_fingerprint is not None:
-                        if entry.wallet_fingerprint != wallet_fingerprint:
-                            continue
-
-                    entries.append(entry)
-                except (ValueError, KeyError) as e:
-                    logger.warning(f"Skipping malformed history row: {e}")
-                    continue
+                entries.append(entry)
 
     except Exception as e:
         logger.error(f"Failed to read history: {e}")
