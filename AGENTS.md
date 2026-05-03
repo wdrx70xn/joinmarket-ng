@@ -55,6 +55,7 @@ Tests use pytest markers to organize by Docker profile:
 - Don't use real mainnet transactions or addresses in tests or examples for privacy reasons.
 - Use external reputable libraries when appropriate, avoid reinventing the wheel.
 - If you add or change settings, update config.toml.template
+- When adding a new field to `MakerSettings` / `TakerSettings` / etc., also wire it through the corresponding `build_*_config` in the component's `cli.py` into the runtime `MakerConfig` / `TakerConfig` (and any nested `OfferConfig`s), and add a settings -> config round-trip test. Defining a setting without wiring it makes the documented config key silently ignored.
 - Do not manually edit CHANGELOG.md during normal development.
 
 ## Commit and Changelog Policy
