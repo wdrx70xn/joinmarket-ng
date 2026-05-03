@@ -475,6 +475,92 @@ class TestBuildMakerConfig:
         )
         assert config.allow_mixdepth_zero_merge is True
 
+    def test_randomization_factors_passed_from_settings(self) -> None:
+        """Randomization factors set in config.toml must propagate to MakerConfig.
+
+        Regression: cjfee_factor / txfee_contribution_factor / size_factor were
+        defined on MakerSettings (and documented in config.toml.template) but
+        never passed to MakerConfig in build_maker_config, so users setting
+        them to 0 (to disable randomization) still saw randomized offers
+        because MakerConfig's defaults (0.1 / 0.3 / 0.1) won.
+        """
+        from jmcore.settings import JoinMarketSettings
+
+        from maker.cli import build_maker_config
+
+        settings = JoinMarketSettings()
+        settings.maker.cjfee_factor = 0.0
+        settings.maker.txfee_contribution_factor = 0.0
+        settings.maker.size_factor = 0.0
+
+        config = build_maker_config(
+            settings=settings,
+            mnemonic=TEST_MNEMONIC,
+            passphrase="",
+        )
+
+        assert config.cjfee_factor == 0.0
+        assert config.txfee_contribution_factor == 0.0
+        assert config.size_factor == 0.0
+
+    def test_randomization_factors_propagate_to_dual_offer_configs(self) -> None:
+        """In --dual-offers mode, factors must reach each OfferConfig as well."""
+        from jmcore.settings import JoinMarketSettings
+
+        from maker.cli import build_maker_config
+
+        settings = JoinMarketSettings()
+        settings.maker.cjfee_factor = 0.05
+        settings.maker.txfee_contribution_factor = 0.2
+        settings.maker.size_factor = 0.07
+
+        config = build_maker_config(
+            settings=settings,
+            mnemonic=TEST_MNEMONIC,
+            passphrase="",
+            dual_offers=True,
+        )
+
+        assert len(config.offer_configs) == 2
+        for offer in config.offer_configs:
+            assert offer.cjfee_factor == 0.05
+            assert offer.txfee_contribution_factor == 0.2
+            assert offer.size_factor == 0.07
+        # Top-level MakerConfig fields must also reflect the settings
+        assert config.cjfee_factor == 0.05
+        assert config.txfee_contribution_factor == 0.2
+        assert config.size_factor == 0.07
+
+    def test_offer_reannounce_delay_max_passed_from_settings(self) -> None:
+        """offer_reannounce_delay_max in config.toml must propagate to MakerConfig.
+
+        Regression: the key was documented in config.toml.template and present
+        on MakerConfig but missing from MakerSettings, so the documented user
+        config was silently ignored.
+        """
+        from jmcore.settings import JoinMarketSettings
+
+        from maker.cli import build_maker_config
+
+        # Default
+        settings = JoinMarketSettings()
+        assert settings.maker.offer_reannounce_delay_max == 600
+        config = build_maker_config(
+            settings=settings,
+            mnemonic=TEST_MNEMONIC,
+            passphrase="",
+        )
+        assert config.offer_reannounce_delay_max == 600
+
+        # Custom value (e.g. disable jitter)
+        settings.maker.offer_reannounce_delay_max = 0
+        config = build_maker_config(
+            settings=settings,
+            mnemonic=TEST_MNEMONIC,
+            passphrase="",
+        )
+        assert config.offer_reannounce_delay_max == 0
+
     def test_neutrino_tls_and_auth_in_backend_config(self) -> None:
         """Test that neutrino TLS cert and auth token flow into maker backend_config."""
         from jmcore.settings import JoinMarketSettings
