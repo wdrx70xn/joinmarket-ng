@@ -333,9 +333,18 @@ prompt_and_store_password() {
         return 1
     fi
 
+    # NOTE: Previous version used whiptail --msgbox after whiptail --passwordbox
+    # for the mismatch message. This appeared to work because verify_wallet_password()
+    # calls jm-wallet (an external process) which refreshes the terminal buffer
+    # as a side effect. However, the msgbox-after-passwordbox pattern is unreliable
+    # in general — it breaks when two passwordbox dialogs are called back-to-back
+    # without an external process in between (see issue #481).
+    # Using inline mismatch text in the passwordbox prompt is robust regardless
+    # of external processes.
+    local mismatch=""
     while [ $attempts -lt $max_attempts ]; do
         pwd_store=$(whiptail --title " Wallet Password " \
-            --passwordbox "Enter the wallet encryption password for:\n$(basename "$wallet_path")" \
+            --passwordbox "${mismatch}Enter the wallet encryption password for:\n$(basename "$wallet_path")" \
             10 60 3>&1 1>&2 2>&3)
         local rc=$?
         if [ $rc -ne 0 ]; then
@@ -353,9 +362,7 @@ prompt_and_store_password() {
         attempts=$((attempts + 1))
         local remaining=$((max_attempts - attempts))
         if [ $remaining -gt 0 ]; then
-            whiptail --title " Password Mismatch " \
-                --msgbox "The password does not decrypt the wallet.\n\n${remaining} attempt(s) remaining." \
-                10 60
+            mismatch="Wrong password. ${remaining} attempt(s) remaining.\n\n"
         else
             whiptail --title " Password Mismatch " \
                 --msgbox "The password does not decrypt the wallet.\n\nToo many attempts. Password was NOT saved." \
@@ -420,9 +427,18 @@ ensure_wallet_password() {
         return 0
     fi
 
+    # NOTE: Previous version used whiptail --msgbox after whiptail --passwordbox
+    # for the mismatch message. This appeared to work because verify_wallet_password()
+    # calls jm-wallet (an external process) which refreshes the terminal buffer
+    # as a side effect. However, the msgbox-after-passwordbox pattern is unreliable
+    # in general — it breaks when two passwordbox dialogs are called back-to-back
+    # without an external process in between (see issue #481).
+    # Using inline mismatch text in the passwordbox prompt is robust regardless
+    # of external processes.
+    local mismatch=""
     while [ $attempts -lt $max_attempts ]; do
         pwd_entry=$(whiptail --title " Wallet Password " \
-            --passwordbox "Enter the wallet encryption password for:\n$(basename "$wallet_path")" \
+            --passwordbox "${mismatch}Enter the wallet encryption password for:\n$(basename "$wallet_path")" \
             10 60 3>&1 1>&2 2>&3)
         local rc=$?
         if [ $rc -ne 0 ]; then
@@ -437,9 +453,7 @@ ensure_wallet_password() {
         attempts=$((attempts + 1))
         local remaining=$((max_attempts - attempts))
         if [ $remaining -gt 0 ]; then
-            whiptail --title " Password Mismatch " \
-                --msgbox "Wrong password.\n\n${remaining} attempt(s) remaining." \
-                9 50
+            mismatch="Wrong password. ${remaining} attempt(s) remaining.\n\n"
         else
             whiptail --title " Password Mismatch " \
                 --msgbox "Too many attempts. Returning to menu." \
