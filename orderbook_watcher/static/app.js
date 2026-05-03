@@ -224,7 +224,18 @@ function updateFeatureBreakdown() {
     breakdown.innerHTML = '';
 
     const featureStats = orderbookData.feature_stats || {};
-    const uniqueMakers = new Set(orderbookData.offers.map(o => o.counterparty)).size;
+    // Feature share is computed over bonded makers only (issue #483):
+    // sybil-cheap bondless makers would otherwise let a single operator
+    // skew the percentages arbitrarily. Backend supplies the matching
+    // denominator; fall back to counting bonded offers locally for
+    // backwards compatibility with older payloads.
+    const uniqueMakers = (typeof orderbookData.feature_stats_denominator === 'number')
+        ? orderbookData.feature_stats_denominator
+        : new Set(
+            orderbookData.offers
+                .filter(o => (o.fidelity_bond_value || 0) > 0)
+                .map(o => o.counterparty)
+        ).size;
 
     // Sort features: legacy first, then by count descending
     const sortedFeatures = Object.entries(featureStats).sort((a, b) => {
@@ -274,6 +285,11 @@ function updateFeatureBreakdown() {
         noFeatures.className = 'feature-item';
         noFeatures.innerHTML = '<span class="feature-no-data">No feature data available yet</span>';
         breakdown.appendChild(noFeatures);
+    } else if (uniqueMakers === 0) {
+        const noBonded = document.createElement('div');
+        noBonded.className = 'feature-item';
+        noBonded.innerHTML = '<span class="feature-no-data">No bonded makers in the orderbook yet</span>';
+        breakdown.appendChild(noBonded);
     }
 }
 

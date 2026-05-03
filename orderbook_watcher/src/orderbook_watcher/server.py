@@ -126,20 +126,33 @@ class OrderbookServer:
             # Offers are already deduplicated by the aggregator with directory_nodes populated
             # This branch should not be reached, but handle it gracefully just in case
 
-        # Calculate feature statistics
+        # Calculate feature statistics over bonded makers only.
+        #
+        # Bondless makers are sybil-cheap: a single operator can announce an
+        # unbounded number of them and skew "% of makers supporting feature X"
+        # arbitrarily. Restricting both numerator and denominator to makers
+        # with a fidelity bond (``fidelity_bond_value > 0``) yields a
+        # sybil-resistant share that reflects committed capital, not raw
+        # nick count. See issue #483.
         feature_stats: dict[str, int] = {}
-        unique_makers = set()
+        unique_makers: set[str] = set()
+        bonded_makers: set[str] = set()
         for offer_data in grouped_offers.values():
             counterparty = offer_data["counterparty"]
-            if counterparty not in unique_makers:
-                unique_makers.add(counterparty)
-                features = offer_data.get("features", {})
-                for feature, value in features.items():
-                    if value:
-                        feature_stats[feature] = feature_stats.get(feature, 0) + 1
-                # Track makers without any features (legacy/reference implementation)
-                if not features:
-                    feature_stats["legacy"] = feature_stats.get("legacy", 0) + 1
+            if counterparty in unique_makers:
+                continue
+            unique_makers.add(counterparty)
+            if offer_data.get("fidelity_bond_value", 0) <= 0:
+                continue
+            bonded_makers.add(counterparty)
+            features = offer_data.get("features", {})
+            for feature, value in features.items():
+                if value:
+                    feature_stats[feature] = feature_stats.get(feature, 0) + 1
+            # Track bonded makers without any features (legacy/reference
+            # implementation makers that don't announce a feature map).
+            if not features:
+                feature_stats["legacy"] = feature_stats.get("legacy", 0) + 1
 
         return {
             "timestamp": orderbook.timestamp.isoformat(),
@@ -162,6 +175,7 @@ class OrderbookServer:
             "directory_nodes": orderbook.directory_nodes,
             "directory_stats": directory_stats,
             "feature_stats": feature_stats,
+            "feature_stats_denominator": len(bonded_makers),
             "mempool_url": self.settings.mempool_web_url
             or (
                 self.settings.mempool_api_url.replace("/api", "")
