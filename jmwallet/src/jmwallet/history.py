@@ -27,6 +27,15 @@ if TYPE_CHECKING:
     from jmwallet.backends.base import BlockchainBackend
 
 
+# Once a pending transaction reaches this many confirmations we stop polling
+# it from the background monitors. The first confirmation already flips
+# ``success`` to True (see ``update_transaction_confirmation*``), but this
+# upper bound is a safety net for ghost/duplicate rows that – for whatever
+# reason – were never finalized: there is no privacy or accounting value in
+# polling the same already-deeply-confirmed txid forever.
+PENDING_CONFIRMATION_TRACKING_MAX = 6
+
+
 class HistoryWriteError(Exception):
     """Raised when a history entry cannot be persisted to disk."""
 
@@ -605,6 +614,18 @@ def get_pending_transactions(
     - Not yet confirmed (success=False, confirmations=0)
     - Not yet completed (completed_at is empty) - excludes failed transactions
     - Either have a txid waiting for confirmation, or no txid yet (needs discovery)
+    - Without a sibling row (same txid + wallet_fingerprint) that is already
+      marked successful. Such ghost duplicates would otherwise cause the
+      background monitors to poll the same already-confirmed txid forever
+      (the duplicated successful row keeps absorbing the update via
+      ``update_transaction_confirmation*``, leaving this stale pending row
+      untouched).
+    - With ``confirmations < PENDING_CONFIRMATION_TRACKING_MAX``. This is a
+      safety net: under normal flow ``confirmations`` flips above 0 only via
+      ``update_transaction_confirmation*`` which simultaneously sets
+      ``success=True`` (so the row is no longer pending). If a row somehow
+      ends up with confirmations >= the cap while still pending, we simply
+      stop polling it.
 
     Args:
         data_dir: Optional data directory.
@@ -617,7 +638,60 @@ def get_pending_transactions(
         List of pending entries (includes entries without txid)
     """
     entries = read_history(data_dir, wallet_fingerprint=wallet_fingerprint)
-    return [e for e in entries if not e.success and e.confirmations == 0 and not e.completed_at]
+
+    # Index already-successful txids per wallet so we can drop any pending
+    # row that is shadowed by a successful sibling. Keying on
+    # ``(wallet_fingerprint, txid)`` keeps the check correct when several
+    # wallets share the same data directory.
+    successful_txids: set[tuple[str, str]] = {
+        (e.wallet_fingerprint, e.txid) for e in entries if e.success and e.txid
+    }
+
+    return [
+        e
+        for e in entries
+        if not e.success
+        and e.confirmations < PENDING_CONFIRMATION_TRACKING_MAX
+        and not e.completed_at
+        and (not e.txid or (e.wallet_fingerprint, e.txid) not in successful_txids)
+    ]
+
+
+def _select_entry_for_confirmation_update(
+    entries: list[TransactionHistoryEntry],
+    txid: str,
+    wallet_fingerprint: str | None,
+) -> TransactionHistoryEntry | None:
+    """Pick the right history row to update for a given confirmed txid.
+
+    Multiple rows can share the same ``txid`` (for example a maker history
+    file that – through past bugs or schema migrations – ended up with both
+    a stale pending row and a finalized row for the same CoinJoin). When we
+    learn about a new confirmation, we want to land on the still-pending
+    row so that ``success`` actually flips to True; otherwise the pending
+    row is never finalized and the background monitors poll the same txid
+    forever.
+
+    Selection rules:
+    1. Honor the optional ``wallet_fingerprint`` filter.
+    2. Prefer the first matching row that is not yet successful.
+    3. Otherwise fall back to the first matching row (preserves the
+       previous "just bump confirmations" behavior for already-finalized
+       rows).
+    """
+
+    matches = [
+        e
+        for e in entries
+        if e.txid == txid
+        and (wallet_fingerprint is None or e.wallet_fingerprint == wallet_fingerprint)
+    ]
+    if not matches:
+        return None
+    for entry in matches:
+        if not entry.success:
+            return entry
+    return matches[0]
 
 
 def update_transaction_confirmation(
@@ -651,30 +725,21 @@ def update_transaction_confirmation(
         return False
 
     entries = read_history(data_dir)
-    updated = False
-
-    for entry in entries:
-        if entry.txid == txid:
-            if wallet_fingerprint is not None and entry.wallet_fingerprint != wallet_fingerprint:
-                continue
-            entry.confirmations = confirmations
-            if confirmations > 0 and not entry.success:
-                # Mark as successful on first confirmation
-                entry.success = True
-                entry.failure_reason = ""
-                entry.confirmed_at = datetime.now().isoformat()
-                entry.completed_at = entry.confirmed_at
-                logger.info(
-                    f"Transaction {txid[:16]}... confirmed with {confirmations} confirmations"
-                )
-            elif confirmations > 0:
-                # Already marked as successful, just update confirmation count
-                logger.debug(f"Updated confirmations for {txid[:16]}...: {confirmations}")
-            updated = True
-            break
-
-    if not updated:
+    target = _select_entry_for_confirmation_update(entries, txid, wallet_fingerprint)
+    if target is None:
         return False
+
+    target.confirmations = confirmations
+    if confirmations > 0 and not target.success:
+        # Mark as successful on first confirmation
+        target.success = True
+        target.failure_reason = ""
+        target.confirmed_at = datetime.now().isoformat()
+        target.completed_at = target.confirmed_at
+        logger.info(f"Transaction {txid[:16]}... confirmed with {confirmations} confirmations")
+    elif confirmations > 0:
+        # Already marked as successful, just update confirmation count
+        logger.debug(f"Updated confirmations for {txid[:16]}...: {confirmations}")
 
     return _write_history_entries_atomic(entries, history_path)
 
@@ -709,47 +774,34 @@ async def update_transaction_confirmation_with_detection(
         return False
 
     entries = read_history(data_dir)
-    updated = False
-
-    for entry in entries:
-        if entry.txid == txid:
-            if wallet_fingerprint is not None and entry.wallet_fingerprint != wallet_fingerprint:
-                continue
-            entry.confirmations = confirmations
-            if confirmations > 0 and not entry.success:
-                # Mark as successful on first confirmation
-                entry.success = True
-                entry.failure_reason = ""
-                entry.confirmed_at = datetime.now().isoformat()
-                entry.completed_at = entry.confirmed_at
-                logger.info(
-                    f"Transaction {txid[:16]}... confirmed with {confirmations} confirmations"
-                )
-
-                # Detect peer count for makers
-                if (
-                    entry.role == "maker"
-                    and entry.peer_count is None
-                    and backend is not None
-                    and entry.cj_amount > 0
-                ):
-                    detected_count = await detect_coinjoin_peer_count(
-                        backend, txid, entry.cj_amount
-                    )
-                    if detected_count is not None:
-                        entry.peer_count = detected_count
-                        logger.info(
-                            f"Detected {detected_count} participants in CoinJoin {txid[:16]}..."
-                        )
-
-            elif confirmations > 0:
-                # Already marked as successful, just update confirmation count
-                logger.debug(f"Updated confirmations for {txid[:16]}...: {confirmations}")
-            updated = True
-            break
-
-    if not updated:
+    target = _select_entry_for_confirmation_update(entries, txid, wallet_fingerprint)
+    if target is None:
         return False
+
+    target.confirmations = confirmations
+    if confirmations > 0 and not target.success:
+        # Mark as successful on first confirmation
+        target.success = True
+        target.failure_reason = ""
+        target.confirmed_at = datetime.now().isoformat()
+        target.completed_at = target.confirmed_at
+        logger.info(f"Transaction {txid[:16]}... confirmed with {confirmations} confirmations")
+
+        # Detect peer count for makers
+        if (
+            target.role == "maker"
+            and target.peer_count is None
+            and backend is not None
+            and target.cj_amount > 0
+        ):
+            detected_count = await detect_coinjoin_peer_count(backend, txid, target.cj_amount)
+            if detected_count is not None:
+                target.peer_count = detected_count
+                logger.info(f"Detected {detected_count} participants in CoinJoin {txid[:16]}...")
+
+    elif confirmations > 0:
+        # Already marked as successful, just update confirmation count
+        logger.debug(f"Updated confirmations for {txid[:16]}...: {confirmations}")
 
     return _write_history_entries_atomic(entries, history_path)
 

@@ -722,6 +722,90 @@ class TestPendingTransactions:
         assert pending[0].txid == "pending_tx"
         assert pending[0].success is False
 
+    def test_get_pending_transactions_skips_shadowed_duplicate(self, temp_data_dir: Path) -> None:
+        """A pending row shadowed by a successful sibling must not be polled.
+
+        Regression test: previously a duplicated history file with both a
+        stale ``success=False, confirmations=0`` row and a finalized
+        ``success=True`` row for the same txid would keep returning the
+        pending row from ``get_pending_transactions`` indefinitely – the
+        update path matched the successful row first and never finalized
+        the pending one. Now the pending row is filtered out.
+        """
+        wallet_fp = "deadbeef"
+        pending = _make_pending_maker_entry(txid="ghost_tx")
+        pending.wallet_fingerprint = wallet_fp
+        append_history_entry(pending, temp_data_dir)
+
+        confirmed = TransactionHistoryEntry(
+            timestamp="2024-01-02T00:00:00",
+            role="maker",
+            txid="ghost_tx",
+            cj_amount=1_000_000,
+            success=True,
+            confirmations=174,
+            confirmed_at="2024-01-02T01:00:00",
+            completed_at="2024-01-02T01:00:00",
+            wallet_fingerprint=wallet_fp,
+        )
+        append_history_entry(confirmed, temp_data_dir)
+
+        result = get_pending_transactions(temp_data_dir, wallet_fingerprint=wallet_fp)
+        assert result == []
+
+    def test_get_pending_transactions_caps_at_tracking_max(self, temp_data_dir: Path) -> None:
+        """Entries with confirmations >= the cap are no longer polled."""
+        from jmwallet.history import PENDING_CONFIRMATION_TRACKING_MAX
+
+        # Force-construct a row that is still flagged "pending" (success=False,
+        # completed_at=="") but has somehow accumulated many confirmations –
+        # that is exactly the stuck state we want to stop polling.
+        stuck = TransactionHistoryEntry(
+            timestamp="2024-01-01T00:00:00",
+            role="maker",
+            txid="stuck_tx",
+            cj_amount=1_000_000,
+            success=False,
+            confirmations=PENDING_CONFIRMATION_TRACKING_MAX,
+            wallet_fingerprint="cafef00d",
+        )
+        append_history_entry(stuck, temp_data_dir)
+
+        result = get_pending_transactions(temp_data_dir, wallet_fingerprint="cafef00d")
+        assert result == []
+
+    def test_update_transaction_confirmation_prefers_pending_duplicate(
+        self, temp_data_dir: Path
+    ) -> None:
+        """When duplicates exist, the pending row is the one that gets finalized."""
+        wallet_fp = "deadbeef"
+        # Simulate the buggy state: confirmed sibling was written first.
+        confirmed = TransactionHistoryEntry(
+            timestamp="2024-01-02T00:00:00",
+            role="maker",
+            txid="dup_tx",
+            cj_amount=1_000_000,
+            success=True,
+            confirmations=10,
+            confirmed_at="2024-01-02T01:00:00",
+            completed_at="2024-01-02T01:00:00",
+            wallet_fingerprint=wallet_fp,
+        )
+        append_history_entry(confirmed, temp_data_dir)
+        pending = _make_pending_maker_entry(txid="dup_tx")
+        pending.wallet_fingerprint = wallet_fp
+        append_history_entry(pending, temp_data_dir)
+
+        result = update_transaction_confirmation(
+            "dup_tx", 11, temp_data_dir, wallet_fingerprint=wallet_fp
+        )
+        assert result is True
+
+        rows = [e for e in read_history(temp_data_dir) if e.txid == "dup_tx"]
+        # The previously-pending row must now be finalized.
+        finalized_rows = [e for e in rows if e.success and e.completed_at]
+        assert len(finalized_rows) == 2
+
     def test_update_transaction_confirmation(self, temp_data_dir: Path) -> None:
         """Test updating transaction confirmation status."""
         # Create and save a pending entry
