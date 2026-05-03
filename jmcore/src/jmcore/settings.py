@@ -629,6 +629,16 @@ class MakerSettings(BaseModel):
         ge=1,
         description="Maximum burst messages per peer",
     )
+    offer_reannounce_delay_max: int = Field(
+        default=600,
+        ge=0,
+        description=(
+            "Maximum random delay in seconds before re-announcing offers "
+            "after a balance change (0 = immediate, default: 600s = 10 minutes). "
+            "Prevents observers from correlating block confirmations with "
+            "offer updates."
+        ),
+    )
 
     @field_validator("cj_fee_relative", mode="before")
     @classmethod
