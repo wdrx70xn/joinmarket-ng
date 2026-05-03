@@ -46,30 +46,6 @@ def _format_relative_cjfee(value: float) -> str:
     return formatted if formatted else "0"
 
 
-def _round_maxsize_to_power_of_2(value: int) -> int:
-    """Round a satoshi amount down to the nearest power of 2.
-
-    This prevents observers from tracking a maker through offer
-    re-announcements by hiding exact balance changes.  Only balance
-    shifts that cross a power-of-2 boundary produce a visible offer
-    update, and even then only the bucket is revealed.
-
-    Examples:
-        150_000_000 (1.5 BTC) → 134_217_728 (≈1.34 BTC, 2^27)
-         70_000_000 (0.7 BTC) →  67_108_864 (≈0.67 BTC, 2^26)
-         10_000_000 (0.1 BTC) →   8_388_608 (≈0.08 BTC, 2^23)
-
-    Args:
-        value: Amount in satoshis (must be > 0)
-
-    Returns:
-        Largest power of 2 that is ≤ value, or 0 if value ≤ 0
-    """
-    if value <= 0:
-        return 0
-    return 1 << (value.bit_length() - 1)
-
-
 class OfferManager:
     """
     Creates and manages offers for the maker bot.
@@ -239,22 +215,19 @@ class OfferManager:
                 _randomize(base_min_size, offer_cfg.size_factor, low=DUST_THRESHOLD)
             )
 
-            # Round max-side to a power of 2 to hide exact balance, then
-            # randomize *downwards* (upstream randomizes downward to stay
-            # within available balance).
-            rounded_max = _round_maxsize_to_power_of_2(max_available)
-            if offer_cfg.size_factor > 0 and rounded_max > 0:
+            # Randomize max_size downward from available balance.
+            if offer_cfg.size_factor > 0 and max_available > 0:
                 randomized_max_size = int(
-                    random.uniform(rounded_max * (1.0 - offer_cfg.size_factor), rounded_max)
+                    random.uniform(max_available * (1.0 - offer_cfg.size_factor), max_available)
                 )
             else:
-                randomized_max_size = rounded_max
+                randomized_max_size = max_available
 
             if randomized_max_size <= randomized_min_size:
                 logger.warning(
                     f"Offer {offer_id}: Randomized maxsize too small: "
                     f"max_size={randomized_max_size} <= min_size={randomized_min_size} "
-                    f"(rounded_max={rounded_max}, exact max_available={max_available})"
+                    f"(max_available={max_available})"
                 )
                 return None
 
@@ -272,7 +245,7 @@ class OfferManager:
             logger.info(
                 f"Created offer {offer_id}: type={offer.ordertype.value}, "
                 f"size={randomized_min_size}-{randomized_max_size} "
-                f"(rounded_max={rounded_max}, exact={max_available}), "
+                f"(max_available={max_available}), "
                 f"cjfee={cjfee}, txfee={randomized_txfee}, "
                 f"bond_value={fidelity_bond_value}"
             )

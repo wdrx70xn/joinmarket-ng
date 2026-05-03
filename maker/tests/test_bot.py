@@ -747,44 +747,10 @@ class TestWalletRescanAndOfferUpdate:
 
 
 class TestOfferPrivacy:
-    """Tests for offer privacy improvements (issue #123).
+    """Tests for offer privacy features.
 
-    Verifies that maxsize is rounded to power-of-2 buckets and that
-    reannouncement delays are applied to prevent maker tracking.
+    Verifies that reannouncement delays are applied to prevent maker tracking.
     """
-
-    def test_round_maxsize_to_power_of_2_exact_powers(self):
-        """Test rounding for exact powers of 2 (value is unchanged)."""
-        from maker.offers import _round_maxsize_to_power_of_2
-
-        assert _round_maxsize_to_power_of_2(1) == 1
-        assert _round_maxsize_to_power_of_2(2) == 2
-        assert _round_maxsize_to_power_of_2(1024) == 1024
-        assert _round_maxsize_to_power_of_2(1_048_576) == 1_048_576  # 2^20
-        assert _round_maxsize_to_power_of_2(67_108_864) == 67_108_864  # 2^26
-
-    def test_round_maxsize_to_power_of_2_between_powers(self):
-        """Test rounding for values between powers of 2 (value is floored)."""
-        from maker.offers import _round_maxsize_to_power_of_2
-
-        # 100M sats (1 BTC) → 2^26 = 67_108_864
-        assert _round_maxsize_to_power_of_2(100_000_000) == 67_108_864
-        # 150M sats (1.5 BTC) → 2^27 = 134_217_728
-        assert _round_maxsize_to_power_of_2(150_000_000) == 134_217_728
-        # 70M sats (0.7 BTC) → 2^26 = 67_108_864
-        assert _round_maxsize_to_power_of_2(70_000_000) == 67_108_864
-        # 10M sats (0.1 BTC) → 2^23 = 8_388_608
-        assert _round_maxsize_to_power_of_2(10_000_000) == 8_388_608
-        # 500_000 sats → 2^18 = 262_144
-        assert _round_maxsize_to_power_of_2(500_000) == 262_144
-
-    def test_round_maxsize_to_power_of_2_edge_cases(self):
-        """Test rounding edge cases: zero and negative values."""
-        from maker.offers import _round_maxsize_to_power_of_2
-
-        assert _round_maxsize_to_power_of_2(0) == 0
-        assert _round_maxsize_to_power_of_2(-1) == 0
-        assert _round_maxsize_to_power_of_2(-100) == 0
 
     @pytest.fixture
     def mock_wallet(self):
@@ -827,10 +793,10 @@ class TestOfferPrivacy:
         )
 
     @pytest.mark.asyncio
-    async def test_no_reannounce_when_balance_stays_in_same_bucket(
+    async def test_no_reannounce_when_offers_unchanged(
         self, mock_wallet, mock_backend, config_no_delay
     ):
-        """When balance changes but stays in the same power-of-2 bucket, no re-announcement."""
+        """When newly computed offers are identical to current offers, no re-announcement."""
         from unittest.mock import AsyncMock
 
         bot = MakerBot(
@@ -838,35 +804,32 @@ class TestOfferPrivacy:
             backend=mock_backend,
             config=config_no_delay,
         )
-        # Initial offer with maxsize at 2^18 = 262_144
-        bot.current_offers = [
-            Offer(
-                counterparty=bot.nick,
-                oid=0,
-                ordertype=OfferType.SW0_RELATIVE,
-                minsize=100_000,
-                maxsize=262_144,
-                txfee=1000,
-                cjfee="0.001",
-            )
-        ]
-
-        # New offer still rounds to 2^18 (balance shifted but stayed in bucket)
-        same_bucket_offer = Offer(
+        current_offer = Offer(
             counterparty=bot.nick,
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,
-            maxsize=262_144,
+            maxsize=500_000,
             txfee=1000,
             cjfee="0.001",
         )
-        bot.offer_manager.create_offers = AsyncMock(return_value=[same_bucket_offer])
+        bot.current_offers = [current_offer]
+
+        # New offer identical to current
+        same_offer = Offer(
+            counterparty=bot.nick,
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=100_000,
+            maxsize=500_000,
+            txfee=1000,
+            cjfee="0.001",
+        )
+        bot.offer_manager.create_offers = AsyncMock(return_value=[same_offer])
         bot._announce_offers = AsyncMock()
 
         await bot._update_offers()
 
-        # No re-announcement since rounded maxsize is the same
         bot._announce_offers.assert_not_called()
 
     @pytest.mark.asyncio
@@ -891,7 +854,7 @@ class TestOfferPrivacy:
             )
         ]
 
-        # New offer with different bucket
+        # New offer with different maxsize
         new_offer = Offer(
             counterparty=bot.nick,
             oid=0,
@@ -930,7 +893,7 @@ class TestOfferPrivacy:
                 oid=0,
                 ordertype=OfferType.SW0_RELATIVE,
                 minsize=100_000,
-                maxsize=262_144,  # 2^18
+                maxsize=262_144,
                 txfee=1000,
                 cjfee="0.001",
             )
@@ -956,14 +919,14 @@ class TestOfferPrivacy:
         bot._announce_offers.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_relative_offer_skipped_when_rounded_max_below_profit_minsize(
+    async def test_relative_offer_skipped_when_max_below_profit_minsize(
         self, mock_wallet, mock_backend, config_no_delay
     ):
-        """Regression: rounded_max must be compared against the effective min_size
+        """Regression: max_available must be compared against the effective min_size
         (which accounts for profitability), not just offer_cfg.min_size.
 
         With a high tx_fee_contribution relative to cj_fee_relative, min_size_for_profit
-        can exceed rounded_max even when rounded_max > offer_cfg.min_size, which would
+        can exceed max_available even when max_available > offer_cfg.min_size, which would
         produce an invalid offer where minsize > maxsize.
         """
         from unittest.mock import AsyncMock, patch
@@ -973,12 +936,9 @@ class TestOfferPrivacy:
 
         # max_balance=180_000, tx_fee_contribution=1000, cj_fee_relative=0.001
         # max_available = 180_000 - 27_300 (dust) = 152_700
-        # rounded_max = 2^17 = 131_072
         # min_size_for_profit = int(1.5 * 1000 / 0.001) = 1_500_000
         # min_size = max(1_500_000, 27_300) = 1_500_000
-        # Without fix: rounded_max (131_072) > offer_cfg.min_size (27_300) -> CREATED
-        #              but minsize=1_500_000 > maxsize=131_072 (invalid offer!)
-        # With fix:    rounded_max (131_072) <= min_size (1_500_000) -> SKIPPED (correct)
+        # max_available (152_700) <= min_size (1_500_000) -> SKIPPED (correct)
         config = MakerConfig(
             mnemonic="test " * 12,
             directory_servers=["localhost:5222"],
