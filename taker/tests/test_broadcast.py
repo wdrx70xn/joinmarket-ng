@@ -259,6 +259,59 @@ class TestTakerBroadcast:
         assert taker.backend.verify_tx_output.call_count >= 2
 
     @pytest.mark.asyncio
+    async def test_phase_broadcast_sends_to_all_makers_without_mempool_access(self, taker) -> None:
+        """Without mempool access all non-SELF policies broadcast to ALL makers.
+
+        Regression test for issue #482: the fix must send !push to every
+        session maker simultaneously (not just one) and must never call
+        verify_tx_output or fall back to _broadcast_self.
+        """
+        from jmcore.models import Offer, OfferType
+
+        from taker.taker import MakerSession
+
+        makers = ["J5maker1", "J5maker2", "J5maker3"]
+        taker.maker_sessions = {}
+        for nick in makers:
+            offer = Offer(
+                counterparty=nick,
+                oid=0,
+                ordertype=OfferType.SW0_RELATIVE,
+                minsize=100_000,
+                maxsize=10_000_000,
+                txfee=1000,
+                cjfee="0.0003",
+                fidelity_bond_value=0,
+            )
+            taker.maker_sessions[nick] = MakerSession(nick=nick, offer=offer)
+
+        taker.directory_client = MagicMock()
+        taker.directory_client.send_privmsg = AsyncMock()
+        taker.tx_metadata = {"output_owners": [(n, "cj") for n in makers]}
+        taker.cj_destination = "bcrt1qtest123"
+        taker.taker_change_address = "bcrt1qchange456"
+
+        taker.backend.has_mempool_access = MagicMock(return_value=False)
+        taker.backend.verify_tx_output = AsyncMock(
+            side_effect=AssertionError("verify_tx_output must not be called without mempool access")
+        )
+        taker.backend.broadcast_transaction = AsyncMock(
+            side_effect=AssertionError("self-broadcast must not be called without mempool access")
+        )
+        taker.config.tx_broadcast = BroadcastPolicy.RANDOM_PEER
+
+        txid = await taker._phase_broadcast()
+
+        assert txid != ""
+        # All 3 makers must be contacted.
+        calls = taker.directory_client.send_privmsg.call_args_list
+        assert len(calls) == 3
+        push_recipients = {call[0][0] for call in calls}
+        assert push_recipients == set(makers)
+        taker.backend.verify_tx_output.assert_not_called()
+        taker.backend.broadcast_transaction.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_phase_broadcast_random_peer_tries_makers(self, taker) -> None:
         """Test RANDOM_PEER policy tries makers, falls back to self on failure (full node)."""
         from jmcore.models import Offer, OfferType
@@ -468,46 +521,56 @@ class TestNeutrinoBroadcast:
 
     @pytest.mark.asyncio
     async def test_multiple_peers_broadcasts_to_n_makers(self, neutrino_taker) -> None:
-        """Test MULTIPLE_PEERS sends !push to N random makers simultaneously."""
+        """MULTIPLE_PEERS on Neutrino broadcasts to ALL makers, ignoring peer_count cap.
+
+        Without mempool access the no-mempool early-exit path fires before the
+        MULTIPLE_PEERS branch. It always sends to every session maker for
+        maximum reliability (issue #482), so ``broadcast_peer_count`` has no
+        effect here.
+        """
         neutrino_taker.config.tx_broadcast = BroadcastPolicy.MULTIPLE_PEERS
         neutrino_taker.config.broadcast_peer_count = 3
         self._setup_makers(neutrino_taker, ["J5maker1", "J5maker2", "J5maker3", "J5maker4"])
 
         txid = await neutrino_taker._phase_broadcast()
 
-        # Should return expected txid even without verification
         assert txid != ""
 
-        # Should send !push to exactly 3 makers (not all 4)
+        # All 4 makers are contacted, not just 3.
         calls = neutrino_taker.directory_client.send_privmsg.call_args_list
-        assert len(calls) == 3
-
-        # Recipients should be subset of all makers
+        assert len(calls) == 4
         push_recipients = {call[0][0] for call in calls}
-        assert push_recipients.issubset({"J5maker1", "J5maker2", "J5maker3", "J5maker4"})
+        assert push_recipients == {"J5maker1", "J5maker2", "J5maker3", "J5maker4"}
 
     @pytest.mark.asyncio
     async def test_random_peer_falls_back_to_self(self, neutrino_taker) -> None:
-        """Test RANDOM_PEER tries makers sequentially, falls back to self on failure."""
+        """RANDOM_PEER on Neutrino broadcasts to ALL makers, never falls back to self.
+
+        Without mempool access, sending to one random maker and "trusting" it
+        is fragile: that maker might be offline. The correct strategy is to
+        send !push to every session maker simultaneously so at least one
+        relays the transaction. Self-broadcast must not be attempted (issue #482).
+        """
         self._setup_makers(neutrino_taker, ["J5maker1", "J5maker2"])
 
-        # Simulate all makers failing verification
         neutrino_taker.backend.verify_tx_output = AsyncMock(return_value=False)
-
-        # Mock self-broadcast to succeed
         neutrino_taker.backend.broadcast_transaction = AsyncMock(return_value="selfbroadcast_txid")
 
         txid = await neutrino_taker._phase_broadcast()
 
-        # Should fall back to self and succeed
-        assert txid == "selfbroadcast_txid"
+        # Returns expected txid (not self-broadcast txid).
+        assert txid != ""
+        assert txid != "selfbroadcast_txid"
 
-        # Should have tried both makers before self
+        # Both makers must be contacted, not just one.
         privmsg_calls = neutrino_taker.directory_client.send_privmsg.call_args_list
-        assert len(privmsg_calls) == 2  # Tried both makers
+        assert len(privmsg_calls) == 2
+        push_recipients = {call[0][0] for call in privmsg_calls}
+        assert push_recipients == {"J5maker1", "J5maker2"}
 
-        # Should have called self-broadcast
-        neutrino_taker.backend.broadcast_transaction.assert_called_once()
+        # No self-broadcast, no mempool verification.
+        neutrino_taker.backend.broadcast_transaction.assert_not_called()
+        neutrino_taker.backend.verify_tx_output.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_fullnode_multiple_peers_same_behavior(self, fullnode_taker) -> None:
@@ -527,24 +590,28 @@ class TestNeutrinoBroadcast:
 
     @pytest.mark.asyncio
     async def test_not_self_never_falls_back(self, neutrino_taker) -> None:
-        """Test NOT_SELF never falls back to self even if all makers fail."""
+        """NOT_SELF on Neutrino: broadcast to ALL makers, never self (issue #482).
+
+        Same as RANDOM_PEER: without mempool access we broadcast to all
+        session makers simultaneously. No self-broadcast, ever.
+        """
         neutrino_taker.config.tx_broadcast = BroadcastPolicy.NOT_SELF
         self._setup_makers(neutrino_taker, ["J5maker1", "J5maker2"])
 
-        # Simulate all makers failing verification
         neutrino_taker.backend.verify_tx_output = AsyncMock(return_value=False)
+        neutrino_taker.backend.broadcast_transaction = AsyncMock(return_value="selfbroadcast_txid")
 
         txid = await neutrino_taker._phase_broadcast()
 
-        # Should fail without self-fallback
-        assert txid == ""
-
-        # Should have tried both makers
+        # Non-empty txid, both makers contacted, no self broadcast.
+        assert txid != ""
+        assert txid != "selfbroadcast_txid"
         calls = neutrino_taker.directory_client.send_privmsg.call_args_list
         assert len(calls) == 2
-
-        # Should NOT have called self-broadcast
+        push_recipients = {call[0][0] for call in calls}
+        assert push_recipients == {"J5maker1", "J5maker2"}
         neutrino_taker.backend.broadcast_transaction.assert_not_called()
+        neutrino_taker.backend.verify_tx_output.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_multiple_peers_falls_back_to_self(self, neutrino_taker) -> None:

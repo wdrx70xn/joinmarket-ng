@@ -2828,7 +2828,12 @@ class Taker(TakerMonitoringMixin):
 
         Neutrino notes:
         - Cannot verify mempool transactions (only confirmed blocks)
-        - Self-fallback allowed but verification skipped (trusts broadcast succeeded)
+        - When the backend has no mempool access, all non-SELF policies fall back
+          to broadcasting to ALL available makers simultaneously (like MULTIPLE_PEERS
+          with peer_count = all makers). Verification is skipped; the
+          pending-transaction monitor confirms the txid via block scanning.
+          This maximises the probability that the tx reaches the network and avoids
+          the privacy-leaking self-broadcast fallback (issue #482).
 
         Returns:
             Transaction ID if successful, empty string otherwise
@@ -2852,6 +2857,37 @@ class Taker(TakerMonitoringMixin):
 
         if policy == BroadcastPolicy.SELF:
             # Always broadcast via own node
+            return await self._broadcast_self()
+
+        # Without mempool access we cannot verify that any individual maker
+        # broadcast the transaction. Sending to a single random maker and
+        # "trusting" it is risky – if that maker is offline the tx is lost
+        # and we would fall back to self-broadcast (privacy leak). Instead,
+        # send to ALL makers simultaneously. All of them already know the
+        # transaction so this reveals nothing new, and it maximises the
+        # probability that at least one relays it to the Bitcoin network.
+        # The pending-transaction monitor will confirm via block scanning.
+        if not has_mempool and maker_nicks:
+            logger.info(
+                f"Backend has no mempool access – broadcasting !push to all "
+                f"{len(maker_nicks)} maker(s) for reliability (issue #482)"
+            )
+            success_count = await self._broadcast_to_all_makers(maker_nicks, tx_b64)
+            if success_count > 0:
+                logger.info(
+                    f"!push delivered to {success_count}/{len(maker_nicks)} maker(s); "
+                    f"transaction {expected_txid} will be confirmed via block monitoring"
+                )
+                return expected_txid
+            # Every send_privmsg raised – fall through to policy-specific handling
+            # (NOT_SELF will return ""; others may self-broadcast).
+            logger.warning("All !push sends failed (no mempool access path)")
+            if policy == BroadcastPolicy.NOT_SELF:
+                logger.error(
+                    "NOT_SELF policy: all maker !push attempts failed. "
+                    f"Transaction hex (for manual broadcast): {self.final_tx.hex()}"
+                )
+                return ""
             return await self._broadcast_self()
 
         elif policy == BroadcastPolicy.RANDOM_PEER:
