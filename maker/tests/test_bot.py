@@ -681,6 +681,50 @@ class TestWalletRescanAndOfferUpdate:
         maker_bot._announce_offers.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_resync_wallet_log_levels(self, maker_bot, mock_wallet):
+        """Routine rescans (no balance change) must not emit INFO logs.
+
+        See issue #484: long-running makers should not flood logs with
+        recurring INFO messages every `rescan_interval_sec`. INFO is reserved
+        for state changes (max balance changed, offers updated).
+        """
+        from unittest.mock import AsyncMock
+
+        from loguru import logger
+
+        # Same balance before and after: routine no-op rescan
+        mock_wallet.get_balance_for_offers = AsyncMock(return_value=400_000)
+        maker_bot.offer_manager.create_offers = AsyncMock()
+        maker_bot._announce_offers = AsyncMock()
+
+        records: list[tuple[str, str]] = []
+        sink_id = logger.add(
+            lambda message: records.append(
+                (message.record["level"].name, message.record["message"])
+            ),
+            level="DEBUG",
+        )
+        try:
+            await maker_bot._resync_wallet_and_update_offers()
+        finally:
+            logger.remove(sink_id)
+
+        info_messages = [msg for level, msg in records if level == "INFO"]
+        debug_messages = [msg for level, msg in records if level == "DEBUG"]
+
+        # No INFO logs should be emitted on a no-op rescan
+        assert not any("Wallet re-synced" in m for m in info_messages), (
+            f"Unexpected INFO 'Wallet re-synced' on routine rescan: {info_messages}"
+        )
+        assert not any("Max balance" in m for m in info_messages), (
+            f"Unexpected INFO 'Max balance' on routine rescan: {info_messages}"
+        )
+        # The resync still happened, just at DEBUG
+        assert any("Wallet re-synced" in m for m in debug_messages), (
+            f"Expected DEBUG 'Wallet re-synced' message, got: {debug_messages}"
+        )
+
+    @pytest.mark.asyncio
     async def test_update_offers_keeps_old_if_create_fails(self, maker_bot):
         """Test that old offers are kept if new offer creation fails."""
         from unittest.mock import AsyncMock

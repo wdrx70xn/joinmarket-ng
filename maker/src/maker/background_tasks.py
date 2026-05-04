@@ -70,7 +70,7 @@ class BackgroundTasksMixin:
                 if not self.running:
                     break
 
-                logger.info("Periodic wallet rescan starting...")
+                logger.debug("Periodic wallet rescan starting...")
                 await self._resync_wallet_and_update_offers()
 
             except asyncio.CancelledError:
@@ -186,7 +186,9 @@ class BackgroundTasksMixin:
                         f"connected. Disconnected: [{disconnected_str}]"
                     )
                 else:
-                    logger.info(
+                    # Healthy state: keep at DEBUG so long-running makers do not
+                    # spam INFO every 10 minutes. Use --log-level DEBUG to see it.
+                    logger.debug(
                         f"Directory connection status: {connected_count}/{total_servers} connected "
                         f"[{', '.join(connected_servers)}]"
                     )

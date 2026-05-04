@@ -795,17 +795,23 @@ class MakerBot(BackgroundTasksMixin, ProtocolHandlersMixin, DirectConnectionMixi
             new_max_balance = max(new_max_balance, balance)
 
         total_balance = await self.wallet.get_total_balance()
-        logger.info(f"Wallet re-synced. Total balance: {total_balance:,} sats")
 
-        # If max balance changed, update offers
+        # If max balance changed, update offers and log at INFO so operators
+        # see balance/offer churn. When unchanged this rescan is a routine
+        # no-op (every `rescan_interval_sec`, default 10 min) and is logged
+        # at DEBUG to avoid flooding logs of long-running makers.
         if old_max_balance != new_max_balance:
+            logger.info(f"Wallet re-synced. Total balance: {total_balance:,} sats")
             logger.info(
                 f"Max balance changed: {old_max_balance:,} -> {new_max_balance:,} sats. "
                 "Updating offers..."
             )
             await self._update_offers()
         else:
-            logger.debug(f"Max balance unchanged at {new_max_balance:,} sats")
+            logger.debug(
+                f"Wallet re-synced (no change). Total balance: {total_balance:,} sats, "
+                f"max offer balance: {new_max_balance:,} sats"
+            )
 
     async def _update_offers(self) -> None:
         """Recreate and re-announce offers based on current wallet state.
