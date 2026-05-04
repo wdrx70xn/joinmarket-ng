@@ -1,29 +1,18 @@
 name: CI
-
-on:
+'on':
   push:
     branches:
-      - main
-  pull_request_target:
-    # Fork PRs are gated by GitHub's fork-workflow approval before this starts.
-    # Run from the base repository context, then explicitly check out the PR head
-    # so the shared-image CI pipeline exercises the contributor's code.
-  workflow_dispatch:
-  workflow_call:
-
+    - main
+  pull_request_target: null
+  workflow_dispatch: null
+  workflow_call: null
 permissions:
   contents: read
-
 env:
   REGISTRY: ghcr.io
-  # Internal CI tag used only to share prebuilt images between CI jobs.
-  CI_TAG: ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-
+  CI_TAG: ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha
+    }}
 jobs:
-  # ==========================================================================
-  # Stage 1: Build all Docker images (parallel matrix)
-  # Push to GHCR with CI-specific tag for reuse by integration tests
-  # ==========================================================================
   build-images:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -34,87 +23,87 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: directory-server
-            dockerfile: ./directory_server/Dockerfile
-            image: directory-server
-            target: production
-            tag_suffix: ""
-          - name: directory-server-debug
-            dockerfile: ./directory_server/Dockerfile
-            image: directory-server-debug
-            target: debug
-            tag_suffix: ""
-          - name: orderbook-watcher
-            dockerfile: ./orderbook_watcher/Dockerfile
-            image: orderbook-watcher
-            target: ""
-            tag_suffix: ""
-          - name: maker
-            dockerfile: ./maker/Dockerfile
-            image: maker
-            target: ""
-            tag_suffix: ""
-          - name: taker
-            dockerfile: ./taker/Dockerfile
-            image: taker
-            target: ""
-            tag_suffix: ""
-          - name: jam-ng
-            dockerfile: ./jmwalletd/Dockerfile
-            image: jam-ng
-            target: "jam-ng"
-            tag_suffix: ""
-          - name: jmwalletd
-            dockerfile: ./jmwalletd/Dockerfile
-            image: jmwalletd
-            target: "jmwalletd"
-            tag_suffix: ""
-
+        - name: directory-server
+          dockerfile: ./directory_server/Dockerfile
+          image: directory-server
+          target: production
+          tag_suffix: ''
+        - name: directory-server-debug
+          dockerfile: ./directory_server/Dockerfile
+          image: directory-server-debug
+          target: debug
+          tag_suffix: ''
+        - name: orderbook-watcher
+          dockerfile: ./orderbook_watcher/Dockerfile
+          image: orderbook-watcher
+          target: ''
+          tag_suffix: ''
+        - name: maker
+          dockerfile: ./maker/Dockerfile
+          image: maker
+          target: ''
+          tag_suffix: ''
+        - name: taker
+          dockerfile: ./taker/Dockerfile
+          image: taker
+          target: ''
+          tag_suffix: ''
+        - name: jam-ng
+          dockerfile: ./jmwalletd/Dockerfile
+          image: jam-ng
+          target: jam-ng
+          tag_suffix: ''
+        - name: jmwalletd
+          dockerfile: ./jmwalletd/Dockerfile
+          image: jmwalletd
+          target: jmwalletd
+          tag_suffix: ''
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - name: Get Git commit timestamp for reproducible builds
+      run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        target: ${{ matrix.target || '' }}
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{
+          env.CI_TAG }}${{ matrix.tag_suffix }}
+        cache-from: 'type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{
+          matrix.image }}:buildcache
 
-      - name: Get Git commit timestamp for reproducible builds
-        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+          type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image
+          }}:latest
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          '
+        cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{
+          matrix.image }}:buildcache,mode=max
+        build-args: 'BUILDKIT_INLINE_CACHE=1
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target || '' }}
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{ env.CI_TAG }}${{ matrix.tag_suffix }}
-          cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:latest
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
-            JOINMARKET_BUILD_COMMIT=${{ github.sha }}
-            JOINMARKET_BUILD_REF=${{ github.ref_name }}
-        env:
-          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          JOINMARKET_BUILD_COMMIT=${{ github.sha }}
 
-  # ==========================================================================
-  # Stage 2a: Unit tests (parallel matrix across Python versions)
-  # Runs in parallel with image builds for faster feedback
-  # Excludes tests marked with @pytest.mark.docker (those run in integration tests)
-  # ==========================================================================
+          JOINMARKET_BUILD_REF=${{ github.ref_name }}
+
+          '
+      env:
+        SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
   test-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -123,45 +112,43 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.14']
+        python-version:
+        - '3.11'
+        - '3.12'
+        - '3.13'
+        - '3.14'
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          python-version: ${{ matrix.python-version }}
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd,tumbler
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        python-version: ${{ matrix.python-version }}
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd,tumbler
+        install-dev: 'true'
+    - name: Run unit tests
+      run: "pytest -c pytest.ini jmcore jmwallet directory_server orderbook_watcher\
+        \ maker taker jmwalletd tumbler \\\n  --junitxml=junit/unit-tests.xml \\\n\
+        \  --cov=jmcore --cov=jmwallet --cov=directory_server --cov=orderbook_watcher\
+        \ --cov=maker --cov=taker --cov=jmwalletd --cov=tumbler \\\n  --cov-report=term-missing\
+        \ --cov-report=xml --cov-report=html \\\n  -v --fail-on-skip\n"
+    - name: Rename coverage file
+      if: always()
+      run: mv coverage.xml coverage-unit-py${{ matrix.python-version }}.xml
+    - uses: actions/upload-artifact@v7
+      with:
+        name: unit-test-results-py${{ matrix.python-version }}
+        path: 'junit/unit-tests.xml
 
-      - name: Run unit tests
-        run: |
-          pytest -c pytest.ini jmcore jmwallet directory_server orderbook_watcher maker taker jmwalletd tumbler \
-            --junitxml=junit/unit-tests.xml \
-            --cov=jmcore --cov=jmwallet --cov=directory_server --cov=orderbook_watcher --cov=maker --cov=taker --cov=jmwalletd --cov=tumbler \
-            --cov-report=term-missing --cov-report=xml --cov-report=html \
-            -v --fail-on-skip
+          coverage-unit-py${{ matrix.python-version }}.xml
 
-      - name: Rename coverage file
-        if: always()
-        run: mv coverage.xml coverage-unit-py${{ matrix.python-version }}.xml
+          htmlcov/
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: unit-test-results-py${{ matrix.python-version }}
-          path: |
-            junit/unit-tests.xml
-            coverage-unit-py${{ matrix.python-version }}.xml
-            htmlcov/
-        if: always()
-
-  # ==========================================================================
-  # Stage 3: Integration tests (require Docker infrastructure)
-  # Uses pre-built images from build-images where needed
-  # Also runs docker-marked tests from jmwallet and maker
-  # ==========================================================================
+          '
+      if: always()
   test-e2e:
     needs: build-images
     runs-on: ubuntu-latest
@@ -170,109 +157,116 @@ jobs:
       contents: read
       packages: read
     env:
-      # Use pre-built images from CI
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd,tumbler
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd,tumbler
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
-          docker pull $JMWALLETD_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: "Start e2e services"
-        env:
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          # Start with pre-built images (env vars override build)
-          docker compose --profile e2e up -d
+        docker pull $JMWALLETD_IMAGE
 
-          .github/scripts/wait-for-service.sh "Bitcoin" \
-            "docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo" \
-            60 1
+        '
+    - name: Start e2e services
+      env:
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "# Start with pre-built images (env vars override build)\ndocker compose\
+        \ --profile e2e up -d\n\n.github/scripts/wait-for-service.sh \"Bitcoin\" \\\
+        \n  \"docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443\
+        \ -rpcuser=test -rpcpassword=test getblockchaininfo\" \\\n  60 1\n\n.github/scripts/wait-for-service.sh\
+        \ \"Directory Server\" \\\n  \"nc -z localhost 5222\" \\\n  30 1\n\n.github/scripts/wait-for-service.sh\
+        \ \"jmwalletd\" \\\n  \"curl -skf https://127.0.0.1:28183/api/v1/getinfo\"\
+        \ \\\n  60 2\n\necho \"Waiting for makers to connect...\"\nsleep 20\n\necho\
+        \ \"E2E services ready!\"\n"
+    - name: Run e2e tests (our implementation only)
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m \"e2e and not tumbler_e2e\" --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=300\
+        \ --reruns=1 --reruns-delay=10 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-          .github/scripts/wait-for-service.sh "Directory Server" \
-            "nc -z localhost 5222" \
-            30 1
+        docker compose --profile e2e ps
 
-          .github/scripts/wait-for-service.sh "jmwalletd" \
-            "curl -skf https://127.0.0.1:28183/api/v1/getinfo" \
-            60 2
+        echo ""
 
-          echo "Waiting for makers to connect..."
-          sleep 20
+        echo "=== Bitcoin logs ==="
 
-          echo "E2E services ready!"
+        docker compose logs bitcoin --tail=30
 
-      - name: Run e2e tests (our implementation only)
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m "e2e and not tumbler_e2e" --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=1 --reruns-delay=10 --fail-on-skip
+        echo ""
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile e2e ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Directory logs ==="
-          docker compose logs directory --tail=30
-          echo ""
-          echo "=== Maker1 logs ==="
-          docker compose logs maker1 --tail=50
-          echo ""
-          echo "=== Maker2 logs ==="
-          docker compose logs maker2 --tail=50
-          echo ""
-          echo "=== jmwalletd logs ==="
-          docker compose logs jmwalletd --tail=50
+        echo "=== Directory logs ==="
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile e2e down -v
+        docker compose logs directory --tail=30
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: e2e-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo ""
 
+        echo "=== Maker1 logs ==="
+
+        docker compose logs maker1 --tail=50
+
+        echo ""
+
+        echo "=== Maker2 logs ==="
+
+        docker compose logs maker2 --tail=50
+
+        echo ""
+
+        echo "=== jmwalletd logs ==="
+
+        docker compose logs jmwalletd --tail=50
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile e2e down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: e2e-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-tumbler:
     needs: build-images
     runs-on: ubuntu-latest
@@ -281,121 +275,140 @@ jobs:
       contents: read
       packages: read
     env:
-      # Use pre-built images from CI
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      JMWALLETD_IMAGE: ghcr.io/${{ github.repository }}/jmwalletd:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd,tumbler
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker,jmwalletd,tumbler
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
-          docker pull $JMWALLETD_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: "Start e2e services"
-        env:
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          # Start with pre-built images (env vars override build)
-          docker compose --profile e2e up -d
+        docker pull $JMWALLETD_IMAGE
 
-          .github/scripts/wait-for-service.sh "Bitcoin" \
-            "docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo" \
-            60 1
+        '
+    - name: Start e2e services
+      env:
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "# Start with pre-built images (env vars override build)\ndocker compose\
+        \ --profile e2e up -d\n\n.github/scripts/wait-for-service.sh \"Bitcoin\" \\\
+        \n  \"docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443\
+        \ -rpcuser=test -rpcpassword=test getblockchaininfo\" \\\n  60 1\n\n.github/scripts/wait-for-service.sh\
+        \ \"Directory Server\" \\\n  \"nc -z localhost 5222\" \\\n  30 1\n\n.github/scripts/wait-for-service.sh\
+        \ \"jmwalletd\" \\\n  \"curl -skf https://127.0.0.1:28183/api/v1/getinfo\"\
+        \ \\\n  60 2\n\necho \"Waiting for makers to connect...\"\nsleep 20\n\necho\
+        \ \"E2E services ready!\"\n"
+    - name: Run tumbler e2e tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m tumbler_e2e --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=600\
+        \ --reruns=1 --reruns-delay=10 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-          .github/scripts/wait-for-service.sh "Directory Server" \
-            "nc -z localhost 5222" \
-            30 1
+        docker compose --profile e2e ps
 
-          .github/scripts/wait-for-service.sh "jmwalletd" \
-            "curl -skf https://127.0.0.1:28183/api/v1/getinfo" \
-            60 2
+        echo ""
 
-          echo "Waiting for makers to connect..."
-          sleep 20
+        echo "=== Bitcoin logs ==="
 
-          echo "E2E services ready!"
+        docker compose logs bitcoin --tail=30
 
-      - name: Run tumbler e2e tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m tumbler_e2e --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=600 --reruns=1 --reruns-delay=10 --fail-on-skip
+        echo ""
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile e2e ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Directory logs ==="
-          docker compose logs directory --tail=30
-          echo ""
-          echo "=== Maker1 logs ==="
-          docker compose logs maker1 --tail=100
-          echo ""
-          echo "=== Maker2 logs ==="
-          docker compose logs maker2 --tail=100
-          echo ""
-          echo "=== Maker3 logs ==="
-          docker compose logs maker3 --tail=100
-          echo ""
-          echo "=== Maker4 logs ==="
-          docker compose logs maker4 --tail=100
-          echo ""
-          echo "=== Maker5 logs ==="
-          docker compose logs maker5 --tail=100
-          echo ""
-          echo "=== jmwalletd logs ==="
-          docker compose logs jmwalletd --tail=200
-          echo ""
-          echo "=== orderbook-watcher logs ==="
-          docker compose logs orderbook-watcher --tail=100
+        echo "=== Directory logs ==="
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile e2e down -v
+        docker compose logs directory --tail=30
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: tumbler-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo ""
 
+        echo "=== Maker1 logs ==="
+
+        docker compose logs maker1 --tail=100
+
+        echo ""
+
+        echo "=== Maker2 logs ==="
+
+        docker compose logs maker2 --tail=100
+
+        echo ""
+
+        echo "=== Maker3 logs ==="
+
+        docker compose logs maker3 --tail=100
+
+        echo ""
+
+        echo "=== Maker4 logs ==="
+
+        docker compose logs maker4 --tail=100
+
+        echo ""
+
+        echo "=== Maker5 logs ==="
+
+        docker compose logs maker5 --tail=100
+
+        echo ""
+
+        echo "=== jmwalletd logs ==="
+
+        docker compose logs jmwalletd --tail=200
+
+        echo ""
+
+        echo "=== orderbook-watcher logs ==="
+
+        docker compose logs orderbook-watcher --tail=100
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile e2e down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: tumbler-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-playwright:
     needs: build-images
     runs-on: ubuntu-latest
@@ -404,100 +417,91 @@ jobs:
       contents: read
       packages: read
     env:
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      JAM_NG_IMAGE: ghcr.io/${{ github.repository }}/jam-ng:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      JAM_NG_IMAGE: ghcr.io/${{ github.repository }}/jam-ng:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+    - name: Install Playwright dependencies
+      working-directory: tests/playwright
+      run: 'npm ci
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+        npx playwright install --with-deps chromium
 
-      - name: Install Playwright dependencies
-        working-directory: tests/playwright
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        '
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Login to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $MAKER_IMAGE &
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $JAM_NG_IMAGE &
 
-      - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $DIRECTORY_SERVER_IMAGE &
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $MAKER_IMAGE &
-          docker pull $JAM_NG_IMAGE &
-          docker pull $DIRECTORY_SERVER_IMAGE &
-          wait
+        wait
 
-      - name: Start e2e services
-        run: |
-          docker compose --profile e2e up -d
+        '
+    - name: Start e2e services
+      run: "docker compose --profile e2e up -d\n\n.github/scripts/wait-for-service.sh\
+        \ \"Bitcoin\" \\\n  \"docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\" \\\n\
+        \  60 1\n\n.github/scripts/wait-for-service.sh \"Directory Server\" \\\n \
+        \ \"nc -z localhost 5222\" \\\n  30 1\n\n.github/scripts/wait-for-service.sh\
+        \ \"jam-playwright\" \\\n  \"curl -skf https://127.0.0.1:29183/api/v1/session\"\
+        \ \\\n  90 2\n\n# Wait for at least 4 maker offers to appear in the orderbook\
+        \ so\n# that the collaborative-send playwright test (which requires the\n\
+        # JAM minimum of 4 collaborators) does not race maker startup.\n.github/scripts/wait-for-service.sh\
+        \ \"Orderbook offers (>=4)\" \\\n  \"curl -sf http://127.0.0.1:8080/orderbook.json\
+        \ | python3 -c 'import sys,json; sys.exit(0 if len(json.load(sys.stdin).get(\\\
+        \"offers\\\", [])) >= 4 else 1)'\" \\\n  120 2\n\necho \"E2E services ready!\"\
+        \n"
+    - name: Run Playwright tests
+      working-directory: tests/playwright
+      env:
+        CI: 'true'
+        JAM_URL: https://localhost:29183
+        JMWALLETD_URL: https://localhost:29183
+        NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      run: npx playwright test
+    - name: Show Docker logs on failure
+      if: failure()
+      run: 'docker compose --profile e2e ps
 
-          .github/scripts/wait-for-service.sh "Bitcoin" \
-            "docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo" \
-            60 1
+        docker compose --profile e2e logs --tail=200
 
-          .github/scripts/wait-for-service.sh "Directory Server" \
-            "nc -z localhost 5222" \
-            30 1
+        '
+    - name: Cleanup Docker services
+      if: always()
+      run: docker compose --profile e2e down -v
+    - name: Upload Playwright report and videos
+      uses: actions/upload-artifact@v7
+      with:
+        name: playwright-report
+        path: 'tests/playwright/playwright-report/
 
-          .github/scripts/wait-for-service.sh "jam-playwright" \
-            "curl -skf https://127.0.0.1:29183/api/v1/session" \
-            90 2
+          tests/playwright/test-results/
 
-          # Wait for at least 4 maker offers to appear in the orderbook so
-          # that the collaborative-send playwright test (which requires the
-          # JAM minimum of 4 collaborators) does not race maker startup.
-          .github/scripts/wait-for-service.sh "Orderbook offers (>=4)" \
-            "curl -sf http://127.0.0.1:8080/orderbook.json | python3 -c 'import sys,json; sys.exit(0 if len(json.load(sys.stdin).get(\"offers\", [])) >= 4 else 1)'" \
-            120 2
-
-          echo "E2E services ready!"
-
-      - name: Run Playwright tests
-        working-directory: tests/playwright
-        env:
-          CI: "true"
-          JAM_URL: https://localhost:29183
-          JMWALLETD_URL: https://localhost:29183
-          # jmwalletd serves a self-signed cert in the e2e stack; accept it for test-only traffic.
-          NODE_TLS_REJECT_UNAUTHORIZED: "0"
-        run: npx playwright test
-
-      - name: Show Docker logs on failure
-        if: failure()
-        run: |
-          docker compose --profile e2e ps
-          docker compose --profile e2e logs --tail=200
-
-      - name: Cleanup Docker services
-        if: always()
-        run: docker compose --profile e2e down -v
-
-      - name: Upload Playwright report and videos
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-report
-          path: |
-            tests/playwright/playwright-report/
-            tests/playwright/test-results/
-          retention-days: 14
-        if: always()
-
+          '
+        retention-days: 14
+      if: always()
   test-jmwallet:
     needs: build-images
     runs-on: ubuntu-latest
@@ -506,68 +510,61 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built directory-server image
+      run: docker pull $DIRECTORY_SERVER_IMAGE
+    - name: Start Bitcoin Core for jmwallet tests
+      run: "docker compose up -d bitcoin\n\n.github/scripts/wait-for-service.sh \"\
+        Bitcoin\" \\\n  \"docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\" \\\n\
+        \  60 1\n"
+    - name: Run jmwallet docker-marked tests only
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m \"docker and not neutrino\" jmwallet/tests/ \\\
+        \n  --junitxml=junit/jmwallet-docker-tests.xml \\\n  --cov=jmwallet --cov-report=term-missing\
+        \ --cov-report=xml \\\n  -v -s --timeout=300 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Bitcoin logs ==="
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker compose logs bitcoin --tail=50
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: jmwallet-docker-results
+        path: 'junit/jmwallet-docker-tests.xml
 
-      - name: Pull pre-built directory-server image
-        run: docker pull $DIRECTORY_SERVER_IMAGE
+          coverage.xml
 
-      - name: Start Bitcoin Core for jmwallet tests
-        run: |
-          docker compose up -d bitcoin
-
-          .github/scripts/wait-for-service.sh "Bitcoin" \
-            "docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo" \
-            60 1
-
-      - name: Run jmwallet docker-marked tests only
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m "docker and not neutrino" jmwallet/tests/ \
-            --junitxml=junit/jmwallet-docker-tests.xml \
-            --cov=jmwallet --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --fail-on-skip
-
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=50
-
-      - name: Cleanup
-        if: always()
-        run: docker compose down -v
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: jmwallet-docker-results
-          path: |
-            junit/jmwallet-docker-tests.xml
-            coverage.xml
-        if: always()
-
+          '
+      if: always()
   test-maker:
     needs: build-images
     runs-on: ubuntu-latest
@@ -576,68 +573,61 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,maker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,maker
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built directory-server image
+      run: docker pull $DIRECTORY_SERVER_IMAGE
+    - name: Start Bitcoin Core for maker tests
+      run: "docker compose up -d bitcoin\n\n.github/scripts/wait-for-service.sh \"\
+        Bitcoin\" \\\n  \"docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\" \\\n\
+        \  60 1\n"
+    - name: Run maker docker-marked tests only
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m docker maker/tests/ \\\n  --junitxml=junit/maker-docker-tests.xml\
+        \ \\\n  --cov=maker --cov-report=term-missing --cov-report=xml \\\n  -v -s\
+        \ --timeout=300 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Bitcoin logs ==="
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker compose logs bitcoin --tail=50
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: maker-docker-results
+        path: 'junit/maker-docker-tests.xml
 
-      - name: Pull pre-built directory-server image
-        run: docker pull $DIRECTORY_SERVER_IMAGE
+          coverage.xml
 
-      - name: Start Bitcoin Core for maker tests
-        run: |
-          docker compose up -d bitcoin
-
-          .github/scripts/wait-for-service.sh "Bitcoin" \
-            "docker compose exec -T bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo" \
-            60 1
-
-      - name: Run maker docker-marked tests only
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m docker maker/tests/ \
-            --junitxml=junit/maker-docker-tests.xml \
-            --cov=maker --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --fail-on-skip
-
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=50
-
-      - name: Cleanup
-        if: always()
-        run: docker compose down -v
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: maker-docker-results
-          path: |
-            junit/maker-docker-tests.xml
-            coverage.xml
-        if: always()
-
+          '
+      if: always()
   test-directory-server-docker:
     needs: build-images
     runs-on: ubuntu-latest
@@ -645,31 +635,29 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,directory_server
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,directory_server
+        install-dev: 'true'
+    - name: Run directory-server docker-marked tests
+      run: "pytest -c pytest.ini -m docker directory_server/tests/ \\\n  --junitxml=junit/directory-server-docker-tests.xml\
+        \ \\\n  --cov=directory_server --cov-report=term-missing --cov-report=xml\
+        \ \\\n  -v -s --timeout=300 --fail-on-skip\n"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: directory-server-docker-results
+        path: 'junit/directory-server-docker-tests.xml
 
-      - name: Run directory-server docker-marked tests
-        run: |
-          pytest -c pytest.ini -m docker directory_server/tests/ \
-            --junitxml=junit/directory-server-docker-tests.xml \
-            --cov=directory_server --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --fail-on-skip
+          coverage.xml
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: directory-server-docker-results
-          path: |
-            junit/directory-server-docker-tests.xml
-            coverage.xml
-        if: always()
-
+          '
+      if: always()
   test-reference-interop:
     needs: build-images
     runs-on: ubuntu-latest
@@ -678,156 +666,137 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: Clone and install reference implementation
-        run: |
-          git clone --depth 1 https://github.com/JoinMarket-Org/joinmarket-clientserver.git
-          sudo apt-get update && sudo apt-get install -y libsecp256k1-dev
-          pip install \
-            chromalog==1.0.5 \
-            service-identity==21.1.0 \
-            twisted==24.7.0 \
-            txtorcon==23.11.0 \
-            python-bitcointx==1.1.5 \
-            argon2_cffi==21.3.0 \
-            autobahn==20.12.3 \
-            fastbencode==0.3.6 \
-            mnemonic==0.20 \
-            pyjwt==2.4.0 \
-            klein \
-            werkzeug
+        '
+    - name: Clone and install reference implementation
+      run: "git clone --depth 1 https://github.com/JoinMarket-Org/joinmarket-clientserver.git\n\
+        sudo apt-get update && sudo apt-get install -y libsecp256k1-dev\npip install\
+        \ \\\n  chromalog==1.0.5 \\\n  service-identity==21.1.0 \\\n  twisted==24.7.0\
+        \ \\\n  txtorcon==23.11.0 \\\n  python-bitcointx==1.1.5 \\\n  argon2_cffi==21.3.0\
+        \ \\\n  autobahn==20.12.3 \\\n  fastbencode==0.3.6 \\\n  mnemonic==0.20 \\\
+        \n  pyjwt==2.4.0 \\\n  klein \\\n  werkzeug\n"
+    - name: Start reference services
+      env:
+        TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64
+          }}
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "docker compose --profile reference up -d\n\necho \"Waiting for Bitcoin...\"\
+        \nfor i in {1..60}; do\n  if docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ \\\n      -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\
+        \ 2>/dev/null; then\n    echo \"Bitcoin ready\"\n    break\n  fi\n  echo \"\
+        Attempt $i/60...\"\n  sleep 2\ndone\n\necho \"Waiting for directory server...\"\
+        \nfor i in {1..30}; do\n  if nc -z localhost 5222 2>/dev/null; then\n    echo\
+        \ \"Directory server ready\"\n    break\n  fi\n  sleep 2\ndone\n\necho \"\
+        Waiting for Tor hidden service...\"\nfor i in {1..90}; do\n  if docker compose\
+        \ exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | grep -q \"\
+        .onion\"; then\n    ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname\
+        \ 2>/dev/null | tr -d '[:space:]')\n    echo \"Tor ready with onion address:\
+        \ $ONION\"\n    break\n  fi\n  echo \"Attempt $i/90: Waiting for Tor...\"\n\
+        \  sleep 2\ndone\n\necho \"Waiting for JAM...\"\nfor i in {1..30}; do\n  if\
+        \ docker compose exec -T jam sh -c \"timeout 5 bash -c '</dev/tcp/127.0.0.1/80'\"\
+        \ 2>/dev/null; then\n    echo \"JAM ready\"\n    break\n  fi\n  sleep 5\n\
+        done\n\necho \"Waiting for makers to connect...\"\nsleep 30\n\necho \"Reference\
+        \ services ready!\"\n"
+    - name: Run reference compatibility tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m reference tests/e2e/test_our_maker_reference_taker.py\
+        \ \\\n  --junitxml=junit/test-results.xml \\\n  --cov --cov-report=term-missing\
+        \ --cov-report=xml \\\n  -v -s --timeout=300 --reruns=1 --reruns-delay=10\
+        \ --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-      - name: "Start reference services"
-        env:
-          TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64 }}
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          docker compose --profile reference up -d
+        docker compose --profile reference ps
 
-          echo "Waiting for Bitcoin..."
-          for i in {1..60}; do
-            if docker compose exec -T bitcoin bitcoin-cli -chain=regtest \
-                -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
-              echo "Bitcoin ready"
-              break
-            fi
-            echo "Attempt $i/60..."
-            sleep 2
-          done
+        echo ""
 
-          echo "Waiting for directory server..."
-          for i in {1..30}; do
-            if nc -z localhost 5222 2>/dev/null; then
-              echo "Directory server ready"
-              break
-            fi
-            sleep 2
-          done
+        echo "=== Bitcoin logs ==="
 
-          echo "Waiting for Tor hidden service..."
-          for i in {1..90}; do
-            if docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | grep -q ".onion"; then
-              ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | tr -d '[:space:]')
-              echo "Tor ready with onion address: $ONION"
-              break
-            fi
-            echo "Attempt $i/90: Waiting for Tor..."
-            sleep 2
-          done
+        docker compose logs bitcoin --tail=30
 
-          echo "Waiting for JAM..."
-          for i in {1..30}; do
-            if docker compose exec -T jam sh -c "timeout 5 bash -c '</dev/tcp/127.0.0.1/80'" 2>/dev/null; then
-              echo "JAM ready"
-              break
-            fi
-            sleep 5
-          done
+        echo ""
 
-          echo "Waiting for makers to connect..."
-          sleep 30
+        echo "=== Directory logs ==="
 
-          echo "Reference services ready!"
+        docker compose logs directory --tail=50
 
-      - name: Run reference compatibility tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m reference tests/e2e/test_our_maker_reference_taker.py \
-            --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=1 --reruns-delay=10 --fail-on-skip
+        echo ""
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile reference ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Directory logs ==="
-          docker compose logs directory --tail=50
-          echo ""
-          echo "=== Maker1 logs ==="
-          docker compose logs maker1 --tail=50
-          echo ""
-          echo "=== Maker2 logs ==="
-          docker compose logs maker2 --tail=50
-          echo ""
-          echo "=== Tor logs ==="
-          docker compose logs tor --tail=30
-          echo ""
-          echo "=== JAM logs ==="
-          docker compose logs jam --tail=100
+        echo "=== Maker1 logs ==="
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile reference down -v
+        docker compose logs maker1 --tail=50
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: reference-interop-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo ""
 
+        echo "=== Maker2 logs ==="
+
+        docker compose logs maker2 --tail=50
+
+        echo ""
+
+        echo "=== Tor logs ==="
+
+        docker compose logs tor --tail=30
+
+        echo ""
+
+        echo "=== JAM logs ==="
+
+        docker compose logs jam --tail=100
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile reference down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: reference-interop-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-reference-legacy:
     needs: build-images
     runs-on: ubuntu-latest
@@ -836,156 +805,137 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: Clone and install reference implementation
-        run: |
-          git clone --depth 1 https://github.com/JoinMarket-Org/joinmarket-clientserver.git
-          sudo apt-get update && sudo apt-get install -y libsecp256k1-dev
-          pip install \
-            chromalog==1.0.5 \
-            service-identity==21.1.0 \
-            twisted==24.7.0 \
-            txtorcon==23.11.0 \
-            python-bitcointx==1.1.5 \
-            argon2_cffi==21.3.0 \
-            autobahn==20.12.3 \
-            fastbencode==0.3.6 \
-            mnemonic==0.20 \
-            pyjwt==2.4.0 \
-            klein \
-            werkzeug
+        '
+    - name: Clone and install reference implementation
+      run: "git clone --depth 1 https://github.com/JoinMarket-Org/joinmarket-clientserver.git\n\
+        sudo apt-get update && sudo apt-get install -y libsecp256k1-dev\npip install\
+        \ \\\n  chromalog==1.0.5 \\\n  service-identity==21.1.0 \\\n  twisted==24.7.0\
+        \ \\\n  txtorcon==23.11.0 \\\n  python-bitcointx==1.1.5 \\\n  argon2_cffi==21.3.0\
+        \ \\\n  autobahn==20.12.3 \\\n  fastbencode==0.3.6 \\\n  mnemonic==0.20 \\\
+        \n  pyjwt==2.4.0 \\\n  klein \\\n  werkzeug\n"
+    - name: Start reference services
+      env:
+        TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64
+          }}
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "docker compose --profile reference up -d\n\necho \"Waiting for Bitcoin...\"\
+        \nfor i in {1..60}; do\n  if docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ \\\n      -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\
+        \ 2>/dev/null; then\n    echo \"Bitcoin ready\"\n    break\n  fi\n  echo \"\
+        Attempt $i/60...\"\n  sleep 2\ndone\n\necho \"Waiting for directory server...\"\
+        \nfor i in {1..30}; do\n  if nc -z localhost 5222 2>/dev/null; then\n    echo\
+        \ \"Directory server ready\"\n    break\n  fi\n  sleep 2\ndone\n\necho \"\
+        Waiting for Tor hidden service...\"\nfor i in {1..90}; do\n  if docker compose\
+        \ exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | grep -q \"\
+        .onion\"; then\n    ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname\
+        \ 2>/dev/null | tr -d '[:space:]')\n    echo \"Tor ready with onion address:\
+        \ $ONION\"\n    break\n  fi\n  echo \"Attempt $i/90: Waiting for Tor...\"\n\
+        \  sleep 2\ndone\n\necho \"Waiting for JAM...\"\nfor i in {1..30}; do\n  if\
+        \ docker compose exec -T jam sh -c \"timeout 5 bash -c '</dev/tcp/127.0.0.1/80'\"\
+        \ 2>/dev/null; then\n    echo \"JAM ready\"\n    break\n  fi\n  sleep 5\n\
+        done\n\necho \"Waiting for makers to connect...\"\nsleep 30\n\necho \"Reference\
+        \ services ready!\"\n"
+    - name: Run reference compatibility tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m reference tests/e2e/test_reference_coinjoin.py\
+        \ tests/e2e/test_reference_bond_import.py \\\n  --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=300\
+        \ --reruns=1 --reruns-delay=10 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-      - name: "Start reference services"
-        env:
-          TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64 }}
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          docker compose --profile reference up -d
+        docker compose --profile reference ps
 
-          echo "Waiting for Bitcoin..."
-          for i in {1..60}; do
-            if docker compose exec -T bitcoin bitcoin-cli -chain=regtest \
-                -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
-              echo "Bitcoin ready"
-              break
-            fi
-            echo "Attempt $i/60..."
-            sleep 2
-          done
+        echo ""
 
-          echo "Waiting for directory server..."
-          for i in {1..30}; do
-            if nc -z localhost 5222 2>/dev/null; then
-              echo "Directory server ready"
-              break
-            fi
-            sleep 2
-          done
+        echo "=== Bitcoin logs ==="
 
-          echo "Waiting for Tor hidden service..."
-          for i in {1..90}; do
-            if docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | grep -q ".onion"; then
-              ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | tr -d '[:space:]')
-              echo "Tor ready with onion address: $ONION"
-              break
-            fi
-            echo "Attempt $i/90: Waiting for Tor..."
-            sleep 2
-          done
+        docker compose logs bitcoin --tail=30
 
-          echo "Waiting for JAM..."
-          for i in {1..30}; do
-            if docker compose exec -T jam sh -c "timeout 5 bash -c '</dev/tcp/127.0.0.1/80'" 2>/dev/null; then
-              echo "JAM ready"
-              break
-            fi
-            sleep 5
-          done
+        echo ""
 
-          echo "Waiting for makers to connect..."
-          sleep 30
+        echo "=== Directory logs ==="
 
-          echo "Reference services ready!"
+        docker compose logs directory --tail=50
 
-      - name: Run reference compatibility tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m reference tests/e2e/test_reference_coinjoin.py tests/e2e/test_reference_bond_import.py \
-            --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=1 --reruns-delay=10 --fail-on-skip
+        echo ""
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile reference ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Directory logs ==="
-          docker compose logs directory --tail=50
-          echo ""
-          echo "=== Maker1 logs ==="
-          docker compose logs maker1 --tail=50
-          echo ""
-          echo "=== Maker2 logs ==="
-          docker compose logs maker2 --tail=50
-          echo ""
-          echo "=== Tor logs ==="
-          docker compose logs tor --tail=30
-          echo ""
-          echo "=== JAM logs ==="
-          docker compose logs jam --tail=100
+        echo "=== Maker1 logs ==="
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile reference down -v
+        docker compose logs maker1 --tail=50
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: reference-legacy-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo ""
 
+        echo "=== Maker2 logs ==="
+
+        docker compose logs maker2 --tail=50
+
+        echo ""
+
+        echo "=== Tor logs ==="
+
+        docker compose logs tor --tail=30
+
+        echo ""
+
+        echo "=== JAM logs ==="
+
+        docker compose logs jam --tail=100
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile reference down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: reference-legacy-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-neutrino-functional:
     needs: build-images
     runs-on: ubuntu-latest
@@ -994,121 +944,111 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: "Start neutrino services"
-        env:
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          docker compose --profile neutrino up -d
+        '
+    - name: Start neutrino services
+      env:
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "docker compose --profile neutrino up -d\n\necho \"Waiting for Bitcoin...\"\
+        \nfor i in {1..60}; do\n  if docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ \\\n      -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\
+        \ 2>/dev/null; then\n    echo \"Bitcoin ready\"\n    break\n  fi\n  echo \"\
+        Attempt $i/60...\"\n  sleep 2\ndone\n\necho \"Waiting for directory server...\"\
+        \nfor i in {1..30}; do\n  if nc -z localhost 5222 2>/dev/null; then\n    echo\
+        \ \"Directory server ready\"\n    break\n  fi\n  sleep 2\ndone\n\necho \"\
+        Waiting for Neutrino sync...\"\nfor i in {1..120}; do\n  TOKEN=$(docker compose\
+        \ exec -T neutrino cat /data/neutrino/auth_token 2>/dev/null || true)\n  if\
+        \ [ -n \"$TOKEN\" ]; then\n    HEIGHT=$(curl -sk -H \"Authorization: Bearer\
+        \ $TOKEN\" https://localhost:8334/v1/status 2>/dev/null | python3 -c 'import\
+        \ json,sys; print(int(json.load(sys.stdin).get(\"block_height\", 0)))' 2>/dev/null\
+        \ || echo 0)\n  else\n    HEIGHT=$(curl -sf http://localhost:8334/v1/status\
+        \ 2>/dev/null | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get(\"\
+        block_height\", 0)))' 2>/dev/null || echo 0)\n  fi\n  if [ \"$HEIGHT\" -gt\
+        \ 0 ]; then\n    echo \"Neutrino ready at height: $HEIGHT\"\n    break\n \
+        \ fi\n  echo \"Attempt $i/120: neutrino height=$HEIGHT\"\n  sleep 2\ndone\n\
+        \necho \"Neutrino services ready!\"\n"
+    - name: Run neutrino backend tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+        NEUTRINO_URL: https://127.0.0.1:8334
+      run: "pytest -c pytest.ini -m neutrino -k \"not test_coinjoin\" --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=300\
+        \ --reruns=1 --reruns-delay=10 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-          echo "Waiting for Bitcoin..."
-          for i in {1..60}; do
-            if docker compose exec -T bitcoin bitcoin-cli -chain=regtest \
-                -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
-              echo "Bitcoin ready"
-              break
-            fi
-            echo "Attempt $i/60..."
-            sleep 2
-          done
+        docker compose --profile neutrino ps
 
-          echo "Waiting for directory server..."
-          for i in {1..30}; do
-            if nc -z localhost 5222 2>/dev/null; then
-              echo "Directory server ready"
-              break
-            fi
-            sleep 2
-          done
+        echo ""
 
-          echo "Waiting for Neutrino sync..."
-          for i in {1..120}; do
-            TOKEN=$(docker compose exec -T neutrino cat /data/neutrino/auth_token 2>/dev/null || true)
-            if [ -n "$TOKEN" ]; then
-              HEIGHT=$(curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8334/v1/status 2>/dev/null | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get("block_height", 0)))' 2>/dev/null || echo 0)
-            else
-              HEIGHT=$(curl -sf http://localhost:8334/v1/status 2>/dev/null | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get("block_height", 0)))' 2>/dev/null || echo 0)
-            fi
-            if [ "$HEIGHT" -gt 0 ]; then
-              echo "Neutrino ready at height: $HEIGHT"
-              break
-            fi
-            echo "Attempt $i/120: neutrino height=$HEIGHT"
-            sleep 2
-          done
+        echo "=== Bitcoin logs ==="
 
-          echo "Neutrino services ready!"
+        docker compose logs bitcoin --tail=30
 
-      - name: Run neutrino backend tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-          NEUTRINO_URL: https://127.0.0.1:8334
-        run: |
-          pytest -c pytest.ini -m neutrino -k "not test_coinjoin" --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=1 --reruns-delay=10 --fail-on-skip
+        echo ""
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile neutrino ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Neutrino logs ==="
-          docker compose logs neutrino --tail=50
-          echo ""
-          echo "=== Maker-neutrino logs ==="
-          docker compose logs maker-neutrino --tail=50
+        echo "=== Neutrino logs ==="
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile neutrino down -v
+        docker compose logs neutrino --tail=50
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: neutrino-functional-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo ""
 
+        echo "=== Maker-neutrino logs ==="
+
+        docker compose logs maker-neutrino --tail=50
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile neutrino down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: neutrino-functional-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-neutrino-coinjoin:
     needs: build-images
     runs-on: ubuntu-latest
@@ -1117,121 +1057,111 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: "Start neutrino services"
-        env:
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          docker compose --profile neutrino up -d
+        '
+    - name: Start neutrino services
+      env:
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "docker compose --profile neutrino up -d\n\necho \"Waiting for Bitcoin...\"\
+        \nfor i in {1..60}; do\n  if docker compose exec -T bitcoin bitcoin-cli -chain=regtest\
+        \ \\\n      -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo\
+        \ 2>/dev/null; then\n    echo \"Bitcoin ready\"\n    break\n  fi\n  echo \"\
+        Attempt $i/60...\"\n  sleep 2\ndone\n\necho \"Waiting for directory server...\"\
+        \nfor i in {1..30}; do\n  if nc -z localhost 5222 2>/dev/null; then\n    echo\
+        \ \"Directory server ready\"\n    break\n  fi\n  sleep 2\ndone\n\necho \"\
+        Waiting for Neutrino sync...\"\nfor i in {1..120}; do\n  TOKEN=$(docker compose\
+        \ exec -T neutrino cat /data/neutrino/auth_token 2>/dev/null || true)\n  if\
+        \ [ -n \"$TOKEN\" ]; then\n    HEIGHT=$(curl -sk -H \"Authorization: Bearer\
+        \ $TOKEN\" https://localhost:8334/v1/status 2>/dev/null | python3 -c 'import\
+        \ json,sys; print(int(json.load(sys.stdin).get(\"block_height\", 0)))' 2>/dev/null\
+        \ || echo 0)\n  else\n    HEIGHT=$(curl -sf http://localhost:8334/v1/status\
+        \ 2>/dev/null | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get(\"\
+        block_height\", 0)))' 2>/dev/null || echo 0)\n  fi\n  if [ \"$HEIGHT\" -gt\
+        \ 0 ]; then\n    echo \"Neutrino ready at height: $HEIGHT\"\n    break\n \
+        \ fi\n  echo \"Attempt $i/120: neutrino height=$HEIGHT\"\n  sleep 2\ndone\n\
+        \necho \"Neutrino services ready!\"\n"
+    - name: Run neutrino backend tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+        NEUTRINO_URL: https://127.0.0.1:8334
+      run: "pytest -c pytest.ini -m neutrino -k \"test_coinjoin\" --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=300\
+        \ --reruns=2 --reruns-delay=15 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-          echo "Waiting for Bitcoin..."
-          for i in {1..60}; do
-            if docker compose exec -T bitcoin bitcoin-cli -chain=regtest \
-                -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
-              echo "Bitcoin ready"
-              break
-            fi
-            echo "Attempt $i/60..."
-            sleep 2
-          done
+        docker compose --profile neutrino ps
 
-          echo "Waiting for directory server..."
-          for i in {1..30}; do
-            if nc -z localhost 5222 2>/dev/null; then
-              echo "Directory server ready"
-              break
-            fi
-            sleep 2
-          done
+        echo ""
 
-          echo "Waiting for Neutrino sync..."
-          for i in {1..120}; do
-            TOKEN=$(docker compose exec -T neutrino cat /data/neutrino/auth_token 2>/dev/null || true)
-            if [ -n "$TOKEN" ]; then
-              HEIGHT=$(curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8334/v1/status 2>/dev/null | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get("block_height", 0)))' 2>/dev/null || echo 0)
-            else
-              HEIGHT=$(curl -sf http://localhost:8334/v1/status 2>/dev/null | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get("block_height", 0)))' 2>/dev/null || echo 0)
-            fi
-            if [ "$HEIGHT" -gt 0 ]; then
-              echo "Neutrino ready at height: $HEIGHT"
-              break
-            fi
-            echo "Attempt $i/120: neutrino height=$HEIGHT"
-            sleep 2
-          done
+        echo "=== Bitcoin logs ==="
 
-          echo "Neutrino services ready!"
+        docker compose logs bitcoin --tail=30
 
-      - name: Run neutrino backend tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-          NEUTRINO_URL: https://127.0.0.1:8334
-        run: |
-          pytest -c pytest.ini -m neutrino -k "test_coinjoin" --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=2 --reruns-delay=15 --fail-on-skip
+        echo ""
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile neutrino ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Neutrino logs ==="
-          docker compose logs neutrino --tail=50
-          echo ""
-          echo "=== Maker-neutrino logs ==="
-          docker compose logs maker-neutrino --tail=50
+        echo "=== Neutrino logs ==="
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile neutrino down -v
+        docker compose logs neutrino --tail=50
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: neutrino-coinjoin-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo ""
 
+        echo "=== Maker-neutrino logs ==="
+
+        docker compose logs maker-neutrino --tail=50
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile neutrino down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: neutrino-coinjoin-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-neutrino-reference:
     needs: build-images
     runs-on: ubuntu-latest
@@ -1240,168 +1170,146 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
+        install-dev: 'true'
+    - name: Install JAM dependencies
+      run: "pip install \\\n  autobahn==22.7.1 \\\n  twisted==22.10.0 \\\n  mnemonic==0.20\
+        \ \\\n  pyjwt==2.4.0 \\\n  klein \\\n  werkzeug\n"
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Install JAM dependencies
-        run: |
-          pip install \
-            autobahn==22.7.1 \
-            twisted==22.10.0 \
-            mnemonic==0.20 \
-            pyjwt==2.4.0 \
-            klein \
-            werkzeug
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $MAKER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $TAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
+        '
+    - name: Start reference + neutrino services
+      env:
+        TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64
+          }}
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "docker compose --profile reference --profile neutrino up -d\n\necho \"\
+        Waiting for Bitcoin...\"\nfor i in {1..60}; do\n  if docker compose exec -T\
+        \ bitcoin bitcoin-cli -chain=regtest \\\n      -rpcport=18443 -rpcuser=test\
+        \ -rpcpassword=test getblockchaininfo 2>/dev/null; then\n    echo \"Bitcoin\
+        \ ready\"\n    break\n  fi\n  echo \"Attempt $i/60...\"\n  sleep 2\ndone\n\
+        \necho \"Waiting for directory server...\"\nfor i in {1..30}; do\n  if nc\
+        \ -z localhost 5222 2>/dev/null; then\n    echo \"Directory server ready\"\
+        \n    break\n  fi\n  sleep 2\ndone\n\necho \"Waiting for Tor hidden service...\"\
+        \nfor i in {1..90}; do\n  if docker compose exec -T tor cat /var/lib/tor/directory/hostname\
+        \ 2>/dev/null | grep -q \".onion\"; then\n    ONION=$(docker compose exec\
+        \ -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | tr -d '[:space:]')\n\
+        \    echo \"Tor ready with onion address: $ONION\"\n    break\n  fi\n  echo\
+        \ \"Attempt $i/90: Waiting for Tor...\"\n  sleep 2\ndone\n\necho \"Waiting\
+        \ for JAM...\"\nfor i in {1..30}; do\n  if docker compose exec -T jam sh -c\
+        \ \"timeout 5 bash -c '</dev/tcp/127.0.0.1/80'\" 2>/dev/null; then\n    echo\
+        \ \"JAM ready\"\n    break\n  fi\n  sleep 5\ndone\n\necho \"Waiting for Neutrino...\"\
+        \nfor i in {1..30}; do\n  TOKEN=$(docker compose exec -T neutrino cat /data/neutrino/auth_token\
+        \ 2>/dev/null || true)\n  if [ -n \"$TOKEN\" ]; then\n    if curl -sk -H \"\
+        Authorization: Bearer $TOKEN\" https://localhost:8334/v1/status >/dev/null\
+        \ 2>&1; then\n      echo \"Neutrino ready\"\n      break\n    fi\n  else\n\
+        \    if curl -s http://localhost:8334/v1/status >/dev/null 2>&1; then\n  \
+        \    echo \"Neutrino ready\"\n      break\n    fi\n  fi\n  sleep 2\ndone\n\
+        \necho \"Waiting for makers to connect and announce offers...\"\nsleep 60\n\
+        \necho \"Reference + neutrino services ready!\"\n"
+    - name: Run neutrino-reference compatibility tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18443
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+        NEUTRINO_URL: https://127.0.0.1:8334
+      run: "pytest -c pytest.ini -m neutrino_reference --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=900\
+        \ --reruns=1 --reruns-delay=10 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-      - name: "Start reference + neutrino services"
-        env:
-          TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64 }}
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          docker compose --profile reference --profile neutrino up -d
+        docker compose --profile reference --profile neutrino ps
 
-          echo "Waiting for Bitcoin..."
-          for i in {1..60}; do
-            if docker compose exec -T bitcoin bitcoin-cli -chain=regtest \
-                -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
-              echo "Bitcoin ready"
-              break
-            fi
-            echo "Attempt $i/60..."
-            sleep 2
-          done
+        echo ""
 
-          echo "Waiting for directory server..."
-          for i in {1..30}; do
-            if nc -z localhost 5222 2>/dev/null; then
-              echo "Directory server ready"
-              break
-            fi
-            sleep 2
-          done
+        echo "=== Bitcoin logs ==="
 
-          echo "Waiting for Tor hidden service..."
-          for i in {1..90}; do
-            if docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | grep -q ".onion"; then
-              ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | tr -d '[:space:]')
-              echo "Tor ready with onion address: $ONION"
-              break
-            fi
-            echo "Attempt $i/90: Waiting for Tor..."
-            sleep 2
-          done
+        docker compose logs bitcoin --tail=30
 
-          echo "Waiting for JAM..."
-          for i in {1..30}; do
-            if docker compose exec -T jam sh -c "timeout 5 bash -c '</dev/tcp/127.0.0.1/80'" 2>/dev/null; then
-              echo "JAM ready"
-              break
-            fi
-            sleep 5
-          done
+        echo ""
 
-          echo "Waiting for Neutrino..."
-          for i in {1..30}; do
-            TOKEN=$(docker compose exec -T neutrino cat /data/neutrino/auth_token 2>/dev/null || true)
-            if [ -n "$TOKEN" ]; then
-              if curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8334/v1/status >/dev/null 2>&1; then
-                echo "Neutrino ready"
-                break
-              fi
-            else
-              if curl -s http://localhost:8334/v1/status >/dev/null 2>&1; then
-                echo "Neutrino ready"
-                break
-              fi
-            fi
-            sleep 2
-          done
+        echo "=== Directory logs ==="
 
-          echo "Waiting for makers to connect and announce offers..."
-          sleep 60
+        docker compose logs directory --tail=50
 
-          echo "Reference + neutrino services ready!"
+        echo ""
 
-      - name: Run neutrino-reference compatibility tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18443
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-          NEUTRINO_URL: https://127.0.0.1:8334
-        run: |
-          pytest -c pytest.ini -m neutrino_reference --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=900 --reruns=1 --reruns-delay=10 --fail-on-skip
+        echo "=== Maker1 logs ==="
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile reference --profile neutrino ps
-          echo ""
-          echo "=== Bitcoin logs ==="
-          docker compose logs bitcoin --tail=30
-          echo ""
-          echo "=== Directory logs ==="
-          docker compose logs directory --tail=50
-          echo ""
-          echo "=== Maker1 logs ==="
-          docker compose logs maker1 --tail=50
-          echo ""
-          echo "=== Maker2 logs ==="
-          docker compose logs maker2 --tail=50
-          echo ""
-          echo "=== Neutrino maker logs ==="
-          docker compose logs maker-neutrino --tail=100
-          echo ""
-          echo "=== Tor logs ==="
-          docker compose logs tor --tail=30
-          echo ""
-          echo "=== JAM logs ==="
-          docker compose logs jam --tail=50
+        docker compose logs maker1 --tail=50
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile reference --profile neutrino down -v
+        echo ""
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: neutrino-reference-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        echo "=== Maker2 logs ==="
 
+        docker compose logs maker2 --tail=50
+
+        echo ""
+
+        echo "=== Neutrino maker logs ==="
+
+        docker compose logs maker-neutrino --tail=100
+
+        echo ""
+
+        echo "=== Tor logs ==="
+
+        docker compose logs tor --tail=30
+
+        echo ""
+
+        echo "=== JAM logs ==="
+
+        docker compose logs jam --tail=50
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile reference --profile neutrino down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: neutrino-reference-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   test-reference-maker:
     needs: build-images
     runs-on: ubuntu-latest
@@ -1410,141 +1318,125 @@ jobs:
       contents: read
       packages: read
     env:
-      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
-      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{ github.event.pull_request.head.sha || github.sha }}
+      DIRECTORY_SERVER_IMAGE: ghcr.io/${{ github.repository }}/directory-server:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      ORDERBOOK_WATCHER_IMAGE: ghcr.io/${{ github.repository }}/orderbook-watcher:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      MAKER_IMAGE: ghcr.io/${{ github.repository }}/maker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
+      TAKER_IMAGE: ghcr.io/${{ github.repository }}/taker:ci-unsafe-do-not-run-${{
+        github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: ./.github/actions/setup-python-deps
-        with:
-          components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
-          install-dev: 'true'
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name || github.repository
+          }}
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
+    - uses: ./.github/actions/setup-python-deps
+      with:
+        components: jmcore,jmwallet,directory_server,orderbook_watcher,maker,taker
+        install-dev: 'true'
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Pull pre-built images
+      run: 'docker pull $DIRECTORY_SERVER_IMAGE
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        docker pull $ORDERBOOK_WATCHER_IMAGE
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        docker pull $MAKER_IMAGE
 
-      - name: Pull pre-built images
-        run: |
-          docker pull $DIRECTORY_SERVER_IMAGE
-          docker pull $ORDERBOOK_WATCHER_IMAGE
-          docker pull $MAKER_IMAGE
-          docker pull $TAKER_IMAGE
+        docker pull $TAKER_IMAGE
 
-      - name: "Start reference-maker services"
-        env:
-          TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64 }}
-          DOCKER_BUILDKIT: 1
-          COMPOSE_DOCKER_CLI_BUILD: 1
-        run: |
-          docker compose --profile reference-maker up -d
+        '
+    - name: Start reference-maker services
+      env:
+        TOR_HS_ED25519_SECRET_KEY_BASE64: ${{ secrets.TOR_HS_ED25519_SECRET_KEY_BASE64
+          }}
+        DOCKER_BUILDKIT: 1
+        COMPOSE_DOCKER_CLI_BUILD: 1
+      run: "docker compose --profile reference-maker up -d\n\necho \"Waiting for Bitcoin...\"\
+        \nfor i in {1..60}; do\n  if docker compose exec -T bitcoin-jam bitcoin-cli\
+        \ -chain=regtest \\\n      -rpcport=18445 -rpcuser=test -rpcpassword=test\
+        \ getblockchaininfo 2>/dev/null; then\n    echo \"Bitcoin ready\"\n    break\n\
+        \  fi\n  echo \"Attempt $i/60...\"\n  sleep 2\ndone\n\necho \"Waiting for\
+        \ directory server...\"\nfor i in {1..30}; do\n  if nc -z localhost 5222 2>/dev/null;\
+        \ then\n    echo \"Directory server ready\"\n    break\n  fi\n  sleep 2\n\
+        done\n\necho \"Waiting for Tor hidden service...\"\nfor i in {1..90}; do\n\
+        \  if docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null\
+        \ | grep -q \".onion\"; then\n    ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname\
+        \ 2>/dev/null | tr -d '[:space:]')\n    echo \"Tor ready with onion address:\
+        \ $ONION\"\n    break\n  fi\n  echo \"Attempt $i/90: Waiting for Tor...\"\n\
+        \  sleep 2\ndone\n\necho \"Waiting for JAM makers...\"\nfor i in {1..30};\
+        \ do\n  if docker compose exec -T jam-maker1 sh -c \"timeout 5 bash -c '</dev/tcp/127.0.0.1/80'\"\
+        \ 2>/dev/null; then\n    echo \"JAM maker1 ready\"\n    break\n  fi\n  sleep\
+        \ 5\ndone\n\necho \"Waiting for reference makers to connect...\"\nsleep 30\n\
+        \necho \"Reference-maker services ready!\"\n"
+    - name: Run reference-maker compatibility tests
+      env:
+        BITCOIN_RPC_URL: http://127.0.0.1:18445
+        BITCOIN_RPC_USER: test
+        BITCOIN_RPC_PASSWORD: test
+      run: "pytest -c pytest.ini -m reference_maker --junitxml=junit/test-results.xml\
+        \ \\\n  --cov --cov-report=term-missing --cov-report=xml \\\n  -v -s --timeout=300\
+        \ --reruns=1 --reruns-delay=10 --fail-on-skip\n"
+    - name: Show logs
+      if: always()
+      run: 'echo "=== Docker compose status ==="
 
-          echo "Waiting for Bitcoin..."
-          for i in {1..60}; do
-            if docker compose exec -T bitcoin-jam bitcoin-cli -chain=regtest \
-                -rpcport=18445 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
-              echo "Bitcoin ready"
-              break
-            fi
-            echo "Attempt $i/60..."
-            sleep 2
-          done
+        docker compose --profile reference-maker ps
 
-          echo "Waiting for directory server..."
-          for i in {1..30}; do
-            if nc -z localhost 5222 2>/dev/null; then
-              echo "Directory server ready"
-              break
-            fi
-            sleep 2
-          done
+        echo ""
 
-          echo "Waiting for Tor hidden service..."
-          for i in {1..90}; do
-            if docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | grep -q ".onion"; then
-              ONION=$(docker compose exec -T tor cat /var/lib/tor/directory/hostname 2>/dev/null | tr -d '[:space:]')
-              echo "Tor ready with onion address: $ONION"
-              break
-            fi
-            echo "Attempt $i/90: Waiting for Tor..."
-            sleep 2
-          done
+        echo "=== Bitcoin-jam logs ==="
 
-          echo "Waiting for JAM makers..."
-          for i in {1..30}; do
-            if docker compose exec -T jam-maker1 sh -c "timeout 5 bash -c '</dev/tcp/127.0.0.1/80'" 2>/dev/null; then
-              echo "JAM maker1 ready"
-              break
-            fi
-            sleep 5
-          done
+        docker compose logs bitcoin-jam --tail=30
 
-          echo "Waiting for reference makers to connect..."
-          sleep 30
+        echo ""
 
-          echo "Reference-maker services ready!"
+        echo "=== Directory logs ==="
 
-      - name: Run reference-maker compatibility tests
-        env:
-          BITCOIN_RPC_URL: http://127.0.0.1:18445
-          BITCOIN_RPC_USER: test
-          BITCOIN_RPC_PASSWORD: test
-        run: |
-          pytest -c pytest.ini -m reference_maker --junitxml=junit/test-results.xml \
-            --cov --cov-report=term-missing --cov-report=xml \
-            -v -s --timeout=300 --reruns=1 --reruns-delay=10 --fail-on-skip
+        docker compose logs directory --tail=50
 
-      - name: Show logs
-        if: always()
-        run: |
-          echo "=== Docker compose status ==="
-          docker compose --profile reference-maker ps
-          echo ""
-          echo "=== Bitcoin-jam logs ==="
-          docker compose logs bitcoin-jam --tail=30
-          echo ""
-          echo "=== Directory logs ==="
-          docker compose logs directory --tail=50
-          echo ""
-          echo "=== Tor logs ==="
-          docker compose logs tor --tail=30
-          echo ""
-          echo "=== JAM Maker1 logs ==="
-          docker compose logs jam-maker1 --tail=100
-          echo ""
-          echo "=== JAM Maker2 logs ==="
-          docker compose logs jam-maker2 --tail=100
+        echo ""
 
-      - name: Cleanup
-        if: always()
-        run: docker compose --profile reference-maker down -v
+        echo "=== Tor logs ==="
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: reference-maker-results
-          path: |
-            junit/test-results.xml
-            coverage.xml
-        if: always()
+        docker compose logs tor --tail=30
 
-  # ==========================================================================
-  # Stage 4a: ARM64 builds (parallel with everything else)
-  # Only on main to save time on PRs
-  # Builds ARM64 images natively on ARM64 runners for faster builds
-  # ==========================================================================
+        echo ""
+
+        echo "=== JAM Maker1 logs ==="
+
+        docker compose logs jam-maker1 --tail=100
+
+        echo ""
+
+        echo "=== JAM Maker2 logs ==="
+
+        docker compose logs jam-maker2 --tail=100
+
+        '
+    - name: Cleanup
+      if: always()
+      run: docker compose --profile reference-maker down -v
+    - uses: actions/upload-artifact@v7
+      with:
+        name: reference-maker-results
+        path: 'junit/test-results.xml
+
+          coverage.xml
+
+          '
+      if: always()
   build-arm64:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -1554,86 +1446,85 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: directory-server
-            dockerfile: ./directory_server/Dockerfile
-            image: directory-server
-            target: production
-            tag_suffix: ""
-          - name: directory-server-debug
-            dockerfile: ./directory_server/Dockerfile
-            image: directory-server-debug
-            target: debug
-            tag_suffix: ""
-          - name: orderbook-watcher
-            dockerfile: ./orderbook_watcher/Dockerfile
-            image: orderbook-watcher
-            target: ""
-            tag_suffix: ""
-          - name: maker
-            dockerfile: ./maker/Dockerfile
-            image: maker
-            target: ""
-            tag_suffix: ""
-          - name: taker
-            dockerfile: ./taker/Dockerfile
-            image: taker
-            target: ""
-            tag_suffix: ""
-          - name: jam-ng
-            dockerfile: ./jmwalletd/Dockerfile
-            image: jam-ng
-            target: "jam-ng"
-            tag_suffix: ""
-          - name: jmwalletd
-            dockerfile: ./jmwalletd/Dockerfile
-            image: jmwalletd
-            target: "jmwalletd"
-            tag_suffix: ""
-
+        - name: directory-server
+          dockerfile: ./directory_server/Dockerfile
+          image: directory-server
+          target: production
+          tag_suffix: ''
+        - name: directory-server-debug
+          dockerfile: ./directory_server/Dockerfile
+          image: directory-server-debug
+          target: debug
+          tag_suffix: ''
+        - name: orderbook-watcher
+          dockerfile: ./orderbook_watcher/Dockerfile
+          image: orderbook-watcher
+          target: ''
+          tag_suffix: ''
+        - name: maker
+          dockerfile: ./maker/Dockerfile
+          image: maker
+          target: ''
+          tag_suffix: ''
+        - name: taker
+          dockerfile: ./taker/Dockerfile
+          image: taker
+          target: ''
+          tag_suffix: ''
+        - name: jam-ng
+          dockerfile: ./jmwalletd/Dockerfile
+          image: jam-ng
+          target: jam-ng
+          tag_suffix: ''
+        - name: jmwalletd
+          dockerfile: ./jmwalletd/Dockerfile
+          image: jmwalletd
+          target: jmwalletd
+          tag_suffix: ''
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - name: Get Git commit timestamp for reproducible builds
+      run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push ARM64 image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        target: ${{ matrix.target || '' }}
+        push: true
+        platforms: linux/arm64
+        tags: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{
+          github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-arm64
+        cache-from: 'type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{
+          matrix.image }}:buildcache-arm64
 
-      - name: Get Git commit timestamp for reproducible builds
-        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+          type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image
+          }}:latest
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          '
+        cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{
+          matrix.image }}:buildcache-arm64,mode=max
+        build-args: 'BUILDKIT_INLINE_CACHE=1
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
 
-      - name: Build and push ARM64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target || '' }}
-          push: true
-          platforms: linux/arm64
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{ github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-arm64
-          cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache-arm64
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:latest
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache-arm64,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
-            JOINMARKET_BUILD_COMMIT=${{ github.sha }}
-            JOINMARKET_BUILD_REF=${{ github.ref_name }}
-        env:
-          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          JOINMARKET_BUILD_COMMIT=${{ github.sha }}
 
-  # ==========================================================================
-  # Stage 4b: ARMv7 builds (parallel with everything else)
-  # Only on main to save time on PRs
-  # Builds ARMv7 images using QEMU emulation
-  # ==========================================================================
+          JOINMARKET_BUILD_REF=${{ github.ref_name }}
+
+          '
+      env:
+        SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
   build-armv7:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -1645,112 +1536,106 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: directory-server
-            dockerfile: ./directory_server/Dockerfile
-            image: directory-server
-            target: production
-            tag_suffix: ""
-          - name: directory-server-debug
-            dockerfile: ./directory_server/Dockerfile
-            image: directory-server-debug
-            target: debug
-            tag_suffix: ""
-          - name: orderbook-watcher
-            dockerfile: ./orderbook_watcher/Dockerfile
-            image: orderbook-watcher
-            target: ""
-            tag_suffix: ""
-          - name: maker
-            dockerfile: ./maker/Dockerfile
-            image: maker
-            target: ""
-            tag_suffix: ""
-          - name: taker
-            dockerfile: ./taker/Dockerfile
-            image: taker
-            target: ""
-            tag_suffix: ""
-          - name: jam-ng
-            dockerfile: ./jmwalletd/Dockerfile
-            image: jam-ng
-            target: "jam-ng"
-            tag_suffix: ""
-          - name: jmwalletd
-            dockerfile: ./jmwalletd/Dockerfile
-            image: jmwalletd
-            target: "jmwalletd"
-            tag_suffix: ""
-
+        - name: directory-server
+          dockerfile: ./directory_server/Dockerfile
+          image: directory-server
+          target: production
+          tag_suffix: ''
+        - name: directory-server-debug
+          dockerfile: ./directory_server/Dockerfile
+          image: directory-server-debug
+          target: debug
+          tag_suffix: ''
+        - name: orderbook-watcher
+          dockerfile: ./orderbook_watcher/Dockerfile
+          image: orderbook-watcher
+          target: ''
+          tag_suffix: ''
+        - name: maker
+          dockerfile: ./maker/Dockerfile
+          image: maker
+          target: ''
+          tag_suffix: ''
+        - name: taker
+          dockerfile: ./taker/Dockerfile
+          image: taker
+          target: ''
+          tag_suffix: ''
+        - name: jam-ng
+          dockerfile: ./jmwalletd/Dockerfile
+          image: jam-ng
+          target: jam-ng
+          tag_suffix: ''
+        - name: jmwalletd
+          dockerfile: ./jmwalletd/Dockerfile
+          image: jmwalletd
+          target: jmwalletd
+          tag_suffix: ''
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - name: Get Git commit timestamp for reproducible builds
+      run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v4
+      with:
+        platforms: linux/arm/v7
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push ARMv7 image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        target: ${{ matrix.target || '' }}
+        push: true
+        platforms: linux/arm/v7
+        tags: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{
+          github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-armv7
+        cache-from: 'type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{
+          matrix.image }}:buildcache-armv7
 
-      - name: Get Git commit timestamp for reproducible builds
-        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+          type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image
+          }}:latest
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: linux/arm/v7
+          '
+        cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{
+          matrix.image }}:buildcache-armv7,mode=max
+        build-args: 'BUILDKIT_INLINE_CACHE=1
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          JOINMARKET_BUILD_COMMIT=${{ github.sha }}
 
-      - name: Build and push ARMv7 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target || '' }}
-          push: true
-          platforms: linux/arm/v7
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{ github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-armv7
-          cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache-armv7
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:latest
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:buildcache-armv7,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
-            JOINMARKET_BUILD_COMMIT=${{ github.sha }}
-            JOINMARKET_BUILD_REF=${{ github.ref_name }}
-        env:
-          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          JOINMARKET_BUILD_REF=${{ github.ref_name }}
 
-  # ==========================================================================
-  # Stage 4c: Publish images (combine manifests and promote to production)
-  # Waits for ALL builds to complete, then creates multi-arch manifests
-  # Combines amd64 (from build-images) + arm64 + armv7 into single manifest
-  # ==========================================================================
+          '
+      env:
+        SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
   publish-images:
     needs:
-      # Unit tests (combined in single job)
-      - test-unit
-      # Component integration tests (run docker-marked tests only)
-      - test-jmwallet
-      - test-maker
-      - test-directory-server-docker
-      # Integration tests (depend on build-images)
-      - test-e2e
-      - test-tumbler
-      - test-playwright
-      - test-reference-interop
-      - test-reference-legacy
-      - test-neutrino-functional
-      - test-neutrino-coinjoin
-      - test-neutrino-reference
-      - test-reference-maker
-      # ARM builds (run in parallel with everything)
-      - build-arm64
-      - build-armv7
+    - test-unit
+    - test-jmwallet
+    - test-maker
+    - test-directory-server-docker
+    - test-e2e
+    - test-tumbler
+    - test-playwright
+    - test-reference-interop
+    - test-reference-legacy
+    - test-neutrino-functional
+    - test-neutrino-coinjoin
+    - test-neutrino-reference
+    - test-reference-maker
+    - build-arm64
+    - build-armv7
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -1761,80 +1646,74 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: directory-server
-            image: directory-server
-            tag_suffix: ""
-          - name: directory-server-debug
-            image: directory-server-debug
-            tag_suffix: ""
-          - name: orderbook-watcher
-            image: orderbook-watcher
-            tag_suffix: ""
-          - name: maker
-            image: maker
-            tag_suffix: ""
-          - name: taker
-            image: taker
-            tag_suffix: ""
-          - name: jam-ng
-            image: jam-ng
-            tag_suffix: ""
-          - name: jmwalletd
-            image: jmwalletd
-            tag_suffix: ""
-
+        - name: directory-server
+          image: directory-server
+          tag_suffix: ''
+        - name: directory-server-debug
+          image: directory-server-debug
+          tag_suffix: ''
+        - name: orderbook-watcher
+          image: orderbook-watcher
+          tag_suffix: ''
+        - name: maker
+          image: maker
+          tag_suffix: ''
+        - name: taker
+          image: taker
+          tag_suffix: ''
+        - name: jam-ng
+          image: jam-ng
+          tag_suffix: ''
+        - name: jmwalletd
+          image: jmwalletd
+          tag_suffix: ''
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+    - name: Log in to GHCR
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
+        flavor: 'suffix=${{ matrix.tag_suffix }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          '
+        tags: 'type=ref,event=branch
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          type=ref,event=pr
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}
-          flavor: |
-            suffix=${{ matrix.tag_suffix }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+          type=semver,pattern={{version}}
 
-      - name: Create and push multi-arch manifest
-        run: |
-          # Define source images for each architecture
-          AMD64_IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{ env.CI_TAG }}${{ matrix.tag_suffix }}"
-          ARM64_IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{ github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-arm64"
-          ARMV7_IMAGE="${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image }}:${{ github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-armv7"
+          type=semver,pattern={{major}}.{{minor}}
 
-          echo "Inspecting source images:"
-          docker buildx imagetools inspect "$AMD64_IMAGE" || echo "AMD64 image not found"
-          docker buildx imagetools inspect "$ARM64_IMAGE" || echo "ARM64 image not found"
-          docker buildx imagetools inspect "$ARMV7_IMAGE" || echo "ARMv7 image not found"
+          type=sha,prefix={{branch}}-
 
-          # Create multi-arch manifest for each production tag
-          TAGS="${{ steps.meta.outputs.tags }}"
-          for TAG in $TAGS; do
-            echo "Creating multi-arch manifest: $TAG"
-            docker buildx imagetools create \
-              --tag "$TAG" \
-              "$AMD64_IMAGE" \
-              "$ARM64_IMAGE" \
-              "$ARMV7_IMAGE"
+          type=raw,value=latest,enable=${{ startsWith(github.ref, ''refs/tags/'')
+          }}
 
-            echo "Verifying manifest: $TAG"
-            docker buildx imagetools inspect "$TAG"
-          done
+          '
+    - name: Create and push multi-arch manifest
+      run: "# Define source images for each architecture\nAMD64_IMAGE=\"${{ env.REGISTRY\
+        \ }}/${{ github.repository }}/${{ matrix.image }}:${{ env.CI_TAG }}${{ matrix.tag_suffix\
+        \ }}\"\nARM64_IMAGE=\"${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image\
+        \ }}:${{ github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-arm64\"\
+        \nARMV7_IMAGE=\"${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image\
+        \ }}:${{ github.ref_name }}-${{ github.sha }}${{ matrix.tag_suffix }}-armv7\"\
+        \n\necho \"Inspecting source images:\"\ndocker buildx imagetools inspect \"\
+        $AMD64_IMAGE\" || echo \"AMD64 image not found\"\ndocker buildx imagetools\
+        \ inspect \"$ARM64_IMAGE\" || echo \"ARM64 image not found\"\ndocker buildx\
+        \ imagetools inspect \"$ARMV7_IMAGE\" || echo \"ARMv7 image not found\"\n\n\
+        # Create multi-arch manifest for each production tag\nTAGS=\"${{ steps.meta.outputs.tags\
+        \ }}\"\nfor TAG in $TAGS; do\n  echo \"Creating multi-arch manifest: $TAG\"\
+        \n  docker buildx imagetools create \\\n    --tag \"$TAG\" \\\n    \"$AMD64_IMAGE\"\
+        \ \\\n    \"$ARM64_IMAGE\" \\\n    \"$ARMV7_IMAGE\"\n\n  echo \"Verifying\
+        \ manifest: $TAG\"\n  docker buildx imagetools inspect \"$TAG\"\ndone\n"
