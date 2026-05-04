@@ -2,6 +2,9 @@
 
 Earn fees by providing liquidity for CoinJoin transactions. Makers passively earn bitcoin while enhancing network privacy.
 
+> Coming from the reference [joinmarket-clientserver](https://github.com/JoinMarket-Org/joinmarket-clientserver) (now archived)?
+> Read [Migration from JoinMarket Reference](#migration-from-joinmarket-reference) first.
+
 ## Installation
 
 Install JoinMarket-NG with the maker component:
@@ -26,10 +29,14 @@ See [Installation](install.md) for backend setup, Tor configuration, and manual 
 ### 1) Create or import a wallet
 
 ```bash
-jm-wallet generate --output ~/.joinmarket-ng/wallets/default.mnemonic
-# or import existing mnemonic
-jm-wallet import --output ~/.joinmarket-ng/wallets/default.mnemonic
+jm-wallet generate
+# or import an existing mnemonic
+jm-wallet import
 ```
+
+Both commands write to `~/.joinmarket-ng/wallets/default.mnemonic` by
+default; subsequent `jm-maker` and `jm-wallet` commands pick it up
+automatically (use `--mnemonic-file` only to override).
 
 Store the mnemonic offline. See [Wallet guide](README-jmwallet.md).
 
@@ -45,7 +52,7 @@ Backend configuration examples are in [Installation](install.md#configure-backen
 ### 3) Start maker
 
 ```bash
-jm-maker start --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
+jm-maker start
 ```
 
 The bot syncs wallet state, builds offers, and waits for takers.
@@ -54,10 +61,7 @@ The bot syncs wallet state, builds offers, and waits for takers.
 
 ```bash
 # Relative fee (0.2%)
-jm-maker start \
-  --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic \
-  --cj-fee-relative 0.002 \
-  --min-size 200000
+jm-maker start --cj-fee-relative 0.002 --min-size 200000
 ```
 
 Use exactly one fee model: `--cj-fee-relative` or `--cj-fee-absolute`.
@@ -71,14 +75,47 @@ Makers automatically discover bonds from the local registry at startup.
 
 ## Migration from JoinMarket Reference
 
-Migration is mnemonic-based:
+If you ran a maker on the legacy
+[joinmarket-clientserver](https://github.com/JoinMarket-Org/joinmarket-clientserver)
+(now archived), most operational concepts carry over: same wire protocol,
+same fee models, same fidelity bonds. The main differences:
+
+- **Wallets are mnemonic-based.** No BerkeleyDB, no `wallet.jmdat`. Import
+  your existing 12-word seed into a JoinMarket-NG mnemonic file. The same
+  addresses and bonds derive from the same seed.
+- **No `joinmarket.cfg`.** Configuration lives in
+  `~/.joinmarket-ng/config.toml` (TOML, sectioned). See
+  [Configuration](technical/configuration.md) and
+  [`config.toml.template`](https://github.com/joinmarket-ng/joinmarket-ng/blob/main/config.toml.template).
+- **No IRC.** Transport is Tor onion services to directory nodes. Tor is
+  required in production.
+- **Backends:** instead of a Bitcoin Core wallet with manual import, choose
+  `descriptor_wallet` (recommended, watch-only on your own Core) or
+  `neutrino` (light client). See [Installation](install.md#configure-backend).
+- **Yield generators:** the legacy `yg-privacyenhanced.py` script is
+  replaced by `jm-maker start` with the same fee flags
+  (`--cj-fee-relative`, `--cj-fee-absolute`, `--min-size`).
+
+Typical migration flow:
 
 ```bash
-jm-wallet import --output ~/.joinmarket-ng/wallets/default.mnemonic
-jm-maker start --mnemonic-file ~/.joinmarket-ng/wallets/default.mnemonic
+# 1. Import your existing mnemonic into the default wallet location
+jm-wallet import
+
+# 2. Recover existing fidelity bonds (scans a wider locktime window)
+jm-wallet recover-bonds
+
+# 3. Verify balances and addresses match what you expect
+jm-wallet info
+
+# 4. Start the maker
+jm-maker start
 ```
 
-For full bond recovery during migration, run `jm-wallet recover-bonds --mnemonic-file ...`.
+See [Wallet guide](README-jmwallet.md) for import options and BIP39
+passphrase handling, and [Fidelity Bonds](technical/privacy.md#fidelity-bonds)
+for the cold-wallet certificate flow used to register bonds whose key is
+not in the hot wallet.
 
 ## Docker Deployment
 
@@ -93,6 +130,87 @@ Typical run:
 docker-compose up -d
 docker-compose logs -f maker
 ```
+
+## Running as a Service
+
+Makers are long-running and benefit from supervised, auto-restarting
+processes. The two common options:
+
+### systemd (Linux)
+
+Create `/etc/systemd/system/jm-maker.service` (replace `youruser` and paths):
+
+```ini
+[Unit]
+Description=JoinMarket-NG Maker
+After=network-online.target tor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=youruser
+ExecStart=/home/youruser/.joinmarket-ng/venv/bin/jm-maker start \
+    --mnemonic-file /home/youruser/.joinmarket-ng/wallets/default.mnemonic
+Restart=on-failure
+RestartSec=30
+# Optional hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now jm-maker
+journalctl -u jm-maker -f         # live logs
+```
+
+If your mnemonic file is encrypted, the bot needs the password at startup
+and cannot prompt under systemd. Set `mnemonic_password` (the encryption
+password) and/or `bip39_passphrase` (BIP39 25th word) in the `[wallet]`
+section of `~/.joinmarket-ng/config.toml`. Make sure that file is
+`chmod 600` and owned by the service user. This is the same approach used
+by the Raspiblitz integration.
+
+On Raspiblitz, the bonus script manages the systemd unit for you; see the
+[TUI guide](README-tui.md).
+
+### Docker
+
+The bundled `docker-compose.yml` uses `restart: unless-stopped` and is the
+recommended path on machines where Tor and the backend are also containers.
+See the [Docker Deployment](#docker-deployment) section above.
+
+## Logs
+
+By default `jm-maker` logs to stderr in human-readable format. Common
+patterns:
+
+```bash
+# Tee to a file while keeping live output
+jm-maker start --mnemonic-file ... 2>&1 | tee -a ~/.joinmarket-ng/jm-maker.log
+
+# Verbose troubleshooting (very chatty)
+jm-maker start --log-level DEBUG ...
+
+# Quieter for unattended operation
+jm-maker start --log-level WARNING ...
+```
+
+When running under systemd, logs go to the journal automatically; use
+`journalctl -u jm-maker` (add `-f` to follow, `--since "1 hour ago"` to
+filter). Persistent journals survive reboots if
+`/var/log/journal` exists.
+
+The default `INFO` level only logs state changes (offers created/updated,
+balance changes, peer events). Routine periodic wallet rescans and healthy
+directory connection status are emitted at `DEBUG` to keep long-running
+maker logs readable. Disconnections, failed transactions, and rate-limit
+events are always logged at `WARNING` or `ERROR`.
 
 ## Configuration Notes
 
